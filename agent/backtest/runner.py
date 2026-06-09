@@ -491,6 +491,24 @@ def main(run_dir: Path) -> None:
     engine_type = config.get("engine", "daily")
     signal_engine = engine_cls()
 
+    # Look-ahead pre-flight (hard gate). A generated SignalEngine computes its
+    # own factors/IC/weights inline and never touches the factor registry, so the
+    # zoo's per-alpha look-ahead guard can't see it. Corrupt the future, check the
+    # past: if any pre-cutoff signal moves, the engine read a future bar — reject.
+    # Set ``"lookahead_check": false`` in config.json to bypass (not recommended).
+    if config.get("lookahead_check", True):
+        try:
+            from backtest.lookahead_guard import detect_lookahead
+            la_report = detect_lookahead(signal_engine, data_map)
+        except Exception as exc:  # noqa: BLE001 — guard infra failure must not block a valid run
+            print(json.dumps({"warning": f"look-ahead check skipped (guard error): {exc}"}))
+        else:
+            if la_report.leaked:
+                print(json.dumps({"error": "look-ahead detected", "detail": la_report.summary()}))
+                sys.exit(1)
+            # Guard ran generate() twice on this instance; hand the engine a fresh one.
+            signal_engine = engine_cls()
+
     # Annualization bars
     effective_source = _detect_primary_source(codes, source)
     from backtest.metrics import calc_bars_per_year
