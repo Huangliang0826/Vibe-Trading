@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_INTERVALS = {"1m", "5m", "15m", "30m", "1H", "4H", "1D"}
 _VALID_ENGINES = {"daily", "options"}
-_VALID_SOURCES = {"tushare", "okx", "yfinance", "akshare", "ccxt", "auto"}
+_VALID_SOURCES = {"tushare", "okx", "yfinance", "akshare", "mootdx", "a_stock_data", "ccxt", "auto"}
 
 
 class BacktestConfigSchema(BaseModel):
@@ -572,7 +572,7 @@ def _create_market_engine(source: str, config: dict, codes: List[str]):
     if source in ("okx", "ccxt"):
         from backtest.engines.crypto import CryptoEngine
         return CryptoEngine(config)
-    elif source in ("tushare", "akshare"):
+    elif source in ("tushare", "akshare", "mootdx", "a_stock_data"):
         if markets & {"us_equity", "hk_equity"}:
             from backtest.engines.global_equity import GlobalEquityEngine
             market = _detect_submarket(codes)

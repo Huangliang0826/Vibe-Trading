@@ -58,6 +58,14 @@ dependencies = [
     "prompt_toolkit>=3.0.0",
 ]
 
+[tool.uv]
+# mootdx (the `a-stock` extra) pins httpx>=0.25,<0.26 in its setup.py, but only
+# uses forward-compatible httpx Client/get APIs; the core + fastmcp need
+# httpx>=0.28. Override mootdx's stale upper cap so the lock stays resolvable and
+# `uv sync --extra a-stock` installs mootdx against modern httpx — this encodes
+# the manual `pip install 'httpx>=0.28.1'` step the mootdx skill already documents.
+override-dependencies = ["httpx>=0.28.0"]
+
 [project.urls]
 Homepage = "https://vibetrading.wiki/"
 Documentation = "https://vibetrading.wiki/docs/"
@@ -93,6 +101,15 @@ include = ["src*", "backtest*", "cli*"]
 [project.optional-dependencies]
 ibkr = [
     "ib_async>=2.0",
+]
+# a-stock-data toolkit runtime deps (simonlin1212/a-stock-data). Kept optional
+# because mootdx pins httpx<0.26 in its setup.py while the core needs httpx>=0.28
+# (see line 28) — isolating it here keeps that conflict out of the core lock, and
+# the a_stock_data loader's is_available() gates on the import so the A-share
+# fallback chain skips to tushare/mootdx/akshare when this group isn't installed.
+a-stock = [
+    "mootdx>=0.11.7",
+    "stockstats>=0.6.0",
 ]
 dev = [
     "pytest>=7.0",
