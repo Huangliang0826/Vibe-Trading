@@ -10,12 +10,12 @@ def test_build_keeps_only_strict_passers_at_threshold(tmp_path):
         "status": "ok",
         "alpha_t_threshold": 3.0,
         "rows": [
-            {"id": "gtja_alpha_032", "zoo": "gtja191", "ir": 0.21,
-             "alpha_t": 4.1, "category": "alive"},
-            {"id": "a101_alpha_054", "zoo": "alpha101", "ir": 0.15,
-             "alpha_t": 3.2, "category": "alive"},
-            {"id": "noise_alpha_001", "zoo": "alpha101", "ir": 0.02,
-             "alpha_t": 1.1, "category": "dead"},
+            {"id": "gtja_alpha_032", "ir": 0.21, "alpha_t_full": 4.1,
+             "_category": "confirmed_alive"},
+            {"id": "a101_alpha_054", "ir": 0.15, "alpha_t_full": 3.2,
+             "_category": "confirmed_alive"},
+            {"id": "noise_alpha_001", "ir": 0.02, "alpha_t_full": 1.1,
+             "_category": "noise"},
         ],
     }
 

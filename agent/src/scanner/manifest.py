@@ -45,19 +45,34 @@ def build_factor_manifest(
         The manifest dict (also written to disk).
     """
     if runner is None:
-        from src.factors.bench_runner_strict import run_bench_strict as runner  # type: ignore
+        # Adapt the real strict runner (which takes a StrictThresholds object) to
+        # this module's simpler (zoo, universe, period, alpha_t_threshold=...) runner
+        # contract, so the injected test fake and the production path agree.
+        from src.factors.bench_runner_strict import (  # type: ignore
+            StrictThresholds,
+            run_bench_strict as _real_runner,
+        )
+
+        def runner(zoo, universe, period, alpha_t_threshold=DEFAULT_THRESHOLD):
+            return _real_runner(
+                zoo, universe, period,
+                thresholds=StrictThresholds(alpha_t_threshold=alpha_t_threshold),
+            )
 
     out = Path(out_path) if out_path is not None else default_manifest_path()
     kept: list[dict[str, Any]] = []
     for zoo in zoos:
         res = runner(zoo, universe, period, alpha_t_threshold=threshold)
         for row in res.get("rows", []):
-            if row.get("category") == "alive" and float(row.get("alpha_t", 0.0)) >= threshold:
+            # Real run_bench_strict rows use "_category" (alive == "confirmed_alive")
+            # and "alpha_t_full"; zoo is the loop var (no per-row zoo field).
+            t_full = float(row.get("alpha_t_full", 0.0))
+            if row.get("_category") == "confirmed_alive" and t_full >= threshold:
                 kept.append({
                     "id": str(row["id"]),
-                    "zoo": str(row.get("zoo", zoo)),
+                    "zoo": zoo,
                     "ir": round(float(row.get("ir", 0.0)), 4),
-                    "alpha_t": round(float(row.get("alpha_t", 0.0)), 3),
+                    "alpha_t": round(t_full, 3),
                 })
 
     manifest = {
