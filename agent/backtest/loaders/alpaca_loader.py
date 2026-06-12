@@ -289,6 +289,7 @@ class DataLoader:
             start=start,
             end=end,
             feed=self._feed(),
+            adjustment="all",
         )
 
         def _call() -> Any:
