@@ -60,8 +60,8 @@ class FactorRankProvider(SignalProvider):
             contrib = signed * weight
             weighted = weighted.add(contrib, fill_value=0.0)
             total_weight += weight
-            for sym, val in (contrib * 100.0).items():
-                contributions.setdefault(str(sym), {})[str(f["id"])] = round(float(val), 2)
+            for sym, val in contrib.items():
+                contributions.setdefault(str(sym), {})[str(f["id"])] = float(val)
 
         if total_weight == 0.0 or weighted.empty:
             return []
@@ -71,10 +71,18 @@ class FactorRankProvider(SignalProvider):
 
         out: list[Candidate] = []
         for sym, score in ranked.head(self._top_n).items():
-            detail = dict(sorted(
-                contributions.get(str(sym), {}).items(),
-                key=lambda kv: -kv[1],
-            ))
+            # Normalise each factor's raw contribution by total weight and scale
+            # to 0-100 so the per-factor detail sums to the composite score.
+            # NOTE: a symbol absent from a factor's cross-section contributes 0 to
+            # that factor (NaN-union via fill_value=0.0) while still dividing by
+            # the full total_weight — i.e. partial coverage is an intentional
+            # penalty, not an abstention.
+            raw = contributions.get(str(sym), {})
+            detail = {
+                fid: round(v / total_weight * 100.0, 2)
+                for fid, v in raw.items()
+            }
+            detail = dict(sorted(detail.items(), key=lambda kv: -kv[1]))
             top_names = list(detail.keys())[:2]
             attribution = (
                 "top by " + ", ".join(top_names) if top_names else "composite factor rank"

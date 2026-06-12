@@ -104,3 +104,20 @@ def test_nan_union_symbol_in_both_factors_outranks_partial_coverage():
     assert [c.symbol for c in ranked] == ["AAA", "CCC", "BBB"]
     assert round(ranked[0].score, 1) == 75.0
     assert round(ranked[-1].score, 1) == 25.0
+
+
+def test_detail_contributions_sum_to_score():
+    dates = pd.DatetimeIndex(pd.to_datetime(["2026-06-11"]))
+    frames = {
+        "f1": _frame({"AAA": [3.0], "BBB": [2.0], "CCC": [1.0]}, dates),
+        "f2": _frame({"AAA": [1.0], "BBB": [3.0], "CCC": [2.0]}, dates),
+    }
+    manifest = {"factors": [
+        {"id": "f1", "zoo": "z", "ir": 0.4, "alpha_t": 4.0},
+        {"id": "f2", "zoo": "z", "ir": 0.1, "alpha_t": 4.0},
+    ]}
+    prov = FactorRankProvider(manifest=manifest, registry=_FakeRegistry(frames), top_n=3)
+    for c in prov.compute({"close": frames["f1"]}, "2026-06-11"):
+        assert abs(sum(c.detail.values()) - c.score) < 0.05, (
+            f"{c.symbol}: detail {c.detail} should sum to score {c.score}"
+        )

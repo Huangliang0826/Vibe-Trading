@@ -29,6 +29,7 @@ def build_factor_manifest(
     period: str,
     out_path: Path | None = None,
     threshold: float = DEFAULT_THRESHOLD,
+    oos_split: str | None = None,
     runner: StrictRunner | None = None,
 ) -> dict[str, Any]:
     """Run strict bench per zoo, keep alive passers, write + return the manifest.
@@ -56,6 +57,8 @@ def build_factor_manifest(
         def runner(zoo, universe, period, alpha_t_threshold=DEFAULT_THRESHOLD):
             return _real_runner(
                 zoo, universe, period,
+                random_control=True,
+                oos_split=oos_split,
                 thresholds=StrictThresholds(alpha_t_threshold=alpha_t_threshold),
             )
 
@@ -79,6 +82,7 @@ def build_factor_manifest(
         "universe": universe,
         "period": period,
         "threshold": threshold,
+        "oos_split": oos_split,
         "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "factors": kept,
     }

@@ -45,3 +45,30 @@ def test_load_missing_manifest_raises_actionable_error(tmp_path):
         assert "scan validate --refresh-factors" in str(exc)
     else:
         raise AssertionError("expected FileNotFoundError")
+
+
+def test_production_adapter_forwards_random_control_and_threshold(tmp_path, monkeypatch):
+    # Pin the REAL adapter path (runner=None): it must pass random_control=True,
+    # the oos_split, and a StrictThresholds carrying our alpha_t threshold.
+    import src.factors.bench_runner_strict as strict
+
+    captured = {}
+
+    def spy_run_bench_strict(zoo, universe, period, **kwargs):
+        captured["zoo"] = zoo
+        captured["universe"] = universe
+        captured.update(kwargs)
+        return {"status": "ok", "rows": []}
+
+    monkeypatch.setattr(strict, "run_bench_strict", spy_run_bench_strict)
+
+    out = tmp_path / "wl.json"
+    m.build_factor_manifest(
+        zoos=["gtja191"], universe="sp500", period="2018-2025",
+        out_path=out, threshold=3.0, oos_split="2023-01-01", runner=None,
+    )
+
+    assert captured["random_control"] is True
+    assert captured["oos_split"] == "2023-01-01"
+    # thresholds is a real StrictThresholds carrying our threshold
+    assert captured["thresholds"].alpha_t_threshold == 3.0
