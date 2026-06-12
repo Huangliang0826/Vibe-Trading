@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import pandas as pd
+
 
 @dataclass(frozen=True)
 class Candidate:
@@ -83,3 +85,61 @@ class ScanResult:
             candidates=[Candidate.from_dict(c) for c in d.get("candidates", [])],
             warnings=[str(w) for w in d.get("warnings", [])],
         )
+
+
+def _truncate_panel(panel: dict[str, pd.DataFrame], asof: str) -> dict[str, Any]:
+    """Return a copy of ``panel`` with every frame cut to rows <= asof.
+
+    Structural look-ahead block: providers physically cannot read future rows.
+    """
+    cutoff = pd.Timestamp(asof)
+    out: dict[str, Any] = {}
+    for col, frame in panel.items():
+        if frame is None or getattr(frame, "empty", True):
+            out[col] = frame
+            continue
+        idx = pd.to_datetime(frame.index)
+        out[col] = frame.loc[idx <= cutoff]
+    return out
+
+
+def run_scan(
+    universe: str,
+    asof: str,
+    providers: list[Any],
+    period: str = "2018-2025",
+    panel_loader: Any = None,
+) -> ScanResult:
+    """Run all ``providers`` over the truncated universe panel as of ``asof``.
+
+    Args:
+        universe: Universe key (``sp500``).
+        asof: ISO close date to scan.
+        providers: Instantiated SignalProvider-likes (have .provider_id + .compute).
+        period: History window passed to the panel loader.
+        panel_loader: Injectable ``(universe, period) -> panel``; defaults to the
+            real ``_load_universe_panel``.
+
+    Returns:
+        A ScanResult (NOT persisted — caller decides).
+    """
+    if panel_loader is None:
+        from src.tools.alpha_bench_tool import _load_universe_panel as panel_loader  # type: ignore
+
+    panel = panel_loader(universe, period)
+    truncated = _truncate_panel(panel, asof)
+
+    candidates: list[Candidate] = []
+    used: list[str] = []
+    warnings: list[str] = []
+    for prov in providers:
+        used.append(prov.provider_id)
+        try:
+            candidates.extend(prov.compute(truncated, asof))
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"provider {prov.provider_id} failed: {exc}")
+
+    return ScanResult(
+        universe=universe, asof=asof, providers=used,
+        candidates=candidates, warnings=warnings,
+    )
