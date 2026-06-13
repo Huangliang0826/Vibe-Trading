@@ -19,6 +19,15 @@ const Correlation = lazy(() =>
 const AlphaZoo = lazy(() =>
   import("@/pages/AlphaZoo").then((m) => ({ default: m.AlphaZoo })),
 );
+const Scanner = lazy(() =>
+  import("@/pages/Scanner").then((m) => ({ default: m.Scanner })),
+);
+const Overview = lazy(() =>
+  import("@/pages/Overview").then((m) => ({ default: m.Overview })),
+);
+const HumanoidRobot = lazy(() =>
+  import("@/pages/HumanoidRobot").then((m) => ({ default: m.HumanoidRobot })),
+);
 
 function PageLoader() {
   return (
@@ -40,12 +49,15 @@ export const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
+      { path: "/overview", element: wrap(Overview) },
+      { path: "/humanoid-robot", element: wrap(HumanoidRobot) },
       { path: "/", element: wrap(Home) },
       { path: "/agent", element: wrap(Agent) },
       { path: "/settings", element: wrap(Settings) },
       { path: "/runs/:runId", element: wrap(RunDetail) },
       { path: "/compare", element: wrap(Compare) },
       { path: "/correlation", element: wrap(Correlation) },
+      { path: "/scanner", element: wrap(Scanner) },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/compare", element: wrap(AlphaZoo) },

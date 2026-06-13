@@ -4089,6 +4089,10 @@ def _build_parser() -> argparse.ArgumentParser:
     from src.factors.cli_handlers import add_subparser as _add_alpha_subparser
     _add_alpha_subparser(subparsers)
 
+    # Opportunity Scanner subcommands
+    from src.scanner.cli_handlers import add_subparser as _add_scan_subparser
+    _add_scan_subparser(subparsers)
+
     # Hypothesis Registry subcommands
     from src.hypotheses.cli_handlers import add_subparser as _add_hypothesis_subparser
     _add_hypothesis_subparser(subparsers)
@@ -4587,6 +4591,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "alpha":
         from src.factors.cli_handlers import dispatch as _alpha_dispatch
         return _coerce_exit_code(_alpha_dispatch(args))
+    if args.command == "scan":
+        from src.scanner.cli_handlers import dispatch as _scan_dispatch
+        return _coerce_exit_code(_scan_dispatch(args))
     if args.command == "hypothesis":
         from src.hypotheses.cli_handlers import dispatch as _hyp_dispatch
         return _coerce_exit_code(_hyp_dispatch(args))

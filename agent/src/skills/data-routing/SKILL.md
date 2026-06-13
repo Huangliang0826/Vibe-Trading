@@ -8,6 +8,7 @@ description: Data source selection decision tree. Load this skill BEFORE any bac
 
 | Source | Markets | Auth Required | Network | Skill |
 |--------|---------|---------------|---------|-------|
+| a_stock_data | A-shares (OHLCV + 研报/新闻/基础数据/公告) | No | China network | a-stock-data |
 | tushare | A-shares, funds, futures, macro | Yes (`TUSHARE_TOKEN`) | China network | tushare |
 | akshare | A-shares, US, HK, futures, macro, forex | No | Unrestricted | akshare |
 | yfinance | US stocks, HK stocks, ETFs | No | Needs Yahoo Finance access | yfinance |
@@ -27,7 +28,7 @@ You do NOT need to specify a concrete data source in config.json unless the user
 1. Identify the market type from the user's request
 2. Pick the source by priority:
 
-**A-shares**: tushare (if TUSHARE_TOKEN is set) > akshare (free fallback)
+**A-shares**: a_stock_data (free, OHLCV + 研报/新闻/基础数据/公告) > tushare (if TUSHARE_TOKEN is set) > mootdx > akshare (free fallback)
 **US stocks**: yfinance > akshare
 **HK stocks**: yfinance > akshare
 **Crypto**: okx (single exchange) > ccxt (multi-exchange)
@@ -61,7 +62,9 @@ The backtest runner implements automatic fallback at the market level:
 ```
 User requests 000001.SZ (A-share)
   -> detect market: a_share
+  -> try a_stock_data: mootdx not installed -> skip
   -> try tushare: TUSHARE_TOKEN missing -> skip
+  -> try mootdx: not installed -> skip
   -> try akshare: available -> use akshare
   -> success (zero config required)
 ```

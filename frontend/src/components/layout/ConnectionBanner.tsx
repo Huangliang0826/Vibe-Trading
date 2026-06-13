@@ -14,12 +14,12 @@ export function ConnectionBanner({ status, retryAttempt }: Props) {
       {status === "reconnecting" ? (
         <>
           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          <span>Connection lost, reconnecting (attempt {retryAttempt || 1})…</span>
+          <span>连接断开，重连中（第 {retryAttempt || 1} 次）...</span>
         </>
       ) : (
         <>
           <WifiOff className="h-3.5 w-3.5" />
-          <span>Connection lost</span>
+          <span>连接断开</span>
         </>
       )}
     </div>
