@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Security, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response, Security, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -1487,6 +1487,580 @@ async def get_correlation_matrix(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Correlation computation failed: {exc}")
+
+
+@app.get("/market-indices")
+async def get_market_indices():
+    """Real-time quotes for major A-share and US indices.
+
+    A-share (上证/沪深300/创业板) via Tencent qt.gtimg; US (纳指/标普/道指) via yfinance.
+    Returns a list ordered: A-share first, then US.  No auth required (public data).
+    """
+    import asyncio
+    result = await asyncio.gather(
+        asyncio.to_thread(_fetch_cn_indices),
+        asyncio.to_thread(_fetch_hk_indices),
+        asyncio.to_thread(_fetch_us_indices),
+        return_exceptions=True,
+    )
+    cn = result[0] if not isinstance(result[0], BaseException) else []
+    hk = result[1] if not isinstance(result[1], BaseException) else []
+    us = result[2] if not isinstance(result[2], BaseException) else []
+    return cn + hk + us
+
+
+def _fetch_hk_indices() -> list[dict]:
+    """Fetch Hang Seng, HSTECH, and HSCEI quotes via akshare (Sina source)."""
+    try:
+        import akshare as ak
+    except ImportError:
+        return []
+
+    TARGET = {
+        "HSI":    "恒生指数",
+        "HSTECH": "恒生科技指数",
+        "HSCEI":  "恒生国企指数",
+    }
+    try:
+        df = ak.stock_hk_index_spot_sina()
+    except Exception:
+        return []
+
+    out = []
+    for code, name in TARGET.items():
+        row = df[df["代码"] == code]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+        out.append({
+            "code": code,
+            "name": name,
+            "market": "港股",
+            "price": float(r["最新价"]),
+            "change_pct": float(r["涨跌幅"]),
+            "prev_close": float(r["昨收"]),
+        })
+    return out
+
+
+def _fetch_cn_indices() -> list[dict]:
+    """Fetch Shanghai, CSI 300, and ChiNext index quotes from Tencent Finance API."""
+    import urllib.request
+
+    INDEX_MAP = [
+        ("sh000001", "上证指数"),
+        ("sh000300", "沪深300"),
+        ("sz399006", "创业板指"),
+    ]
+    codes_str = ",".join(c for c, _ in INDEX_MAP)
+    name_map = {c: n for c, n in INDEX_MAP}
+
+    try:
+        req = urllib.request.Request(
+            f"https://qt.gtimg.cn/q={codes_str}",
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        raw = urllib.request.urlopen(req, timeout=8).read().decode("gbk")
+    except Exception:
+        return []
+
+    out = []
+    for line in raw.strip().split(";"):
+        line = line.strip()
+        if not line or "=" not in line or '"' not in line:
+            continue
+        key_part = line.split("=")[0]  # e.g. "v_sh000001"
+        exchange_code = key_part.split("_")[-1]  # "sh000001"
+        vals = line.split('"')[1].split("~")
+        if len(vals) < 35:
+            continue
+
+        def _f(i: int) -> float:
+            try:
+                return float(vals[i]) if vals[i] else 0.0
+            except (ValueError, IndexError):
+                return 0.0
+
+        price = _f(3)
+        prev_close = _f(4)
+        change_pct = _f(32)
+        out.append({
+            "code": exchange_code,
+            "name": name_map.get(exchange_code, vals[1]),
+            "market": "A股",
+            "price": price,
+            "change_pct": change_pct,
+            "prev_close": prev_close,
+        })
+    return out
+
+
+def _fetch_us_indices() -> list[dict]:
+    """Fetch NASDAQ, S&P 500, and Dow Jones quotes via yfinance."""
+    INDEX_MAP = [
+        ("^IXIC", "纳斯达克"),
+        ("^GSPC", "标普500"),
+        ("^DJI",  "道琼斯"),
+    ]
+    try:
+        import yfinance as yf
+    except ImportError:
+        return []
+
+    out = []
+    for ticker_sym, display_name in INDEX_MAP:
+        try:
+            t = yf.Ticker(ticker_sym)
+            info = t.fast_info
+            price = float(info.last_price or 0)
+            prev_close = float(info.previous_close or 0)
+            change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
+            out.append({
+                "code": ticker_sym,
+                "name": display_name,
+                "market": "美股",
+                "price": price,
+                "change_pct": round(change_pct, 2),
+                "prev_close": prev_close,
+            })
+        except Exception:
+            out.append({
+                "code": ticker_sym,
+                "name": display_name,
+                "market": "美股",
+                "price": 0.0,
+                "change_pct": 0.0,
+                "prev_close": 0.0,
+            })
+    return out
+
+
+@app.get("/watchlist/quote")
+async def get_watchlist_quote(
+    codes: str = Query(..., description="Comma-separated stock codes"),
+    market: str = Query(..., description="'cn' for A-share, 'us' for US equity"),
+):
+    """Real-time quotes for a watchlist of user-selected symbols.
+
+    A-share data via Tencent qt.gtimg (same source as index cards).
+    US equity data via Alpaca latest bars → yfinance fallback.
+    """
+    import asyncio
+
+    code_list = [c.strip() for c in codes.split(",") if c.strip()]
+    if not code_list:
+        return []
+    if market not in ("cn", "hk", "us"):
+        raise HTTPException(status_code=400, detail="market must be 'cn', 'hk' or 'us'")
+    if market == "cn":
+        return await asyncio.to_thread(_fetch_cn_watchlist_quotes, code_list)
+    if market == "hk":
+        return await asyncio.to_thread(_fetch_hk_watchlist_quotes, code_list)
+    return await asyncio.to_thread(_fetch_us_watchlist_quotes, code_list)
+
+
+def _normalize_hk_code(code: str) -> tuple[str | None, str | None]:
+    """Map a user-entered HK code to (tencent_code, yfinance_code).
+
+    Accepts ``00700`` / ``0700`` / ``700`` / ``0700.HK`` → ``hk00700`` and ``0700.HK``.
+    Returns ``(None, None)`` if no digits are present.
+    """
+    digits = "".join(ch for ch in code.upper().replace(".HK", "") if ch.isdigit())
+    if not digits:
+        return None, None
+    n = int(digits)
+    return f"hk{n:05d}", f"{n:04d}.HK"
+
+
+def _fetch_hk_watchlist_quotes(codes: list[str]) -> list[dict]:
+    """Hong Kong real-time quotes via Tencent qt.gtimg (r_hkNNNNN format)."""
+    import urllib.request
+
+    token_to_orig: dict[str, str] = {}  # "r_hk00700" -> original user code
+    for c in codes:
+        tc, _ = _normalize_hk_code(c)
+        if tc:
+            token_to_orig[f"r_{tc}"] = c
+
+    parsed: dict[str, list[str]] = {}
+    if token_to_orig:
+        try:
+            url = "http://qt.gtimg.cn/q=" + ",".join(token_to_orig.keys())
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            raw = urllib.request.urlopen(req, timeout=6).read().decode("gbk", "ignore")
+            for line in raw.split(";"):
+                line = line.strip()
+                if not line.startswith("v_"):
+                    continue
+                varname, _, payload = line.partition("=")
+                token = varname[2:]  # strip "v_" -> "r_hk00700"
+                fields = payload.strip().strip('"').split("~")
+                if len(fields) >= 5:
+                    parsed[token] = fields
+        except Exception:
+            parsed = {}
+
+    out = []
+    for token, orig in token_to_orig.items():
+        fields = parsed.get(token)
+        try:
+            price = float(fields[3]) if fields else 0.0
+            prev_close = float(fields[4]) if fields else 0.0
+        except (ValueError, IndexError, TypeError):
+            price = prev_close = 0.0
+        if fields and price:
+            chg = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
+            out.append({
+                "code": orig,
+                "name": fields[1] or orig,
+                "price": price,
+                "change_pct": round(chg, 2),
+                "prev_close": prev_close,
+            })
+        else:
+            out.append({
+                "code": orig, "name": orig, "price": 0.0,
+                "change_pct": 0.0, "prev_close": 0.0, "error": "not_found",
+            })
+    return out
+
+
+def _fetch_cn_watchlist_quotes(codes: list[str]) -> list[dict]:
+    """A-share real-time quotes via Tencent API (reuses fetch_quote logic)."""
+    from backtest.loaders.a_stock_data_research import fetch_quote, normalize_ticker
+
+    # fetch_quote returns keys as bare 6-digit codes (exchange prefix stripped)
+    norm_to_orig: dict[str, str] = {}
+    for c in codes:
+        norm = normalize_ticker(c)
+        norm_to_orig[norm] = c
+
+    raw = fetch_quote(list(norm_to_orig.keys()))
+
+    out = []
+    for norm, orig in norm_to_orig.items():
+        data = raw.get(norm, {})
+        if data and data.get("price", 0):
+            out.append({
+                "code": orig,
+                "name": data.get("name", orig),
+                "price": data.get("price", 0.0),
+                "change_pct": data.get("change_pct", 0.0),
+                "prev_close": data.get("last_close", 0.0),
+            })
+        else:
+            out.append({
+                "code": orig,
+                "name": orig,
+                "price": 0.0,
+                "change_pct": 0.0,
+                "prev_close": 0.0,
+                "error": "not_found",
+            })
+    return out
+
+
+def _fetch_us_watchlist_quotes(codes: list[str]) -> list[dict]:
+    """US equity quotes via Alpaca latest daily bars → yfinance fallback."""
+    symbols = [c.strip().upper() for c in codes]
+
+    # --- Try Alpaca ---
+    try:
+        result = _alpaca_us_quotes(symbols)
+        if result:
+            return result
+    except Exception:
+        pass
+
+    # --- yfinance fallback ---
+    try:
+        import yfinance as yf
+    except ImportError:
+        return [{"code": s, "name": s, "price": 0.0, "change_pct": 0.0, "prev_close": 0.0, "error": "no_source"} for s in symbols]
+
+    out = []
+    for sym in symbols:
+        try:
+            info = yf.Ticker(sym).fast_info
+            price = float(info.last_price or 0)
+            prev_close = float(info.previous_close or 0)
+            chg = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
+            out.append({
+                "code": sym,
+                "name": sym,
+                "price": price,
+                "change_pct": round(chg, 2),
+                "prev_close": prev_close,
+            })
+        except Exception:
+            out.append({"code": sym, "name": sym, "price": 0.0, "change_pct": 0.0, "prev_close": 0.0, "error": "fetch_failed"})
+    return out
+
+
+def _alpaca_us_quotes(symbols: list[str]) -> list[dict]:
+    """Fetch US quotes from Alpaca (last 2 daily bars → price + change_pct).
+
+    Returns an empty list if Alpaca is not configured or SDK is missing.
+    """
+    from backtest.loaders.alpaca_loader import DataLoader as AlpacaLoader
+
+    loader = AlpacaLoader()
+    if not loader.is_available():
+        return []
+
+    from alpaca.data.requests import StockBarsRequest  # type: ignore
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit  # type: ignore
+    import datetime as _dt
+
+    client = loader._client()
+    feed = loader._feed()
+
+    end = _dt.datetime.now(_dt.timezone.utc)
+    start = end - _dt.timedelta(days=7)  # enough to cover weekends/holidays
+
+    req = StockBarsRequest(
+        symbol_or_symbols=symbols,
+        timeframe=TimeFrame(1, TimeFrameUnit.Day),
+        start=start,
+        end=end,
+        feed=feed,
+    )
+    bars_resp = client.get_stock_bars(req)
+    raw: dict = getattr(bars_resp, "data", {}) or {}
+
+    out = []
+    for sym in symbols:
+        bars = list(raw.get(sym) or [])
+        if not bars:
+            return []  # signal fallback needed
+        price = float(getattr(bars[-1], "close", 0) or 0)
+        prev_close = float(getattr(bars[-2], "close", 0) or 0) if len(bars) >= 2 else 0.0
+        chg = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
+        out.append({
+            "code": sym,
+            "name": sym,
+            "price": price,
+            "change_pct": round(chg, 2),
+            "prev_close": prev_close,
+        })
+    return out
+
+
+# ── Price history ────────────────────────────────────────────────────────────
+
+def _resolve_symbol_name(code: str, market: str) -> str:
+    """Best-effort company name for a symbol; falls back to the code itself."""
+    try:
+        if market == "a_share":
+            from backtest.loaders.a_stock_data_research import fetch_quote, normalize_ticker
+            norm = normalize_ticker(code)
+            raw = fetch_quote([norm])
+            name = (raw.get(norm) or {}).get("name")
+            if name:
+                return name
+        elif market == "hk_equity":
+            quotes = _fetch_hk_watchlist_quotes([code])
+            if quotes and not quotes[0].get("error"):
+                return quotes[0]["name"]
+    except Exception:
+        pass
+    return code.upper()
+
+
+def _df_to_bars(df, intraday: bool) -> list[dict]:
+    """Serialize an OHLCV DataFrame to [{date, close, volume}] rows."""
+    import pandas as pd
+
+    fmt = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
+    rows = []
+    for ts, row in df.iterrows():
+        try:
+            close_val = float(row["close"])
+            if pd.isna(close_val):
+                continue
+            vol_val = int(row.get("volume", 0) or 0)
+        except (ValueError, TypeError):
+            continue
+        date_str = ts.strftime(fmt) if hasattr(ts, "strftime") else str(ts)[: (16 if intraday else 10)]
+        rows.append({"date": date_str, "close": round(close_val, 4), "volume": vol_val})
+    return rows
+
+
+def _fetch_price_history(code: str, period: str, market_hint: str | None = None) -> dict:
+    """Fetch OHLCV close+volume + name for a symbol over the period.
+
+    1D / 5D use intraday 15m bars (trimmed to the exact sessions) for a
+    Yahoo-style intraday line; longer periods use daily closes. Intraday
+    falls back to a short daily window if no intraday data is available.
+
+    ``market_hint`` ('cn'/'hk'/'us') disambiguates codes that ``infer_market``
+    cannot classify on its own (notably bare HK codes like ``0700``).
+    """
+    from datetime import date, timedelta
+    from backtest.correlation import infer_market
+    from backtest.loaders.registry import resolve_loader
+
+    today = date.today()
+    # HK codes need normalizing to the ``.HK`` form before market inference.
+    if market_hint == "hk":
+        _, yf_code = _normalize_hk_code(code)
+        if yf_code:
+            code = yf_code
+    market = infer_market(code)
+    name = _resolve_symbol_name(code, market)
+    loader = resolve_loader(market)
+
+    # ── Intraday periods (1D / 5D) ───────────────────────────────────────────
+    # sessions: how many trailing trading days to keep after fetching.
+    intraday_cfg = {"1D": (5, 1), "5D": (11, 5)}
+    if period in intraday_cfg:
+        lookback_days, sessions = intraday_cfg[period]
+        start_str = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        end_str = today.strftime("%Y-%m-%d")
+        try:
+            result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="15m")
+            df = result.get(code)
+        except Exception:
+            df = None
+        if df is not None and not df.empty:
+            df = df.sort_index()
+            # Keep only the last `sessions` distinct trading dates.
+            unique_dates = sorted({ts.date() for ts in df.index})
+            keep = set(unique_dates[-sessions:])
+            df = df[[ts.date() in keep for ts in df.index]]
+            if not df.empty:
+                return {"name": name, "bars": _df_to_bars(df, intraday=True)}
+        # Fallback: short daily window so the feature still works.
+        fb_days = {"1D": 4, "5D": 9}[period]
+        start_str = (today - timedelta(days=fb_days)).strftime("%Y-%m-%d")
+        end_str = today.strftime("%Y-%m-%d")
+        result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
+        df = result.get(code)
+        if df is None or df.empty:
+            return {"name": name, "bars": []}
+        df = df.sort_index()
+        keep_n = {"1D": 2, "5D": 6}[period]
+        return {"name": name, "bars": _df_to_bars(df.iloc[-keep_n:], intraday=False)}
+
+    # ── Daily periods (1M / YTD / 1Y / 5Y / ALL) ─────────────────────────────
+    period_days = {"1M": 45, "1Y": 400, "5Y": 1885}
+    if period == "YTD":
+        start_str = f"{today.year}-01-01"
+    elif period == "ALL":
+        start_str = "1997-01-01"
+    else:
+        start_str = (today - timedelta(days=period_days.get(period, 400))).strftime("%Y-%m-%d")
+    end_str = today.strftime("%Y-%m-%d")
+
+    result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
+    df = result.get(code)
+    if df is None or df.empty:
+        return {"name": name, "bars": []}
+
+    df = df.sort_index()
+    if len(df) > 3000:
+        df = df.iloc[-3000:]
+    return {"name": name, "bars": _df_to_bars(df, intraday=False)}
+
+
+@app.get("/watchlist/history")
+async def get_watchlist_history(
+    response: Response,
+    code: str = Query(...),
+    period: str = Query("1Y"),
+    market: str | None = Query(None, description="Optional market hint: 'cn'/'hk'/'us'"),
+):
+    """Historical daily close + volume for a single watchlist symbol."""
+    response.headers["Cache-Control"] = "no-store"
+    _VALID = {"1D", "5D", "1M", "YTD", "1Y", "5Y", "ALL"}
+    period = period.upper()
+    if period not in _VALID:
+        raise HTTPException(status_code=400, detail=f"period must be one of {sorted(_VALID)}")
+    try:
+        data = await asyncio.to_thread(_fetch_price_history, code.strip(), period, market)
+        return {"code": code.strip().upper(), "name": data["name"], "period": period, "bars": data["bars"]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Price history fetch failed: {exc}")
+
+
+# ── Valuation history (PE / PB / market cap) ─────────────────────────────────
+
+_VAL_METRIC = {"pe": "市盈率(TTM)", "pb": "市净率", "mktcap": "总市值"}
+_VAL_PERIOD = {"1Y": "近一年", "3Y": "近三年", "5Y": "近五年", "10Y": "近十年", "ALL": "全部"}
+
+
+def _fetch_valuation_history(code: str, market: str, metric: str, period: str) -> list[dict]:
+    """Historical valuation (PE-TTM / PB / market cap) via akshare Baidu source.
+
+    Supports HK (``stock_hk_valuation_baidu``) and A-share
+    (``stock_zh_valuation_baidu``). US has no Baidu valuation source → empty.
+    """
+    indicator = _VAL_METRIC.get(metric)
+    baidu_period = _VAL_PERIOD.get(period, "近五年")
+    if not indicator:
+        return []
+
+    try:
+        import akshare as ak
+    except ImportError:
+        return []
+
+    if market == "hk":
+        tc, _ = _normalize_hk_code(code)
+        if not tc:
+            return []
+        sym = tc[2:]  # 'hk00700' -> '00700'
+        fn = ak.stock_hk_valuation_baidu
+    elif market == "cn":
+        from backtest.loaders.a_stock_data_research import normalize_ticker
+        sym = normalize_ticker(code)
+        fn = ak.stock_zh_valuation_baidu
+    else:
+        return []  # US: no historical valuation source
+
+    try:
+        df = fn(symbol=sym, indicator=indicator, period=baidu_period)
+    except Exception:
+        return []
+    if df is None or df.empty:
+        return []
+
+    import math
+    points = []
+    for _, row in df.iterrows():
+        try:
+            val = float(row["value"])
+        except (ValueError, TypeError):
+            continue
+        if not math.isfinite(val):  # drop NaN/inf → keeps the JSON valid
+            continue
+        d = row["date"]
+        date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+        points.append({"date": date_str, "value": round(val, 4)})
+    return points
+
+
+@app.get("/watchlist/valuation")
+async def get_watchlist_valuation(
+    response: Response,
+    code: str = Query(...),
+    market: str = Query(..., description="'cn' / 'hk' / 'us'"),
+    metric: str = Query("pe", description="pe / pb / mktcap"),
+    period: str = Query("5Y", description="1Y / 3Y / 5Y / 10Y / ALL"),
+):
+    """Historical valuation series for a single watchlist symbol."""
+    response.headers["Cache-Control"] = "no-store"
+    metric = metric.lower()
+    period = period.upper()
+    if metric not in _VAL_METRIC:
+        raise HTTPException(status_code=400, detail=f"metric must be one of {sorted(_VAL_METRIC)}")
+    if period not in _VAL_PERIOD:
+        raise HTTPException(status_code=400, detail=f"period must be one of {sorted(_VAL_PERIOD)}")
+    try:
+        points = await asyncio.to_thread(_fetch_valuation_history, code.strip(), market, metric, period)
+        return {"code": code.strip().upper(), "market": market, "metric": metric, "period": period, "points": points}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Valuation fetch failed: {exc}")
 
 
 def _terminate_current_process() -> None:
