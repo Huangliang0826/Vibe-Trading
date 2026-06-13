@@ -103,8 +103,40 @@ def _truncate_panel(panel: dict[str, pd.DataFrame], asof: str) -> dict[str, Any]
     return out
 
 
+def _normalize_scores(candidates: list[Candidate]) -> list[Candidate]:
+    """Percentile-normalize scores within each provider to 0-100."""
+    by_provider: dict[str, list[Candidate]] = {}
+    for c in candidates:
+        by_provider.setdefault(c.provider_id, []).append(c)
+
+    if len(by_provider) <= 1:
+        return candidates
+
+    normalized: list[Candidate] = []
+    for pid, group in by_provider.items():
+        scores = sorted(set(c.score for c in group))
+        if len(scores) <= 1:
+            for c in group:
+                normalized.append(Candidate(
+                    symbol=c.symbol, score=100.0, provider_id=c.provider_id,
+                    attribution=c.attribution, detail=c.detail,
+                ))
+            continue
+        lo, hi = scores[0], scores[-1]
+        span = hi - lo
+        for c in group:
+            pct = ((c.score - lo) / span) * 100.0 if span > 0 else 100.0
+            normalized.append(Candidate(
+                symbol=c.symbol, score=round(pct, 2), provider_id=c.provider_id,
+                attribution=c.attribution, detail=c.detail,
+            ))
+    return normalized
+
+
 def _merge_candidates(candidates: list[Candidate]) -> list[Candidate]:
-    """Merge candidates from multiple providers by symbol (average scores)."""
+    """Normalize scores across providers, then merge overlapping symbols."""
+    candidates = _normalize_scores(candidates)
+
     by_sym: dict[str, list[Candidate]] = {}
     for c in candidates:
         by_sym.setdefault(c.symbol, []).append(c)
