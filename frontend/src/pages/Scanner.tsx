@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
-import { Radar, AlertTriangle, RefreshCw, Loader2 } from "lucide-react";
+import { Radar, AlertTriangle, RefreshCw, Loader2, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+
+const PROVIDER_META: Record<string, { label: string; color: string }> = {
+  factor_rank: { label: "因子", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
+  anomaly: { label: "异常", color: "bg-orange-500/10 text-orange-600 dark:text-orange-400" },
+};
 
 interface ScanCandidate {
   symbol: string;
@@ -43,6 +48,7 @@ export function Scanner() {
   const [calibration, setCalibration] = useState<CalibrationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -91,8 +97,13 @@ export function Scanner() {
     );
   }
 
-  const ranked = data.candidates;
-  const maxScore = ranked.length > 0 ? ranked[0].score : 100;
+  const allCandidates = data.candidates;
+  const ranked = filter ? allCandidates.filter(c => c.provider_id === filter) : allCandidates;
+  const maxScore = allCandidates.length > 0 ? allCandidates[0].score : 100;
+  const providerCounts = allCandidates.reduce<Record<string, number>>((acc, c) => {
+    acc[c.provider_id] = (acc[c.provider_id] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
@@ -138,6 +149,36 @@ export function Scanner() {
         </div>
       )}
 
+      {/* Provider filter */}
+      {Object.keys(providerCounts).length > 1 && (
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => setFilter(null)}
+            className={cn(
+              "text-xs px-2.5 py-1 rounded-full border transition-colors",
+              !filter ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground"
+            )}
+          >
+            全部 ({allCandidates.length})
+          </button>
+          {Object.entries(providerCounts).map(([pid, count]) => {
+            const meta = PROVIDER_META[pid] || { label: pid, color: "bg-muted text-muted-foreground" };
+            return (
+              <button
+                key={pid}
+                onClick={() => setFilter(filter === pid ? null : pid)}
+                className={cn(
+                  "text-xs px-2.5 py-1 rounded-full border transition-colors",
+                  filter === pid ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {meta.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Leaderboard table */}
       <div className="rounded-lg border bg-card overflow-hidden">
         <table className="w-full text-sm">
@@ -169,8 +210,11 @@ export function Scanner() {
                 <td className="px-4 py-3 tabular-nums text-muted-foreground">
                   {i + 1}
                 </td>
-                <td className="px-4 py-3 font-mono font-semibold">
-                  {c.symbol}
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-semibold">{c.symbol}</span>
+                    <ProviderBadge providerId={c.provider_id} />
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
@@ -223,6 +267,16 @@ export function Scanner() {
         {calibration && ` · 已跟踪 ${calibration.filled}/${calibration.total_tracked} 样本`}
       </p>
     </div>
+  );
+}
+
+function ProviderBadge({ providerId }: { providerId: string }) {
+  const meta = PROVIDER_META[providerId];
+  if (!meta) return null;
+  return (
+    <span className={cn("text-[9px] px-1.5 py-0.5 rounded-full font-medium", meta.color)}>
+      {meta.label}
+    </span>
   );
 }
 

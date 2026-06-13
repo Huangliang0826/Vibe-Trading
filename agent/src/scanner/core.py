@@ -103,6 +103,35 @@ def _truncate_panel(panel: dict[str, pd.DataFrame], asof: str) -> dict[str, Any]
     return out
 
 
+def _merge_candidates(candidates: list[Candidate]) -> list[Candidate]:
+    """Merge candidates from multiple providers by symbol (average scores)."""
+    by_sym: dict[str, list[Candidate]] = {}
+    for c in candidates:
+        by_sym.setdefault(c.symbol, []).append(c)
+
+    merged: list[Candidate] = []
+    for sym, group in by_sym.items():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        avg_score = sum(c.score for c in group) / len(group)
+        combined_detail: dict[str, Any] = {}
+        for c in group:
+            combined_detail.update(c.detail)
+        combined_detail = dict(sorted(combined_detail.items(), key=lambda kv: -kv[1]))
+        top_names = list(combined_detail.keys())[:2]
+        providers_used = ", ".join(c.provider_id for c in group)
+        attribution = "、".join(top_names) + " 驱动" if top_names else providers_used
+        merged.append(Candidate(
+            symbol=sym,
+            score=round(avg_score, 2),
+            provider_id=providers_used,
+            attribution=attribution,
+            detail=combined_detail,
+        ))
+    return merged
+
+
 def run_scan(
     universe: str,
     asof: str,
@@ -139,7 +168,9 @@ def run_scan(
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"provider {prov.provider_id} failed: {exc}")
 
+    merged = _merge_candidates(candidates) if len(used) > 1 else candidates
+
     return ScanResult(
         universe=universe, asof=asof, providers=used,
-        candidates=candidates, warnings=warnings,
+        candidates=merged, warnings=warnings,
     )

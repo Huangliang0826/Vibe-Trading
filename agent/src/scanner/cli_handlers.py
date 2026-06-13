@@ -47,13 +47,17 @@ def add_subparser(subparsers: Any) -> None:
 
 
 def _build_scan(universe: str, asof: str, top: int) -> ScanResult:
-    """Load the manifest, build the factor_rank provider, run the scan."""
+    """Load the manifest, build all providers, run the scan."""
     from src.factors.registry import Registry
+    from src.scanner.providers.anomaly import AnomalyProvider
     from src.scanner.providers.factor_rank import FactorRankProvider
 
     manifest = load_factor_manifest()
-    provider = FactorRankProvider(manifest=manifest, registry=Registry(), top_n=top)
-    return run_scan(universe=universe, asof=asof, providers=[provider])
+    providers = [
+        FactorRankProvider(manifest=manifest, registry=Registry(), top_n=top),
+        AnomalyProvider(top_n=top),
+    ]
+    return run_scan(universe=universe, asof=asof, providers=providers)
 
 
 def _print_result(result: ScanResult, as_json: bool) -> None:
