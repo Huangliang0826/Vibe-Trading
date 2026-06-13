@@ -79,14 +79,23 @@ def load_all_tracking(root: Path | None = None) -> list[TrackingRecord]:
     return records
 
 
+def _strip_suffix(symbol: str) -> str:
+    """Remove exchange suffix (e.g. '.US') for yfinance compatibility."""
+    return symbol.rsplit(".", 1)[0] if "." in symbol else symbol
+
+
 def _fetch_prices(symbols: list[str], start: str, end: str) -> pd.DataFrame:
     """Fetch adjusted OHLC for symbols over [start, end]."""
     if not symbols:
         return pd.DataFrame()
-    df = yf.download(symbols, start=start, end=end,
+    yf_syms = [_strip_suffix(s) for s in symbols]
+    df = yf.download(yf_syms, start=start, end=end,
                      auto_adjust=True, progress=False)
     if df.empty:
         return df
+    if len(yf_syms) > 1:
+        remap = {yf_s: orig for yf_s, orig in zip(yf_syms, symbols)}
+        df = df.rename(columns=remap, level=1)
     return df
 
 
