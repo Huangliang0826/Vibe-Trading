@@ -21,6 +21,65 @@ def _asof_row(frame: pd.DataFrame, asof: str) -> pd.Series | None:
     return frame.loc[mask].iloc[-1]
 
 
+FACTOR_LABELS: dict[str, str] = {
+    # alpha101 (Kakushadze)
+    "alpha101_005": "VWAP偏离动量",
+    "alpha101_007": "放量趋势跟踪",
+    "alpha101_009": "条件价格反转",
+    "alpha101_011": "VWAP偏离×量变",
+    "alpha101_012": "量价背离",
+    "alpha101_021": "均值回归",
+    "alpha101_024": "条件反转",
+    "alpha101_025": "高位放量回落",
+    "alpha101_026": "量价秩相关",
+    "alpha101_030": "量缩价变",
+    "alpha101_032": "均线偏离+VWAP滞后",
+    "alpha101_033": "开收比反转",
+    "alpha101_034": "波动率收敛+价格反转",
+    "alpha101_035": "量×价格区间×收益反转",
+    "alpha101_036": "多因子加权",
+    "alpha101_037": "隔日缺口+价量相关",
+    "alpha101_038": "收盘排名×日内涨幅",
+    "alpha101_043": "放量下跌反转",
+    "alpha101_047": "高价放量回落",
+    "alpha101_049": "加速下跌反转",
+    "alpha101_051": "条件动量切换",
+    "alpha101_054": "低位阴线强度",
+    "alpha101_057": "VWAP偏离衰减",
+    "alpha101_083": "波幅×量排名",
+    # gtja191
+    "gtja191_002": "高低价差动量",
+    "gtja191_004": "条件止损信号",
+    "gtja191_005": "量价秩相关极值",
+    "gtja191_034": "12日均线偏离",
+    "gtja191_046": "多周期均线比",
+    "gtja191_048": "连续涨跌×缩量",
+    "gtja191_065": "6日均线偏离",
+    "gtja191_080": "5日量变速率",
+    "gtja191_085": "放量下跌反转",
+    "gtja191_091": "近期高点回落×量价相关",
+    "gtja191_102": "量变平滑动量",
+    "gtja191_111": "量价波动交叉",
+    "gtja191_117": "收益波动×量排名",
+    "gtja191_171": "日内偏离×均线",
+    "gtja191_180": "量变均值回归",
+    "gtja191_184": "收益与收盘偏离相关",
+    # qlib158
+    "qlib158_ma5": "5日均线偏离",
+    "qlib158_ma10": "10日均线偏离",
+    "qlib158_qtld5": "5日下分位支撑",
+    "qlib158_qtld10": "10日下分位支撑",
+    "qlib158_qtlu5": "5日上分位压力",
+    "qlib158_qtlu10": "10日上分位压力",
+    "qlib158_vsumd5": "5日量能涨跌差",
+    "qlib158_vsump5": "5日量能上涨占比",
+}
+
+
+def _label(factor_id: str) -> str:
+    return FACTOR_LABELS.get(factor_id, factor_id)
+
+
 class FactorRankProvider(SignalProvider):
     """Composite cross-sectional rank over whitelisted factors, weighted by |IR|."""
 
@@ -79,13 +138,13 @@ class FactorRankProvider(SignalProvider):
             # penalty, not an abstention.
             raw = contributions.get(str(sym), {})
             detail = {
-                fid: round(v / total_weight * 100.0, 2)
+                _label(fid): round(v / total_weight * 100.0, 2)
                 for fid, v in raw.items()
             }
             detail = dict(sorted(detail.items(), key=lambda kv: -kv[1]))
             top_names = list(detail.keys())[:2]
             attribution = (
-                "top by " + ", ".join(top_names) if top_names else "composite factor rank"
+                "、".join(top_names) + " 驱动" if top_names else "综合因子排名"
             )
             out.append(Candidate(
                 symbol=str(sym),
