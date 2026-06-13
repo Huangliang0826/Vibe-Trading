@@ -9,6 +9,9 @@ from typing import Any, Awaitable, Callable
 from fastapi import Depends, FastAPI, HTTPException
 
 from src.scanner.store import load_latest
+from src.scanner.tracking import (
+    backfill_returns, calibration_check, load_all_tracking, load_tracking,
+)
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
 
@@ -38,3 +41,39 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         if result is None:
             raise HTTPException(status_code=404, detail="no scans available")
         return result.to_dict()
+
+    @app.get("/scan/tracking/{asof}", dependencies=[Depends(require_auth)])
+    async def scan_tracking(asof: str) -> dict[str, Any]:
+        """Return tracking records for a specific scan date."""
+        records = load_tracking(asof)
+        if not records:
+            raise HTTPException(status_code=404, detail=f"no tracking for {asof}")
+        return {"asof": asof, "records": [r.to_dict() for r in records]}
+
+    @app.get("/scan/tracking", dependencies=[Depends(require_auth)])
+    async def scan_tracking_all() -> dict[str, Any]:
+        """Return all tracking records across all scan dates."""
+        records = load_all_tracking()
+        return {"records": [r.to_dict() for r in records], "total": len(records)}
+
+    @app.get("/scan/calibration", dependencies=[Depends(require_auth)])
+    async def scan_calibration() -> dict[str, Any]:
+        """Run calibration check and return alerts."""
+        records = load_all_tracking()
+        alerts = calibration_check(records)
+        return {
+            "total_tracked": len(records),
+            "filled": len([r for r in records if r.fwd_5d is not None]),
+            "alerts": [
+                {
+                    "metric": a.metric,
+                    "predicted_mean": a.predicted_mean,
+                    "actual_mean": a.actual_mean,
+                    "divergence_pp": a.divergence_pp,
+                    "n_samples": a.n_samples,
+                    "message": a.message,
+                }
+                for a in alerts
+            ],
+            "ok": len(alerts) == 0,
+        }
