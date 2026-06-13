@@ -44,6 +44,9 @@ export default defineConfig(({ mode }) => {
         "/runs": apiProxy,
         "/correlation": apiProxyWithHtmlFallback,
         "^/alpha(?:/|$)": apiProxy,
+        "/market-indices": apiProxy,
+        "/watchlist": apiProxy,
+        "^/scan/": apiProxy,
       },
     },
     build: {

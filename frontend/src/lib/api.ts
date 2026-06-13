@@ -42,6 +42,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...rest,
     headers: mergedHeaders,
+    // Live trading data — always bypass the browser HTTP cache so a stale or
+    // empty response can never be replayed for a given URL.
+    cache: "no-store",
   });
   if (!res.ok) {
     throw await errorFromResponse(res);
@@ -138,6 +141,11 @@ export const api = {
       body: JSON.stringify(settings),
     }),
 
+  // Scanner API
+  getScanLatest: () => request<any>("/scan/latest"),
+  getScanTracking: (asof: string) => request<any>(`/scan/tracking/${asof}`),
+  getScanCalibration: () => request<any>("/scan/calibration"),
+
   // Alpha Zoo API
   listAlphas: (params: AlphaListParams = {}) => {
     const q = new URLSearchParams();
@@ -196,7 +204,81 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ broker }),
     }),
+
+  // 行情看板 — major index quotes (A-share + US)
+  getMarketIndices: () => request<MarketIndex[]>("/market-indices"),
+
+  // 自选股行情
+  getWatchlistQuote: (codes: string[], market: WatchlistMarket) =>
+    request<WatchlistQuote[]>(`/watchlist/quote?codes=${encodeURIComponent(codes.join(","))}&market=${market}`),
+
+  // 自选股历史走势
+  getWatchlistHistory: (code: string, period: string, market?: WatchlistMarket) =>
+    request<WatchlistHistoryResponse>(
+      `/watchlist/history?code=${encodeURIComponent(code)}&period=${encodeURIComponent(period)}` +
+        (market ? `&market=${market}` : "")
+    ),
+
+  // 自选股估值走势（市盈率/市净率/总市值）
+  getWatchlistValuation: (code: string, market: WatchlistMarket, metric: ValuationMetric, period: ValuationPeriod) =>
+    request<ValuationResponse>(
+      `/watchlist/valuation?code=${encodeURIComponent(code)}&market=${market}&metric=${metric}&period=${period}`
+    ),
+
 };
+
+// --- 行情看板 types ---
+
+export type WatchlistMarket = "cn" | "hk" | "us";
+
+export type PriceHistoryPeriod = "1D" | "5D" | "1M" | "YTD" | "1Y" | "5Y" | "ALL";
+
+export interface PriceHistoryBar {
+  date: string;
+  close: number;
+  volume: number;
+}
+
+export interface WatchlistHistoryResponse {
+  code: string;
+  name: string;
+  period: PriceHistoryPeriod;
+  bars: PriceHistoryBar[];
+}
+
+export type ValuationMetric = "pe" | "pb" | "mktcap";
+export type ValuationPeriod = "1Y" | "3Y" | "5Y" | "10Y" | "ALL";
+
+export interface ValuationPoint {
+  date: string;
+  value: number;
+}
+
+export interface ValuationResponse {
+  code: string;
+  market: WatchlistMarket;
+  metric: ValuationMetric;
+  period: ValuationPeriod;
+  points: ValuationPoint[];
+}
+
+export interface WatchlistQuote {
+  code: string;
+  name: string;
+  price: number;
+  change_pct: number;
+  prev_close: number;
+  error?: string;
+}
+
+export interface MarketIndex {
+  code: string;
+  name: string;
+  market: string;
+  price: number;
+  change_pct: number;
+  prev_close: number;
+}
 
 // --- Swarm types ---
 
