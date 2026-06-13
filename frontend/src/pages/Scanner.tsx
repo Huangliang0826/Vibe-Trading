@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Radar, AlertTriangle, RefreshCw, Loader2, Activity } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Radar, AlertTriangle, RefreshCw, Loader2, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 
@@ -42,18 +42,43 @@ interface CalibrationData {
   ok: boolean;
 }
 
+type RankChange = { delta: number; isNew: boolean };
+
+function computeRankChanges(
+  current: ScanCandidate[],
+  previous: ScanCandidate[] | null,
+): Map<string, RankChange> {
+  const map = new Map<string, RankChange>();
+  if (!previous || previous.length === 0) return map;
+  const prevRank = new Map(previous.map((c, i) => [c.symbol, i + 1]));
+  current.forEach((c, i) => {
+    const curRank = i + 1;
+    const prev = prevRank.get(c.symbol);
+    if (prev === undefined) {
+      map.set(c.symbol, { delta: 0, isNew: true });
+    } else {
+      map.set(c.symbol, { delta: prev - curRank, isNew: false });
+    }
+  });
+  return map;
+}
+
 export function Scanner() {
   const [data, setData] = useState<ScanData | null>(null);
+  const [prevData, setPrevData] = useState<ScanData | null>(null);
   const [tracking, setTracking] = useState<Map<string, TrackingRecord>>(new Map());
   const [calibration, setCalibration] = useState<CalibrationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
+  const [dates, setDates] = useState<string[]>([]);
+  const [dateIdx, setDateIdx] = useState(0);
 
-  const load = () => {
+  const loadScan = useCallback((asof?: string) => {
     setLoading(true);
     setError(null);
-    api.getScanLatest()
+    const fetchScan = asof ? api.getScanByDate(asof) : api.getScanLatest();
+    fetchScan
       .then((scan) => {
         setData(scan);
         api.getScanTracking(scan.asof)
@@ -63,15 +88,42 @@ export function Scanner() {
             setTracking(map);
           })
           .catch(() => setTracking(new Map()));
-        api.getScanCalibration()
-          .then(setCalibration)
-          .catch(() => {});
+        api.getScanCalibration().then(setCalibration).catch(() => {});
       })
       .catch((e) => setError(e?.message || "Failed to load scan"))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(load, []);
+  const loadPrevious = useCallback((prevAsof: string) => {
+    api.getScanByDate(prevAsof).then(setPrevData).catch(() => setPrevData(null));
+  }, []);
+
+  useEffect(() => {
+    api.getScanDates().then((r) => {
+      setDates(r.dates);
+      if (r.dates.length > 0) {
+        loadScan(r.dates[0]);
+        if (r.dates.length > 1) loadPrevious(r.dates[1]);
+      } else {
+        setLoading(false);
+      }
+    }).catch(() => {
+      loadScan();
+    });
+  }, [loadScan, loadPrevious]);
+
+  const navigateDate = (dir: -1 | 1) => {
+    const newIdx = dateIdx + dir;
+    if (newIdx < 0 || newIdx >= dates.length) return;
+    setDateIdx(newIdx);
+    loadScan(dates[newIdx]);
+    const prevIdx = newIdx + 1;
+    if (prevIdx < dates.length) {
+      loadPrevious(dates[prevIdx]);
+    } else {
+      setPrevData(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -90,7 +142,7 @@ export function Scanner() {
         <p className="text-xs">
           运行 <code className="bg-muted px-1.5 py-0.5 rounded text-xs">scan run</code> 生成首次扫描
         </p>
-        <button onClick={load} className="mt-2 text-xs text-primary hover:underline">
+        <button onClick={() => loadScan()} className="mt-2 text-xs text-primary hover:underline">
           重试
         </button>
       </div>
@@ -104,6 +156,8 @@ export function Scanner() {
     acc[c.provider_id] = (acc[c.provider_id] || 0) + 1;
     return acc;
   }, {});
+  const rankChanges = computeRankChanges(ranked, prevData?.candidates ?? null);
+  const isLatest = dateIdx === 0;
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
@@ -114,18 +168,64 @@ export function Scanner() {
           <div>
             <h1 className="text-xl font-bold">机会扫描</h1>
             <p className="text-xs text-muted-foreground">
-              {data.universe.toUpperCase()} · 截至 {data.asof} · {ranked.length} 只股票
+              {data.universe.toUpperCase()} · {ranked.length} 只股票
             </p>
           </div>
         </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded border border-border hover:border-foreground/20"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          刷新
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Date navigator */}
+          {dates.length > 1 && (
+            <div className="flex items-center gap-1 border border-border rounded px-1">
+              <button
+                onClick={() => navigateDate(1)}
+                disabled={dateIdx >= dates.length - 1}
+                className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-xs tabular-nums px-1 flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                {data.asof}
+              </span>
+              <button
+                onClick={() => navigateDate(-1)}
+                disabled={dateIdx <= 0}
+                className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          {dates.length <= 1 && (
+            <span className="text-xs tabular-nums text-muted-foreground flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {data.asof}
+            </span>
+          )}
+          <button
+            onClick={() => { setDateIdx(0); loadScan(); }}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded border border-border hover:border-foreground/20"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            最新
+          </button>
+        </div>
       </div>
+
+      {/* Non-latest banner */}
+      {!isLatest && (
+        <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-2 flex items-center justify-between">
+          <p className="text-xs text-blue-600 dark:text-blue-400">
+            正在查看历史扫描 ({data.asof})，共 {dates.length} 期
+          </p>
+          <button
+            onClick={() => { setDateIdx(0); loadScan(dates[0]); if (dates.length > 1) loadPrevious(dates[1]); }}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            回到最新 →
+          </button>
+        </div>
+      )}
 
       {/* Calibration alerts */}
       {calibration && !calibration.ok && calibration.alerts.map((a, i) => (
@@ -199,57 +299,63 @@ export function Scanner() {
             </tr>
           </thead>
           <tbody>
-            {ranked.map((c, i) => (
-              <tr
-                key={c.symbol}
-                className={cn(
-                  "border-b last:border-b-0 transition-colors hover:bg-muted/20",
-                  i < 3 && "bg-primary/[0.02]"
-                )}
-              >
-                <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                  {i + 1}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono font-semibold">{c.symbol}</span>
-                    <ProviderBadge providerId={c.provider_id} />
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${(c.score / maxScore) * 100}%` }}
-                      />
+            {ranked.map((c, i) => {
+              const change = rankChanges.get(c.symbol);
+              return (
+                <tr
+                  key={c.symbol}
+                  className={cn(
+                    "border-b last:border-b-0 transition-colors hover:bg-muted/20",
+                    i < 3 && "bg-primary/[0.02]"
+                  )}
+                >
+                  <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                    <div className="flex items-center gap-1">
+                      {i + 1}
+                      <RankBadge change={change} />
                     </div>
-                    <span className="tabular-nums text-xs font-medium w-10 text-right">
-                      {c.score.toFixed(1)}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell max-w-[200px] truncate">
-                  {c.attribution}
-                </td>
-                {tracking.size > 0 && (
-                  <>
-                    <td className="px-4 py-3 text-right hidden lg:table-cell">
-                      <ReturnCell value={tracking.get(c.symbol)?.fwd_1d} />
-                    </td>
-                    <td className="px-4 py-3 text-right hidden lg:table-cell">
-                      <ReturnCell value={tracking.get(c.symbol)?.fwd_5d} />
-                    </td>
-                    <td className="px-4 py-3 text-right hidden lg:table-cell">
-                      <ReturnCell value={tracking.get(c.symbol)?.fwd_20d} />
-                    </td>
-                  </>
-                )}
-                <td className="px-4 py-3 hidden md:table-cell">
-                  <FactorChips detail={c.detail} />
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-semibold">{c.symbol}</span>
+                      <ProviderBadge providerId={c.provider_id} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${(c.score / maxScore) * 100}%` }}
+                        />
+                      </div>
+                      <span className="tabular-nums text-xs font-medium w-10 text-right">
+                        {c.score.toFixed(1)}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell max-w-[200px] truncate">
+                    {c.attribution}
+                  </td>
+                  {tracking.size > 0 && (
+                    <>
+                      <td className="px-4 py-3 text-right hidden lg:table-cell">
+                        <ReturnCell value={tracking.get(c.symbol)?.fwd_1d} />
+                      </td>
+                      <td className="px-4 py-3 text-right hidden lg:table-cell">
+                        <ReturnCell value={tracking.get(c.symbol)?.fwd_5d} />
+                      </td>
+                      <td className="px-4 py-3 text-right hidden lg:table-cell">
+                        <ReturnCell value={tracking.get(c.symbol)?.fwd_20d} />
+                      </td>
+                    </>
+                  )}
+                  <td className="px-4 py-3 hidden md:table-cell">
+                    <FactorChips detail={c.detail} />
+                  </td>
+                </tr>
+              );
+            })}
             {ranked.length === 0 && (
               <tr>
                 <td colSpan={tracking.size > 0 ? 8 : 5} className="px-4 py-8 text-center text-muted-foreground text-sm">
@@ -265,9 +371,22 @@ export function Scanner() {
       <p className="mt-3 text-xs text-muted-foreground/60">
         数据源: {data.providers.join(", ")} · 因子门槛 α_t ≥ 3.0 · 排名仅供研究参考
         {calibration && ` · 已跟踪 ${calibration.filled}/${calibration.total_tracked} 样本`}
+        {dates.length > 1 && ` · ${dates.length} 期历史`}
       </p>
     </div>
   );
+}
+
+function RankBadge({ change }: { change?: RankChange }) {
+  if (!change) return null;
+  if (change.isNew) {
+    return <span className="text-[9px] font-bold text-emerald-500">新</span>;
+  }
+  if (change.delta === 0) return null;
+  if (change.delta > 0) {
+    return <span className="text-[9px] tabular-nums font-bold text-green-500">↑{change.delta}</span>;
+  }
+  return <span className="text-[9px] tabular-nums font-bold text-red-500">↓{Math.abs(change.delta)}</span>;
 }
 
 function ProviderBadge({ providerId }: { providerId: string }) {

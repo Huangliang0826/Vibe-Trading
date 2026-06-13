@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import Depends, FastAPI, HTTPException
 
-from src.scanner.store import load_latest
+from src.scanner.store import list_scan_dates, load_by_date, load_latest
 from src.scanner.tracking import (
     backfill_returns, calibration_check, load_all_tracking, load_tracking,
 )
@@ -33,6 +33,20 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
                 "register_scan_routes: api_server not in sys.modules; pass require_auth"
             )
         require_auth = host.require_auth
+
+    @app.get("/scan/dates", dependencies=[Depends(require_auth)])
+    async def scan_dates() -> dict[str, Any]:
+        """Return available scan dates, most recent first."""
+        dates = list_scan_dates()
+        return {"dates": dates}
+
+    @app.get("/scan/history/{asof}", dependencies=[Depends(require_auth)])
+    async def scan_by_date(asof: str) -> dict[str, Any]:
+        """Return a scan for a specific date."""
+        result = load_by_date(asof)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"no scan for {asof}")
+        return result.to_dict()
 
     @app.get("/scan/latest", dependencies=[Depends(require_auth)])
     async def scan_latest() -> dict[str, Any]:

@@ -30,6 +30,27 @@ def load_scan(path: Path) -> ScanResult:
     return ScanResult.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
+def list_scan_dates(root: Path | None = None) -> list[str]:
+    """Return available scan dates (YYYY-MM-DD), most recent first."""
+    base = Path(root) if root is not None else default_root()
+    if not base.is_dir():
+        return []
+    return sorted(
+        (d.name for d in base.iterdir()
+         if d.is_dir() and (d / "run.json").is_file()),
+        reverse=True,
+    )
+
+
+def load_by_date(asof: str, root: Path | None = None) -> ScanResult | None:
+    """Load a scan for a specific date, or None if not found."""
+    base = Path(root) if root is not None else default_root()
+    path = base / asof / "run.json"
+    if not path.is_file():
+        return None
+    return load_scan(path)
+
+
 def load_latest(root: Path | None = None) -> ScanResult | None:
     """Return the most recent scan by asof date, or None if none exist."""
     base = Path(root) if root is not None else default_root()

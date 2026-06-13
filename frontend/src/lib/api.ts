@@ -143,6 +143,8 @@ export const api = {
 
   // Scanner API
   getScanLatest: () => request<any>("/scan/latest"),
+  getScanDates: () => request<{ dates: string[] }>("/scan/dates"),
+  getScanByDate: (asof: string) => request<any>(`/scan/history/${asof}`),
   getScanTracking: (asof: string) => request<any>(`/scan/tracking/${asof}`),
   getScanCalibration: () => request<any>("/scan/calibration"),
 
