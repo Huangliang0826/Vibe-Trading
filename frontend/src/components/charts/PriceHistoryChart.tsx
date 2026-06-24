@@ -55,6 +55,55 @@ function computeDrawdown(bars: PriceHistoryBar[]): {
            sincePeakDays: dayDiff(bars[ddPeakIdx].date, bars[bars.length - 1].date), recoveredPct };
 }
 
+function computeSeriesMaxDrawdown(values: number[]): number {
+  if (values.length < 2) return 0;
+  let peak = values[0];
+  let maxDD = 0;
+  values.forEach((value) => {
+    if (value > peak) peak = value;
+    const dd = peak > 0 ? value / peak - 1 : 0;
+    if (dd < maxDD) maxDD = dd;
+  });
+  return maxDD;
+}
+
+function computeDailyDca(bars: PriceHistoryBar[]): {
+  totalReturn: number;
+  maxDD: number;
+  contributions: number;
+} | null {
+  if (bars.length < 2 || bars[0].close <= 0) return null;
+
+  let wealth = 1;
+  let contributed = 1;
+  let contributionDays = 1;
+  let lastContributionDate = bars[0].date.slice(0, 10);
+  const nav = [1];
+
+  for (let i = 1; i < bars.length; i++) {
+    const prevClose = bars[i - 1].close;
+    const close = bars[i].close;
+    if (prevClose > 0) {
+      wealth *= close / prevClose;
+    }
+
+    const currentDate = bars[i].date.slice(0, 10);
+    if (currentDate !== lastContributionDate) {
+      wealth += 1;
+      contributed += 1;
+      contributionDays += 1;
+      lastContributionDate = currentDate;
+    }
+    nav.push(wealth / contributed);
+  }
+
+  return {
+    totalReturn: nav[nav.length - 1] - 1,
+    maxDD: computeSeriesMaxDrawdown(nav),
+    contributions: contributionDays,
+  };
+}
+
 // Change over the displayed range — computed from the exact plotted bars so
 // the number always matches the line (red = up / green = down, CN convention).
 function changeClass(up: boolean) {
@@ -82,6 +131,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
   const pctChange = firstClose ? (absChange / firstClose) * 100 : 0;
   const up = absChange >= 0;
   const dd = showRisk && hasData ? computeDrawdown(bars) : null;
+  const dailyDca = showRisk && hasData && period !== "1D" ? computeDailyDca(bars) : null;
 
   useEffect(() => {
     if (!ref.current || bars.length < 2) return;
@@ -246,7 +296,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
 
       {/* Risk metrics over the displayed window: max drawdown + recovery time */}
       {dd && !loading && (
-        <div className="flex items-center gap-4 text-[11px] -mt-1">
+        <div className="flex items-center gap-x-4 gap-y-1 text-[11px] -mt-1 flex-wrap">
           <span className="text-muted-foreground">
             最大回撤{" "}
             <b className={cn("tabular-nums", dd.maxDD < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
@@ -263,6 +313,23 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
               <b className="tabular-nums text-amber-600 dark:text-amber-400">暂未修复（距高点 {dd.sincePeakDays} 天 · 已恢复 {dd.recoveredPct.toFixed(0)}%）</b>
             )}
           </span>
+          {dailyDca && (
+            <>
+              <span className="text-muted-foreground">
+                每日定投收益{" "}
+                <b className={cn("tabular-nums", dailyDca.totalReturn >= 0 ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+                  {dailyDca.totalReturn >= 0 ? "+" : ""}{(dailyDca.totalReturn * 100).toFixed(1)}%
+                </b>
+              </span>
+              <span className="text-muted-foreground">
+                每日定投最大回撤{" "}
+                <b className={cn("tabular-nums", dailyDca.maxDD < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+                  {(dailyDca.maxDD * 100).toFixed(1)}%
+                </b>
+                <span className="ml-1 text-muted-foreground/70">({dailyDca.contributions} 次)</span>
+              </span>
+            </>
+          )}
         </div>
       )}
 

@@ -6,13 +6,45 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Forecast and HSTECH strategy panels.** Restored the trend forecast page,
-  HSTECH embedded forecast panel, and the smart T research panel for
-  trapped-position low-buy/high-sell cost reduction.
+- **HSTECH research workbench.** Added a dedicated 恒生科技 research surface with
+  price/valuation charts, TimesFM forecast cone, news, reports, AI summaries,
+  factor research panels, and benchmarked Q1/Q2 portfolio views.
+- **HSTECH factor portfolio views.** Added current Q1 and Q2 constituents with
+  company names, 24-hour cached portfolio results, and separate Q1/Q2
+  Walk-Forward validation panels. Q1 Walk-Forward is now pure-long first:
+  headline metrics, Q1-only equity curve, and long-short as secondary evidence.
+- **Q1 pure-long benchmarking.** Added `Q1 纯多 vs 基准` comparison against
+  HSTECH equal-weight, universe equal-weight, 03033.HK ETF, and a DCA baseline.
+  The benchmark panel is collapsed by default and calculates only when opened.
+- **DCA analytics.** Added DCA baselines to forecast strategy backtests and daily
+  DCA return / max-drawdown metrics to price charts for non-`1D` windows,
+  including the Overview and HSTECH charts.
+- **Forecast and scan result caching.** Added 48-hour disk caching for TimesFM
+  forecast charts, 24-hour caching for Q1/Q2 portfolio views, and result caching
+  for expensive quintile / walk-forward / benchmark scans.
 
 ### Changed
+- **HSTECH API routing.** Split the API server surface into focused routers for
+  settings, market data, forecast, sessions, live, runs, and scan-related
+  endpoints, reducing the `api_server.py` monolith.
+- **HSTECH forecast UX.** Forecast refresh still bypasses cache, while normal
+  chart loads reuse the two-day forecast cache. Strategy backtests now compare
+  against both buy-and-hold and DCA baselines.
+- **HSTECH news summaries.** AI summaries in the News tab now summarize only
+  same-day news; historical news remains visible in the list but is excluded
+  from the daily AI summary prompt.
+- **Q1/Q2 factor UX.** Q1 and Q2 controls are now opt-in where expensive:
+  benchmark and walk-forward panels stay collapsed until the user opens them,
+  reducing accidental long-running scans.
 
 ### Fixed
+- **Frontend API error handling.** Non-JSON backend responses are now surfaced as
+  readable `API returned a non-JSON response` errors instead of crashing on an
+  `Unexpected token` parse failure.
+- **03033.HK benchmark lookup.** ETF benchmark loading now retries the unpadded
+  Hong Kong ticker form when yfinance rejects the padded symbol.
+- **Forecast reliability.** The HSTECH forecast request path retries transient
+  500 errors and avoids overlapping in-flight forecast requests.
 
 ## [0.1.9] — 2026-06-01
 

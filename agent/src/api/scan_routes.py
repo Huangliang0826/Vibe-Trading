@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import time
 from typing import Any, Awaitable, Callable
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -16,6 +17,25 @@ from src.scanner.tracking import (
 )
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
+
+_SCAN_RESULT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_SCAN_RESULT_TTL = 24 * 3600
+
+
+def _cache_get(key: str) -> dict[str, Any] | None:
+    cached = _SCAN_RESULT_CACHE.get(key)
+    if not cached:
+        return None
+    ts, payload = cached
+    if time.time() - ts > _SCAN_RESULT_TTL:
+        _SCAN_RESULT_CACHE.pop(key, None)
+        return None
+    return {**payload, "cached": True}
+
+
+def _cache_set(key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    _SCAN_RESULT_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
 
 
 def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> None:
@@ -103,6 +123,11 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         from src.scanner.quintile import run_quintile_backtest
         from src.tools.alpha_bench_tool import _load_universe_panel
 
+        cache_key = f"quintile:{universe}:{period}:{rebal_days}:{cost_bps}:{refined}:{long_q}:{short_q}"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
+
         loop = asyncio.get_running_loop()
 
         def _run():
@@ -122,7 +147,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
 
         try:
             result = await loop.run_in_executor(None, _run)
-            return result.to_dict()
+            return _cache_set(cache_key, result.to_dict())
         except (FileNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -139,6 +164,11 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         from src.scanner.manifest import load_factor_manifest
         from src.scanner.quintile import run_walkforward_backtest
         from src.tools.alpha_bench_tool import _load_universe_panel
+
+        cache_key = f"walkforward:{universe}:{period}:{rebal_days}:{cost_bps}:{long_q}:{short_q}"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         loop = asyncio.get_running_loop()
 
@@ -158,7 +188,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
 
         try:
             result = await loop.run_in_executor(None, _run)
-            return result.to_dict()
+            return _cache_set(cache_key, result.to_dict())
         except (FileNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -174,6 +204,11 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
             _compute_composite, _screen_on_window,
         )
         from src.tools.alpha_bench_tool import _load_universe_panel
+
+        cache_key = f"portfolio:{universe}:{period}"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         loop = asyncio.get_running_loop()
 
@@ -236,7 +271,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         import pandas as pd
         try:
             result = await loop.run_in_executor(None, _run)
-            return result
+            return _cache_set(cache_key, result)
         except (FileNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

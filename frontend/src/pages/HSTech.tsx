@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Cpu, RefreshCw, Loader2, BookOpen, ExternalLink, Sparkles, ChevronDown, ChevronUp, Newspaper, TrendingUp } from "lucide-react";
-import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type TradeSignal, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse } from "@/lib/api";
+import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type TradeSignal, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { ForecastChart } from "@/components/charts/ForecastChart";
@@ -432,6 +432,106 @@ function ScreeningTable({ items }: { items: FactorScreening[] }) {
   );
 }
 
+function CurrentPortfolioSection() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<ScanPortfolioResponse | null>(null);
+  const [quotes, setQuotes] = useState<Map<string, WatchlistQuote>>(new Map());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api.getScanPortfolio("hkconnect", "2024-2026")
+      .then(async (res) => {
+        setData(res);
+        const codes = Array.from(new Set([...(res.portfolio.Q1 || []), ...(res.portfolio.Q2 || [])]));
+        if (codes.length > 0) {
+          try {
+            const quoteList = await api.getWatchlistQuote(codes, "hk");
+            setQuotes(new Map(quoteList.map((q) => [q.code.toUpperCase(), q])));
+          } catch {
+            setQuotes(new Map());
+          }
+        }
+      })
+      .catch((e) => setError(e?.message || "组合计算失败"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { if (open && !data && !loading) load(); }, [open, data, loading, load]);
+
+  const renderBucket = (label: "Q1" | "Q2") => {
+    const symbols = data?.portfolio[label] || [];
+    return (
+      <div className="rounded-xl border overflow-hidden">
+        <div className="flex items-center justify-between bg-muted/30 px-3 py-2">
+          <span className="text-xs font-semibold text-foreground">{label} 当前组合</span>
+          <span className="text-[11px] text-muted-foreground">{symbols.length} 只</span>
+        </div>
+        <div className="divide-y">
+          {symbols.map((symbol) => {
+            const quote = quotes.get(symbol.toUpperCase());
+            return (
+              <div key={`${label}-${symbol}`} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground truncate">{quote?.name || symbol}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground">{symbol}</p>
+                </div>
+                {quote && quote.price > 0 && (
+                  <div className="text-right tabular-nums">
+                    <p>{quote.price.toFixed(2)}</p>
+                    <p className={quote.change_pct >= 0 ? "text-red-500" : "text-emerald-600"}>
+                      {quote.change_pct >= 0 ? "+" : ""}{quote.change_pct.toFixed(2)}%
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {symbols.length === 0 && (
+            <div className="px-3 py-6 text-center text-xs text-muted-foreground">暂无组合数据</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-3 border-t pt-3">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+        {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        当前 Q1 / Q2 组合
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-6 justify-center">
+              <Loader2 className="h-4 w-4 animate-spin" /> 当前组合计算中…（24 小时缓存）
+            </div>
+          ) : error ? (
+            <p className="text-xs text-red-500">{error}</p>
+          ) : data ? (
+            <>
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                <span>截至 {data.as_of.slice(0, 10)}</span>
+                <span>{data.n_stocks} 只股票</span>
+                <span>{data.n_factors_used} 个因子</span>
+                {data.cached && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">缓存</span>}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {renderBucket("Q1")}
+                {renderBucket("Q2")}
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuintileSection() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<QuintileResponse | null>(null);
@@ -752,13 +852,13 @@ ${lines}
 
 function buildNewsSummaryPrompt(items: NewsItem[]): string {
   const lines = items.slice(0, 30).map((n) => `- [${n.time}] ${n.title}${n.summary ? `：${n.summary.slice(0, 80)}` : ""}`).join("\n");
-  return `以下是最近与恒生科技指数相关的 ${items.length} 条新闻：
+  return `以下是今日与恒生科技指数相关的 ${items.length} 条新闻：
 
 ${lines}
 
 请严格按以下格式输出总结：
 
-**一、今日/近期核心动态**
+**一、今日核心动态**
 - （列3-5条最重要的市场动态）
 
 **二、市场情绪判断**
@@ -772,6 +872,35 @@ ${lines}
 - （列1-2条）
 
 请全程用中文回答，简洁扼要，直接输出总结内容，不要添加开头语或额外段落。`;
+}
+
+function todayDateKey(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function newsDateKey(time: string): string {
+  const text = String(time || "");
+  const m = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (m) {
+    return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  }
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    return `${y}-${month}-${day}`;
+  }
+  return "";
+}
+
+function filterTodayNews(items: NewsItem[]): NewsItem[] {
+  const today = todayDateKey();
+  return items.filter((item) => newsDateKey(item.time) === today);
 }
 
 type Tab = "forecast" | "news" | "report" | "research";
@@ -849,7 +978,7 @@ export function HSTech() {
 
   // News LLM summary state
   const [newsSummary, setNewsSummary] = useState<string>(() => {
-    try { return localStorage.getItem("hstech-news-summary") || ""; } catch { return ""; }
+    try { return localStorage.getItem(`hstech-news-summary-${todayDateKey()}`) || ""; } catch { return ""; }
   });
   const [newsSummaryLoading, setNewsSummaryLoading] = useState(false);
   const newsSummaryRef = useRef("");
@@ -977,7 +1106,8 @@ export function HSTech() {
   useEffect(() => { loadNews(); }, [loadNews]);
 
   const generateNewsSummary = useCallback(async () => {
-    if (newsSummaryLoading || news.length === 0) return;
+    const todayNews = filterTodayNews(news);
+    if (newsSummaryLoading || todayNews.length === 0) return;
     setNewsSummaryLoading(true);
     newsSummaryRef.current = "";
     setNewsSummary("");
@@ -994,7 +1124,7 @@ export function HSTech() {
         "attempt.completed": () => {
           setNewsSummaryLoading(false);
           disconnectNewsSummary();
-          try { localStorage.setItem("hstech-news-summary", newsSummaryRef.current); } catch {}
+          try { localStorage.setItem(`hstech-news-summary-${todayDateKey()}`, newsSummaryRef.current); } catch {}
         },
         "attempt.failed": (d) => {
           setNewsSummaryLoading(false);
@@ -1007,7 +1137,7 @@ export function HSTech() {
         reconnect: () => {},
       });
 
-      await api.sendMessage(sid, buildNewsSummaryPrompt(news));
+      await api.sendMessage(sid, buildNewsSummaryPrompt(todayNews));
     } catch (e) {
       setNewsSummaryLoading(false);
       setNewsSummary(`请求失败：${e instanceof Error ? e.message : "未知错误"}`);
@@ -1071,6 +1201,8 @@ export function HSTech() {
   useEffect(() => {
     return () => { disconnect(); disconnectSummary(); disconnectNewsSummary(); };
   }, [disconnect, disconnectSummary, disconnectNewsSummary]);
+
+  const todayNewsCount = filterTodayNews(news).length;
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -1221,6 +1353,7 @@ export function HSTech() {
               <ForecastChart data={forecast} height={300} trades={trades.length > 0 ? trades : undefined} />
               <CalibrationSection market={HSTECH_MARKET} code={HSTECH_CODE} context={512} />
               <StrategySection market={HSTECH_MARKET} code={HSTECH_CODE} context={512} />
+              <CurrentPortfolioSection />
               <QuintileSection />
               <WalkForwardSection />
             </>
@@ -1236,11 +1369,11 @@ export function HSTech() {
             <div className="flex items-center gap-2">
               <button
                 onClick={generateNewsSummary}
-                disabled={newsSummaryLoading || news.length === 0}
+                disabled={newsSummaryLoading || todayNewsCount === 0}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
               >
                 {newsSummaryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {newsSummaryLoading ? "总结中..." : newsSummary ? "重新总结" : "AI 总结"}
+                {newsSummaryLoading ? "总结中..." : newsSummary ? "重新总结今日" : "AI 总结今日"}
               </button>
               <button
                 onClick={loadNews}
@@ -1257,7 +1390,7 @@ export function HSTech() {
             <div className="rounded-xl border bg-muted/30 p-4 mb-4">
               <div className="flex items-center gap-1.5 mb-2">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-medium text-primary">AI 新闻总结</span>
+                <span className="text-xs font-medium text-primary">AI 今日新闻总结</span>
               </div>
               <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed text-sm">
                 {renderMarkdown(newsSummary)}
@@ -1270,6 +1403,10 @@ export function HSTech() {
 
           {newsError && (
             <p className="text-xs text-red-500 dark:text-red-400 mb-3">{newsError}</p>
+          )}
+
+          {!newsLoading && news.length > 0 && todayNewsCount === 0 && (
+            <p className="text-xs text-muted-foreground mb-3">今日暂无新闻，AI 总结仅在有当日新闻时可用。</p>
           )}
 
           {newsLoading && news.length === 0 ? (

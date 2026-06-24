@@ -7,6 +7,7 @@ V5: ReAct Agent + async /run + CORS env + SSE tool events.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -2179,12 +2180,53 @@ async def get_watchlist_valuation(
 
 _FORECAST_CACHE: dict[str, tuple[float, dict]] = {}
 _FORECAST_TTL = 48 * 3600
+_FORECAST_DISK_CACHE_DIR = Path.home() / ".vibe-trading" / "cache" / "forecast"
 _CALIB_CACHE: dict[str, tuple[float, dict]] = {}
 _CALIB_TTL = 48 * 3600
 _STRATEGY_CACHE: dict[str, tuple[float, dict]] = {}
 _STRATEGY_TTL = 24 * 3600
 _SMART_T_CACHE: dict[str, tuple[float, dict]] = {}
 _SMART_T_TTL = 24 * 3600
+
+
+def _forecast_disk_cache_path(key: str) -> Path:
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return _FORECAST_DISK_CACHE_DIR / f"{digest}.json"
+
+
+def _read_forecast_disk_cache(key: str) -> dict | None:
+    path = _forecast_disk_cache_path(key)
+    try:
+        stat = path.stat()
+        if time.time() - stat.st_mtime > _FORECAST_TTL:
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    result = payload.get("result") if isinstance(payload, dict) else None
+    return result if isinstance(result, dict) else None
+
+
+def _write_forecast_disk_cache(key: str, result: dict) -> None:
+    path = _forecast_disk_cache_path(key)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    payload = {
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "result": result,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.replace(path)
+    except Exception as exc:  # noqa: BLE001 - forecast cache is best-effort.
+        logger.warning("forecast disk cache write failed for %s: %s", key, exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 @app.get("/forecast/{market}/{code}")
@@ -2205,6 +2247,10 @@ async def get_forecast(
         cached = _FORECAST_CACHE.get(key)
         if cached and (time.time() - cached[0]) < _FORECAST_TTL:
             return {**cached[1], "cached": True}
+        disk_cached = _read_forecast_disk_cache(key)
+        if disk_cached is not None:
+            _FORECAST_CACHE[key] = (time.time(), disk_cached)
+            return {**disk_cached, "cached": True}
     try:
         hist = await asyncio.to_thread(_fetch_price_history, code.strip(), "ALL", market)
         bars = hist.get("bars", [])
@@ -2224,6 +2270,7 @@ async def get_forecast(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"forecast failed: {exc}") from exc
     _FORECAST_CACHE[key] = (time.time(), payload)
+    _write_forecast_disk_cache(key, payload)
     return {**payload, "cached": False}
 
 

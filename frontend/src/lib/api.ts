@@ -157,6 +157,8 @@ export const api = {
     request<QuintileResponse>(`/scan/quintile?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}&refined=${refined}`),
   getScanWalkforward: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30) =>
     request<WalkForwardResponse>(`/scan/quintile/walkforward?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}`),
+  getScanPortfolio: (universe = "hkconnect", period = "2024-2026") =>
+    request<ScanPortfolioResponse>(`/scan/quintile/portfolio?universe=${universe}&period=${period}`),
 
   // 行业研报库
   getIndustryReports: () =>
@@ -357,6 +359,18 @@ export interface WalkForwardResponse {
   spread_summary: { total_return: number; annual_return: number; annual_vol: number; sharpe: number; max_drawdown: number };
   long_q?: string;
   short_q?: string;
+}
+
+export interface ScanPortfolioResponse {
+  universe: string;
+  as_of: string;
+  n_stocks: number;
+  n_factors_used: number;
+  factors_used: string[];
+  portfolio: Record<string, string[]>;
+  q1_count: number;
+  q1_details?: { symbol: string; score: number }[];
+  cached?: boolean;
 }
 
 export interface MarketIndex {
