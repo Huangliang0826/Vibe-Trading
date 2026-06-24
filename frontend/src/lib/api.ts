@@ -269,7 +269,7 @@ export const api = {
 
 export type WatchlistMarket = "cn" | "hk" | "us";
 
-export type PriceHistoryPeriod = "1D" | "5D" | "1M" | "YTD" | "1Y" | "5Y" | "ALL";
+export type PriceHistoryPeriod = "1D" | "1M" | "YTD" | "1Y" | "3Y" | "5Y" | "ALL";
 
 export interface PriceHistoryBar {
   date: string;

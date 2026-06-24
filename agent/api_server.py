@@ -2002,7 +2002,7 @@ def _df_to_bars(df, intraday: bool) -> list[dict]:
 def _fetch_price_history(code: str, period: str, market_hint: str | None = None) -> dict:
     """Fetch OHLCV close+volume + name for a symbol over the period.
 
-    1D / 5D use intraday 15m bars (trimmed to the exact sessions) for a
+    1D uses intraday 15m bars (trimmed to the exact session) for a
     Yahoo-style intraday line; longer periods use daily closes. Intraday
     falls back to a short daily window if no intraday data is available.
 
@@ -2023,9 +2023,9 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
     name = _resolve_symbol_name(code, market)
     loader = resolve_loader(market)
 
-    # ── Intraday periods (1D / 5D) ───────────────────────────────────────────
+    # ── Intraday period (1D) ─────────────────────────────────────────────────
     # sessions: how many trailing trading days to keep after fetching.
-    intraday_cfg = {"1D": (5, 1), "5D": (11, 5)}
+    intraday_cfg = {"1D": (5, 1)}
     if period in intraday_cfg:
         lookback_days, sessions = intraday_cfg[period]
         start_str = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
@@ -2044,7 +2044,7 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
             if not df.empty:
                 return {"name": name, "bars": _df_to_bars(df, intraday=True)}
         # Fallback: short daily window so the feature still works.
-        fb_days = {"1D": 4, "5D": 9}[period]
+        fb_days = {"1D": 4}[period]
         start_str = (today - timedelta(days=fb_days)).strftime("%Y-%m-%d")
         end_str = today.strftime("%Y-%m-%d")
         result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
@@ -2052,11 +2052,11 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         if df is None or df.empty:
             return {"name": name, "bars": []}
         df = df.sort_index()
-        keep_n = {"1D": 2, "5D": 6}[period]
+        keep_n = {"1D": 2}[period]
         return {"name": name, "bars": _df_to_bars(df.iloc[-keep_n:], intraday=False)}
 
-    # ── Daily periods (1M / YTD / 1Y / 5Y / ALL) ─────────────────────────────
-    period_days = {"1M": 45, "1Y": 400, "5Y": 1885}
+    # ── Daily periods (1M / YTD / 1Y / 3Y / 5Y / ALL) ───────────────────────
+    period_days = {"1M": 45, "1Y": 400, "3Y": 1160, "5Y": 1885}
     if period == "YTD":
         start_str = f"{today.year}-01-01"
     elif period == "ALL":
@@ -2085,7 +2085,7 @@ async def get_watchlist_history(
 ):
     """Historical daily close + volume for a single watchlist symbol."""
     response.headers["Cache-Control"] = "no-store"
-    _VALID = {"1D", "5D", "1M", "YTD", "1Y", "5Y", "ALL"}
+    _VALID = {"1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"}
     period = period.upper()
     if period not in _VALID:
         raise HTTPException(status_code=400, detail=f"period must be one of {sorted(_VALID)}")

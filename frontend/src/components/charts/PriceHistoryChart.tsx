@@ -5,7 +5,7 @@ import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
 import type { PriceHistoryBar, PriceHistoryPeriod } from "@/lib/api";
 
-export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "5D", "1M", "YTD", "1Y", "5Y", "ALL"];
+export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"];
 
 interface Props {
   bars: PriceHistoryBar[];
@@ -55,21 +55,9 @@ function computeDrawdown(bars: PriceHistoryBar[]): {
            sincePeakDays: dayDiff(bars[ddPeakIdx].date, bars[bars.length - 1].date), recoveredPct };
 }
 
-function computeSeriesMaxDrawdown(values: number[]): number {
-  if (values.length < 2) return 0;
-  let peak = values[0];
-  let maxDD = 0;
-  values.forEach((value) => {
-    if (value > peak) peak = value;
-    const dd = peak > 0 ? value / peak - 1 : 0;
-    if (dd < maxDD) maxDD = dd;
-  });
-  return maxDD;
-}
-
-function computeDailyDca(bars: PriceHistoryBar[]): {
+export function computeDailyDca(bars: PriceHistoryBar[]): {
   totalReturn: number;
-  maxDD: number;
+  maxLoss: number;
   contributions: number;
 } | null {
   if (bars.length < 2 || bars[0].close <= 0) return null;
@@ -99,7 +87,7 @@ function computeDailyDca(bars: PriceHistoryBar[]): {
 
   return {
     totalReturn: nav[nav.length - 1] - 1,
-    maxDD: computeSeriesMaxDrawdown(nav),
+    maxLoss: Math.min(...nav.map((value) => value - 1)),
     contributions: contributionDays,
   };
 }
@@ -114,7 +102,7 @@ function changeClass(up: boolean) {
 function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   if (val.includes(" ")) {
     const [d, time] = val.split(" ");
-    return period === "1D" ? time : d.slice(5); // 1D → HH:MM, 5D → MM-DD
+    return period === "1D" ? time : d.slice(5);
   }
   if (period === "5Y" || period === "ALL") return val.slice(0, 7); // YYYY-MM
   return val.slice(5); // MM-DD
@@ -322,9 +310,9 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
                 </b>
               </span>
               <span className="text-muted-foreground">
-                每日定投最大回撤{" "}
-                <b className={cn("tabular-nums", dailyDca.maxDD < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
-                  {(dailyDca.maxDD * 100).toFixed(1)}%
+                每日定投最大亏损{" "}
+                <b className={cn("tabular-nums", dailyDca.maxLoss < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+                  {(dailyDca.maxLoss * 100).toFixed(1)}%
                 </b>
                 <span className="ml-1 text-muted-foreground/70">({dailyDca.contributions} 次)</span>
               </span>
