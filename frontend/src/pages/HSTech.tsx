@@ -1,13 +1,14 @@
 import React from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Cpu, RefreshCw, Loader2, BookOpen, ExternalLink, Sparkles, ChevronDown, ChevronUp, Newspaper, TrendingUp } from "lucide-react";
-import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type TradeSignal, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote } from "@/lib/api";
+import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type TradeSignal, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote, type SmartTResponse } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { ForecastChart } from "@/components/charts/ForecastChart";
 import { CalibrationChart } from "@/components/charts/CalibrationChart";
 import { StrategyEquityChart } from "@/components/charts/StrategyEquityChart";
 import { QuintileChart } from "@/components/charts/QuintileChart";
+import { SmartTChart } from "@/components/charts/SmartTChart";
 import { useSSE } from "@/hooks/useSSE";
 import { cn } from "@/lib/utils";
 
@@ -382,6 +383,125 @@ function StrategySection({ market, code, context }: { market: "hk"; code: string
             </div>
           ) : data?.error ? (
             <p className="text-xs text-muted-foreground py-4">历史数据不足，无法回测。</p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SmartTSection() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<SmartTResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback((refresh = false) => {
+    setLoading(true);
+    setError(null);
+    api.getHSTechSmartT("ALL", refresh)
+      .then(setData)
+      .catch((e) => setError(e?.message || "智能做T回测失败"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (open && !data && !loading) load(false);
+  }, [open, data, loading, load]);
+
+  const signal = data?.current_signal;
+  const summary = data?.summary;
+  const smart = data?.metrics.smart_t;
+  const buyHold = data?.metrics.buy_and_hold;
+  const recentEvents = data?.events.slice(-8).reverse() || [];
+
+  return (
+    <div className="mt-3 border-t pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          智能做T策略（被套降成本）
+        </button>
+        {open && data && (
+          <button
+            onClick={() => load(true)}
+            disabled={loading}
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+            重新计算
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-3">
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-6 justify-center">
+              <Loader2 className="h-4 w-4 animate-spin" /> 智能做T回测中…首次可能较久
+            </div>
+          ) : error ? (
+            <p className="text-xs text-red-500">{error}</p>
+          ) : data ? (
+            <div className="space-y-3">
+              {signal && (
+                <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-semibold text-foreground">当前建议：{signal.action}</span>
+                    <span className="text-muted-foreground">价格 {signal.price.toFixed(3)}</span>
+                    <span className="text-muted-foreground">有效成本 {signal.effective_cost.toFixed(3)}</span>
+                    <span className="text-muted-foreground">仓位 {pct(signal.position_ratio)}</span>
+                    <span className="text-muted-foreground">现金 {pct(signal.cash_ratio)}</span>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">原因：{signal.reason}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <Stat label="智能做T收益" value={fmtRet(smart?.total_return)} tone={smart?.total_return != null && smart.total_return >= 0 ? "good" : "bad"} />
+                <Stat label="买入持有收益" value={fmtRet(buyHold?.total_return)} />
+                <Stat label="智能做T最大回撤" value={fmtRet(smart?.max_drawdown)} tone="bad" />
+                <Stat label="买入持有最大回撤" value={fmtRet(buyHold?.max_drawdown)} tone="bad" />
+                <Stat label="有效成本降低" value={fmtRet(summary?.cost_reduction)} hint="负数代表成本下降" tone={summary?.cost_reduction != null && summary.cost_reduction < 0 ? "good" : "neutral"} />
+                <Stat label="已实现价差" value={summary ? summary.realized_profit.toFixed(4) : "—"} tone={summary?.realized_profit != null && summary.realized_profit >= 0 ? "good" : "bad"} />
+                <Stat label="卖出胜率" value={pct(summary?.win_rate)} />
+                <Stat label="交易次数" value={summary?.trade_count?.toString() ?? "—"} hint={`卖出 ${summary?.sell_count ?? 0} 次`} />
+              </div>
+
+              <div>
+                <p className="text-[11px] text-muted-foreground mb-1">净值曲线（初始资金归一）</p>
+                <SmartTChart data={data} />
+              </div>
+
+              {recentEvents.length > 0 && (
+                <div className="overflow-x-auto rounded-xl border">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/30 text-muted-foreground text-left">
+                        <th className="px-3 py-2 font-medium">日期</th>
+                        <th className="px-3 py-2 font-medium">动作</th>
+                        <th className="px-3 py-2 font-medium text-right">价格</th>
+                        <th className="px-3 py-2 font-medium text-right">盈亏</th>
+                        <th className="px-3 py-2 font-medium text-right">有效成本</th>
+                        <th className="px-3 py-2 font-medium">原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentEvents.map((event, idx) => (
+                        <tr key={`${event.date}-${event.action}-${idx}`} className="border-b last:border-b-0">
+                          <td className="px-3 py-2 tabular-nums">{event.date}</td>
+                          <td className="px-3 py-2 font-medium">{event.action}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{event.price.toFixed(3)}</td>
+                          <td className={cn("px-3 py-2 text-right tabular-nums", event.pnl >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>{event.pnl.toFixed(4)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{event.effective_cost.toFixed(3)}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{event.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           ) : null}
         </div>
       )}
@@ -1353,6 +1473,7 @@ export function HSTech() {
               <ForecastChart data={forecast} height={300} trades={trades.length > 0 ? trades : undefined} />
               <CalibrationSection market={HSTECH_MARKET} code={HSTECH_CODE} context={512} />
               <StrategySection market={HSTECH_MARKET} code={HSTECH_CODE} context={512} />
+              <SmartTSection />
               <CurrentPortfolioSection />
               <QuintileSection />
               <WalkForwardSection />

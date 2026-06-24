@@ -22,6 +22,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Forecast and scan result caching.** Added 48-hour disk caching for TimesFM
   forecast charts, 24-hour caching for Q1/Q2 portfolio views, and result caching
   for expensive quintile / walk-forward / benchmark scans.
+- **HSTECH smart T strategy.** Added a default-collapsed `智能做T策略`
+  backtest panel for trapped-position cost reduction, with current signal,
+  cost-basis metrics, realized spread, win rate, trade log, and equity curve.
 
 ### Changed
 - **HSTECH API routing.** Split the API server surface into focused routers for
