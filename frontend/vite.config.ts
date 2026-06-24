@@ -47,6 +47,9 @@ export default defineConfig(({ mode }) => {
         "/market-indices": apiProxy,
         "/watchlist": apiProxy,
         "^/scan/": apiProxy,
+        "^/research/": apiProxy,
+        "^/forecast/": apiProxy,
+        "^/hstech/": apiProxy,
       },
     },
     build: {

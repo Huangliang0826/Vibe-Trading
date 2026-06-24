@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -80,6 +81,282 @@ def eastmoney_reports(code: str, max_pages: int = 5) -> list[dict]:
         if page >= (d.get("TotalPage", 1) or 1):
             break
     return all_records
+
+
+# 所属环节关键词 → 标签。顺序即优先级（标题命中多个时取第一个）。
+_SEGMENT_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("灵巧手", ("灵巧手", "灵巧 手", "机械手")),
+    ("减速器", ("谐波减速", "减速器", "减速机", "RV减速")),
+    ("丝杠", ("丝杠", "丝杆", "滚柱", "滚珠丝")),
+    ("执行器", ("执行器", "电缸", "线性执行")),
+    ("机器人", ("人形机器人", "机器人", "具身智能")),
+]
+
+
+def _classify_segment(title: str) -> Optional[str]:
+    """Map a report title to a robot-supply-chain segment label, or None."""
+    for label, kws in _SEGMENT_KEYWORDS:
+        if any(kw in title for kw in kws):
+            return label
+    return None
+
+
+def eastmoney_industry_reports(
+    begin_time: str,
+    end_time: str,
+    keywords: Optional[list[str]] = None,
+    max_pages: int = 30,
+    page_size: int = 100,
+) -> list[dict]:
+    """东财行业研报列表 (qType=1, 不传个股代码)."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for page in range(1, max_pages + 1):
+        params = {
+            "industryCode": "*", "pageSize": str(page_size), "industry": "*",
+            "rating": "*", "ratingChange": "*",
+            "beginTime": begin_time, "endTime": end_time,
+            "pageNo": str(page), "fields": "", "qType": "1",
+            "orgCode": "", "code": "", "rcode": "",
+            "p": str(page), "pageNum": str(page), "pageNumber": str(page),
+        }
+        try:
+            r = em_get(_REPORT_API, params=params,
+                       headers={"Referer": "https://data.eastmoney.com/"}, timeout=30)
+            d = r.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("a_stock_data industry reports failed p%d: %s", page, exc)
+            break
+        rows = d.get("data") or []
+        if not rows:
+            break
+        for row in rows:
+            title = (row.get("title") or "").strip()
+            segment = _classify_segment(title)
+            if segment is None:
+                continue
+            if keywords and not any(kw in title for kw in keywords):
+                continue
+            info_code = row.get("infoCode") or ""
+            if info_code in seen:
+                continue
+            seen.add(info_code)
+            url = (
+                f"https://data.eastmoney.com/report/info/{info_code}.html"
+                if info_code else ""
+            )
+            out.append({
+                "date": (row.get("publishDate") or "")[:10],
+                "org": row.get("orgSName") or row.get("orgName") or "",
+                "title": title,
+                "segment": segment,
+                "url": url,
+                "source": "东财",
+            })
+        if page >= (d.get("TotalPage", 1) or 1):
+            break
+    out.sort(key=lambda x: x["date"], reverse=True)
+    return out
+
+
+_IWENCAI_QUERIES: list[tuple[str, str]] = [
+    ("人形机器人 行业 研究报告", "机器人"),
+    ("谐波减速器 减速器 研究报告", "减速器"),
+    ("行星滚柱丝杠 滚珠丝杠 研究报告", "丝杠"),
+    ("机器人 执行器 研究报告", "执行器"),
+    ("灵巧手 研究报告", "灵巧手"),
+]
+
+
+def iwencai_search_reports(
+    query: str,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    timeout: int = 30,
+) -> dict:
+    """同花顺问财研报搜索；未配置网关时返回空错误对象。"""
+    api_key = api_key or os.environ.get("IWENCAI_API_KEY", "")
+    base = base_url or os.environ.get("IWENCAI_BASE_URL", "")
+    if not api_key:
+        return {"error": "no_api_key"}
+    if not base:
+        return {"error": "no_base_url"}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    payload = {"channels": ["report"], "app_id": "AIME_SKILL", "query": query}
+    try:
+        r = requests.post(base.rstrip("/") + "/v1/comprehensive/search",
+                          headers=headers, json=payload, timeout=timeout)
+        return r.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("iwencai report search failed for %r: %s", query, exc)
+        return {"error": str(exc)}
+
+
+def iwencai_industry_reports(
+    begin_time: str,
+    end_time: str,
+    queries: Optional[list[tuple[str, str]]] = None,
+    api_key: Optional[str] = None,
+) -> list[dict]:
+    """问财研报，按产业链方向搜集并归类到所属环节。"""
+    queries = queries or _IWENCAI_QUERIES
+    api_key = api_key or os.environ.get("IWENCAI_API_KEY", "")
+    if not api_key:
+        logger.info("iwencai_industry_reports skipped: IWENCAI_API_KEY unset")
+        return []
+
+    seen_titles: set[str] = set()
+    out: list[dict] = []
+    for query, fallback_seg in queries:
+        resp = iwencai_search_reports(query, api_key=api_key)
+        if not isinstance(resp, dict) or resp.get("error"):
+            continue
+        for item in resp.get("data") or []:
+            title = (item.get("title") or "").strip()
+            if not title:
+                continue
+            date = (item.get("publish_date") or "")[:10]
+            if date and not (begin_time <= date <= end_time):
+                continue
+            key = re.sub(r"\s+", "", title)
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            segment = _classify_segment(title) or fallback_seg
+            out.append({
+                "date": date,
+                "org": (item.get("extra") or {}).get("organization") or "",
+                "title": title,
+                "segment": segment,
+                "url": item.get("url") or "",
+                "source": "问财",
+            })
+    out.sort(key=lambda x: x["date"], reverse=True)
+    return out
+
+
+def collect_industry_reports(
+    begin_time: str,
+    end_time: str,
+    max_pages: int = 50,
+    api_key: Optional[str] = None,
+) -> list[dict]:
+    """合并东财(qType=1)与问财研报，按标题去重，按日期倒序。"""
+    em = eastmoney_industry_reports(begin_time, end_time, max_pages=max_pages)
+    iwc = iwencai_industry_reports(begin_time, end_time, api_key=api_key)
+    by_title: dict[str, dict] = {}
+    for rec in em + iwc:
+        key = re.sub(r"\s+", "", rec["title"])
+        if key not in by_title:
+            by_title[key] = rec
+    merged = list(by_title.values())
+    merged.sort(key=lambda x: x["date"], reverse=True)
+    return merged
+
+
+# ── HSTECH (恒生科技) report collection ─────────────────────────────────────
+
+_HSTECH_SEGMENT_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("恒生科技", ("恒生科技", "HSTECH", "港股科技")),
+    ("港股科技", ("港股互联网", "中概互联", "港股TMT")),
+    ("港股策略", ("港股策略", "港股配置", "南向资金")),
+]
+
+
+def _classify_hstech_segment(title: str) -> Optional[str]:
+    for label, kws in _HSTECH_SEGMENT_KEYWORDS:
+        if any(kw in title for kw in kws):
+            return label
+    return None
+
+
+def eastmoney_hstech_reports(
+    begin_time: str,
+    end_time: str,
+    max_pages: int = 30,
+    page_size: int = 100,
+) -> list[dict]:
+    """东财行业研报，筛选恒生科技/港股科技/互联网相关标题。"""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for page in range(1, max_pages + 1):
+        params = {
+            "industryCode": "*", "pageSize": str(page_size), "industry": "*",
+            "rating": "*", "ratingChange": "*",
+            "beginTime": begin_time, "endTime": end_time,
+            "pageNo": str(page), "fields": "", "qType": "1",
+            "orgCode": "", "code": "", "rcode": "",
+            "p": str(page), "pageNum": str(page), "pageNumber": str(page),
+        }
+        try:
+            r = em_get(_REPORT_API, params=params,
+                       headers={"Referer": "https://data.eastmoney.com/"}, timeout=30)
+            d = r.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hstech reports failed p%d: %s", page, exc)
+            break
+        rows = d.get("data") or []
+        if not rows:
+            break
+        for row in rows:
+            title = (row.get("title") or "").strip()
+            segment = _classify_hstech_segment(title)
+            if segment is None:
+                continue
+            info_code = row.get("infoCode") or ""
+            if info_code in seen:
+                continue
+            seen.add(info_code)
+            url = (
+                f"https://data.eastmoney.com/report/info/{info_code}.html"
+                if info_code else ""
+            )
+            out.append({
+                "date": (row.get("publishDate") or "")[:10],
+                "org": row.get("orgSName") or row.get("orgName") or "",
+                "title": title,
+                "segment": segment,
+                "url": url,
+                "source": "东财",
+            })
+        if page >= (d.get("TotalPage", 1) or 1):
+            break
+    out.sort(key=lambda x: x["date"], reverse=True)
+    return out
+
+
+_IWENCAI_HSTECH_QUERIES: list[tuple[str, str]] = [
+    ("恒生科技指数 行业 研究报告", "恒生科技"),
+    ("港股科技 互联网 研究报告", "港股科技"),
+    ("港股策略 科技 研究报告", "港股策略"),
+]
+
+
+def collect_hstech_reports(
+    begin_time: str,
+    end_time: str,
+    max_pages: int = 30,
+    api_key: Optional[str] = None,
+) -> list[dict]:
+    """合并东财+问财恒生科技相关研报，按标题去重，按日期倒序。"""
+    em = eastmoney_hstech_reports(begin_time, end_time, max_pages=max_pages)
+    iwc = iwencai_industry_reports(
+        begin_time, end_time,
+        queries=_IWENCAI_HSTECH_QUERIES,
+        api_key=api_key,
+    )
+    for rec in iwc:
+        seg = _classify_hstech_segment(rec["title"])
+        if seg:
+            rec["segment"] = seg
+    by_title: dict[str, dict] = {}
+    for rec in em + iwc:
+        key = re.sub(r"\s+", "", rec["title"])
+        if key not in by_title:
+            by_title[key] = rec
+    merged = list(by_title.values())
+    merged.sort(key=lambda x: x["date"], reverse=True)
+    return merged
 
 
 def ths_eps_forecast(code: str) -> pd.DataFrame:

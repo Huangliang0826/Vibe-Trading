@@ -1,8 +1,7 @@
 import { Suspense, lazy, type ComponentType } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 
-const Home = lazy(() => import("@/pages/Home").then((m) => ({ default: m.Home })));
 const Agent = lazy(() => import("@/pages/Agent").then((m) => ({ default: m.Agent })));
 const RunDetail = lazy(() =>
   import("@/pages/RunDetail").then((m) => ({ default: m.RunDetail })),
@@ -25,8 +24,11 @@ const Scanner = lazy(() =>
 const Overview = lazy(() =>
   import("@/pages/Overview").then((m) => ({ default: m.Overview })),
 );
-const HumanoidRobot = lazy(() =>
-  import("@/pages/HumanoidRobot").then((m) => ({ default: m.HumanoidRobot })),
+const Forecast = lazy(() =>
+  import("@/pages/Forecast").then((m) => ({ default: m.Forecast })),
+);
+const HSTech = lazy(() =>
+  import("@/pages/HSTech").then((m) => ({ default: m.HSTech })),
 );
 
 function PageLoader() {
@@ -50,14 +52,16 @@ export const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: "/overview", element: wrap(Overview) },
-      { path: "/humanoid-robot", element: wrap(HumanoidRobot) },
-      { path: "/", element: wrap(Home) },
+
+      { path: "/", element: <Navigate to="/overview" replace /> },
       { path: "/agent", element: wrap(Agent) },
       { path: "/settings", element: wrap(Settings) },
       { path: "/runs/:runId", element: wrap(RunDetail) },
       { path: "/compare", element: wrap(Compare) },
       { path: "/correlation", element: wrap(Correlation) },
       { path: "/scanner", element: wrap(Scanner) },
+      { path: "/forecast", element: wrap(Forecast) },
+      { path: "/hstech", element: wrap(HSTech) },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/compare", element: wrap(AlphaZoo) },

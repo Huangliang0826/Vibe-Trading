@@ -6,6 +6,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Forecast and HSTECH strategy panels.** Restored the trend forecast page,
+  HSTECH embedded forecast panel, and the smart T research panel for
+  trapped-position low-buy/high-sell cost reduction.
 
 ### Changed
 

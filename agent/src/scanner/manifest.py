@@ -19,7 +19,9 @@ DEFAULT_THRESHOLD = 3.0
 StrictRunner = Callable[..., dict[str, Any]]
 
 
-def default_manifest_path() -> Path:
+def default_manifest_path(universe: str | None = None) -> Path:
+    if universe and universe != "sp500":
+        return Path.home() / ".vibe-trading" / "scans" / f"factor_whitelist_{universe}.json"
     return Path.home() / ".vibe-trading" / "scans" / "factor_whitelist.json"
 
 
@@ -95,9 +97,9 @@ def build_factor_manifest(
     return manifest
 
 
-def load_factor_manifest(path: Path | None = None) -> dict[str, Any]:
+def load_factor_manifest(path: Path | None = None, *, universe: str | None = None) -> dict[str, Any]:
     """Load the manifest, with an actionable error when it's absent."""
-    p = Path(path) if path is not None else default_manifest_path()
+    p = Path(path) if path is not None else default_manifest_path(universe)
     if not p.is_file():
         raise FileNotFoundError(
             f"factor whitelist not found at {p}; build it with "

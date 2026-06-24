@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
@@ -23,6 +23,31 @@ function formatValue(metric: ValuationMetric, v: number): string {
   return v.toFixed(2);
 }
 
+function computeStats(points: ValuationPoint[], metric: ValuationMetric) {
+  if (points.length < 2) return null;
+  const current = points[points.length - 1].value;
+  const values = metric === "mktcap"
+    ? points.map((p) => p.value)
+    : points.map((p) => p.value).filter((v) => v > 0 && v <= 200);
+  if (values.length < 2) return null;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  const belowCount = values.filter((v) => v < current).length;
+  const percentile = (belowCount / (values.length - 1)) * 100;
+  return { max, min, median, percentile };
+}
+
+const PERIOD_LABEL: Record<ValuationPeriod, string> = {
+  "1Y": "近1年",
+  "3Y": "近3年",
+  "5Y": "近5年",
+  "10Y": "近10年",
+  "ALL": "全部",
+};
+
 interface Props {
   points: ValuationPoint[];
   metric: ValuationMetric;
@@ -41,6 +66,8 @@ export function ValuationChart({ points, metric, period, onPeriodChange, loading
   const lastVal = hasData ? points[points.length - 1].value : 0;
   const pctChange = firstVal ? ((lastVal - firstVal) / firstVal) * 100 : 0;
   const up = lastVal - firstVal >= 0;
+
+  const stats = useMemo(() => computeStats(points, metric), [points, metric]);
 
   useEffect(() => {
     if (!ref.current || points.length < 2) return;
@@ -97,6 +124,16 @@ export function ValuationChart({ points, metric, period, onPeriodChange, loading
               ],
             },
           },
+          markLine: stats ? {
+            silent: true,
+            symbol: "none",
+            label: { fontSize: 9, position: "insideEndTop" },
+            data: [
+              { yAxis: stats.max, lineStyle: { color: "#ef4444", type: "dashed", width: 1 }, label: { formatter: `最高 ${formatValue(metric, stats.max)}`, color: "#ef4444" } },
+              { yAxis: stats.min, lineStyle: { color: "#22c55e", type: "dashed", width: 1 }, label: { formatter: `最低 ${formatValue(metric, stats.min)}`, color: "#22c55e" } },
+              { yAxis: stats.median, lineStyle: { color: "#f59e0b", type: "dashed", width: 1 }, label: { formatter: `中位数 ${formatValue(metric, stats.median)}`, color: "#f59e0b" } },
+            ],
+          } : undefined,
         },
       ],
       tooltip: {
@@ -158,6 +195,25 @@ export function ValuationChart({ points, metric, period, onPeriodChange, loading
           ))}
         </div>
       </div>
+
+      {/* Stats row */}
+      {hasData && !loading && stats && (
+        <div className="flex items-center gap-4 flex-wrap text-xs tabular-nums">
+          <span className="text-red-500 dark:text-red-400">
+            最高 <b>{formatValue(metric, stats.max)}</b>
+          </span>
+          <span className="text-emerald-600 dark:text-emerald-400">
+            最低 <b>{formatValue(metric, stats.min)}</b>
+          </span>
+          <span className="text-amber-500 dark:text-amber-400">
+            中位数 <b>{formatValue(metric, stats.median)}</b>
+          </span>
+          <span className="text-foreground">
+            百分位 <b>{stats.percentile.toFixed(1)}%</b>
+            <span className="text-muted-foreground ml-0.5">({PERIOD_LABEL[period]})</span>
+          </span>
+        </div>
+      )}
 
       {/* Chart area — distinct keys so React never reuses one <div> as another
           (a reused node leaves a stale ECharts instance attached). */}

@@ -37,10 +37,13 @@ function saveList(key: string, list: string[]) {
 
 // ── IndexCard ─────────────────────────────────────────────────────────────
 
-function IndexCard({ idx }: { idx: MarketIndex }) {
+function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
   const color = changeColor(idx.change_pct);
   return (
-    <div className="rounded-2xl border bg-card p-4 flex flex-col gap-1 shadow-sm">
+    <div className={cn(
+      "rounded-2xl border bg-card p-4 flex flex-col gap-1 shadow-sm transition-colors duration-700",
+      flash && "bg-primary/5 border-primary/20"
+    )}>
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">{idx.market}</span>
         {idx.change_pct > 0
@@ -74,7 +77,36 @@ function SkeletonCard() {
   );
 }
 
+// ── Market status ────────────────────────────────────────────────────────
+
+function getMarketStatus(market: "A股" | "港股" | "美股"): { open: boolean; label: string } {
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const offsetH = market === "美股" ? -4 : 8; // ET for US, CST for CN/HK
+  const local = new Date(utc + offsetH * 3600000);
+  const h = local.getHours(), m = local.getMinutes(), t = h * 60 + m;
+  const day = local.getDay();
+  const weekday = day >= 1 && day <= 5;
+
+  if (market === "A股") {
+    const open = weekday && ((t >= 570 && t < 690) || (t >= 780 && t < 900));
+    return { open, label: open ? "交易中" : "已收盘" };
+  }
+  if (market === "港股") {
+    const open = weekday && ((t >= 570 && t < 720) || (t >= 780 && t < 960));
+    return { open, label: open ? "交易中" : "已收盘" };
+  }
+  // 美股
+  const open = weekday && t >= 570 && t < 960;
+  return { open, label: open ? "交易中" : "已收盘" };
+}
+
 // ── WatchlistRow ─────────────────────────────────────────────────────────
+
+function scrollToChart(market: WatchlistMarket, code: string) {
+  const el = document.getElementById(`chart-${market}-${code.toUpperCase()}`);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
 function WatchlistRow({
   quote,
@@ -90,12 +122,15 @@ function WatchlistRow({
 
   return (
     <div className="group flex items-center justify-between px-3 py-2.5 rounded-xl border bg-card hover:bg-muted/30 transition-colors">
-      <div className="flex flex-col min-w-0">
+      <button
+        className="flex flex-col min-w-0 text-left cursor-pointer hover:opacity-70 transition-opacity"
+        onClick={() => scrollToChart(market, quote.code)}
+      >
         <span className="text-sm font-medium text-foreground leading-tight truncate">
           {quote.name !== quote.code ? quote.name : quote.code}
         </span>
         <span className="text-[11px] text-muted-foreground font-mono">{quote.code}</span>
-      </div>
+      </button>
 
       <div className="flex items-center gap-3 shrink-0">
         {hasData ? (
@@ -311,7 +346,7 @@ const VIEW_TABS: { key: CardView; label: string }[] = [
   { key: "mktcap", label: "市值" },
 ];
 
-function StockChartCard({ code, market }: { code: string; market: WatchlistMarket }) {
+function StockChartCard({ code, market, id }: { code: string; market: WatchlistMarket; id?: string }) {
   const [view, setView] = useState<CardView>("price");
   const [name, setName] = useState(code);
 
@@ -363,7 +398,7 @@ function StockChartCard({ code, market }: { code: string; market: WatchlistMarke
   }, [code, market, view, valPeriod]);
 
   return (
-    <div className="rounded-2xl border bg-card p-4">
+    <div id={id} className="rounded-2xl border bg-card p-4">
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <span className="text-sm font-semibold text-foreground">
           {name && name !== code ? name : ""}
@@ -395,6 +430,7 @@ function StockChartCard({ code, market }: { code: string; market: WatchlistMarke
             onPeriodChange={setPeriod}
             loading={loading}
             height={260}
+            showRisk
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>
@@ -420,6 +456,7 @@ export function Overview() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState(false);
 
   // Watchlist codes (lifted from the columns) drive one chart per stock.
   const [hkCodes, setHkCodes] = useState<string[]>(() => loadList("watchlist-hk"));
@@ -432,6 +469,8 @@ export function Overview() {
       const data = await api.getMarketIndices();
       setIndices(data);
       setLastUpdated(new Date());
+      setFlash(true);
+      setTimeout(() => setFlash(false), 700);
     } catch (e) {
       setError(e instanceof Error ? e.message : "获取指数行情失败");
     } finally {
@@ -483,31 +522,46 @@ export function Overview() {
 
       {/* Index cards — A-share */}
       <section className="space-y-2">
-        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">A 股指数</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">A 股指数</h2>
+          {!loading && (() => { const s = getMarketStatus("A股"); return (
+            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", s.open ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{s.label}</span>
+          ); })()}
+        </div>
         <div className="grid grid-cols-3 gap-3">
           {loading
             ? [0,1,2].map((i) => <SkeletonCard key={i} />)
-            : cn_indices.map((idx) => <IndexCard key={idx.code} idx={idx} />)}
+            : cn_indices.map((idx) => <IndexCard key={idx.code} idx={idx} flash={flash} />)}
         </div>
       </section>
 
       {/* Index cards — HK */}
       <section className="space-y-2">
-        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">港股指数</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">港股指数</h2>
+          {!loading && (() => { const s = getMarketStatus("港股"); return (
+            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", s.open ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{s.label}</span>
+          ); })()}
+        </div>
         <div className="grid grid-cols-3 gap-3">
           {loading
             ? [0,1,2].map((i) => <SkeletonCard key={i} />)
-            : hk_indices.map((idx) => <IndexCard key={idx.code} idx={idx} />)}
+            : hk_indices.map((idx) => <IndexCard key={idx.code} idx={idx} flash={flash} />)}
         </div>
       </section>
 
       {/* Index cards — US */}
       <section className="space-y-2">
-        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">美股指数</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">美股指数</h2>
+          {!loading && (() => { const s = getMarketStatus("美股"); return (
+            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", s.open ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{s.label}</span>
+          ); })()}
+        </div>
         <div className="grid grid-cols-3 gap-3">
           {loading
             ? [0,1,2].map((i) => <SkeletonCard key={i} />)
-            : us_indices.map((idx) => <IndexCard key={idx.code} idx={idx} />)}
+            : us_indices.map((idx) => <IndexCard key={idx.code} idx={idx} flash={flash} />)}
         </div>
       </section>
 
@@ -536,10 +590,10 @@ export function Overview() {
         {hkCodes.length + usCodes.length > 0 ? (
           <div className="grid grid-cols-1 gap-4">
             {hkCodes.map((code) => (
-              <StockChartCard key={`hk-${code}`} code={code.toUpperCase()} market="hk" />
+              <StockChartCard key={`hk-${code}`} id={`chart-hk-${code.toUpperCase()}`} code={code.toUpperCase()} market="hk" />
             ))}
             {usCodes.map((code) => (
-              <StockChartCard key={`us-${code}`} code={code.toUpperCase()} market="us" />
+              <StockChartCard key={`us-${code}`} id={`chart-us-${code.toUpperCase()}`} code={code.toUpperCase()} market="us" />
             ))}
           </div>
         ) : (

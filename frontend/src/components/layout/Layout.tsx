@@ -1,6 +1,6 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, PersonStanding, Radar } from "lucide-react";
+import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, Radar, LineChart, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -12,13 +12,13 @@ const APP_VERSION = "v0.1.9";
 
 const NAV = [
   { to: "/overview", icon: LayoutDashboard, label: "总览" },
-  { to: "/humanoid-robot", icon: PersonStanding, label: "人形机器人" },
-  { to: "/", icon: BarChart3, label: "首页" },
-  { to: "/agent", icon: Bot, label: "智能体" },
   { to: "/scanner", icon: Radar, label: "机会扫描" },
+  { to: "/forecast", icon: LineChart, label: "走势预测" },
+  { to: "/hstech", icon: Cpu, label: "恒生科技" },
+
+  { to: "/agent", icon: Bot, label: "智能体" },
   { to: "/alpha-zoo", icon: Layers, label: "Alpha 因子库" },
   { to: "/settings", icon: Settings, label: "设置" },
-  { to: "/correlation", icon: BarChart3, label: "相关性矩阵" },
 ];
 
 export function Layout() {
@@ -80,7 +80,7 @@ export function Layout() {
       )}>
         {/* Brand */}
         <div className={cn("border-b", collapsed ? "p-2 flex justify-center" : "p-4")}>
-          <Link to="/" className={cn("flex items-center font-bold text-base tracking-tight", collapsed ? "justify-center" : "gap-2")}>
+          <Link to="/overview" className={cn("flex items-center font-bold text-base tracking-tight", collapsed ? "justify-center" : "gap-2")}>
             <BarChart3 className="h-5 w-5 text-primary shrink-0" />
             {!collapsed && "黄梁的看板"}
           </Link>

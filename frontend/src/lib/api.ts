@@ -50,7 +50,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw await errorFromResponse(res);
   }
   const text = await res.text();
-  return text ? JSON.parse(text) : ({} as T);
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const preview = text.replace(/\s+/g, " ").slice(0, 160);
+    throw new ApiError(`API returned a non-JSON response: ${preview || "empty response"}`, res.status);
+  }
 }
 
 export interface UploadResult {
@@ -147,6 +153,34 @@ export const api = {
   getScanByDate: (asof: string) => request<any>(`/scan/history/${asof}`),
   getScanTracking: (asof: string) => request<any>(`/scan/tracking/${asof}`),
   getScanCalibration: () => request<any>("/scan/calibration"),
+  getScanQuintile: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30, refined = false) =>
+    request<QuintileResponse>(`/scan/quintile?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}&refined=${refined}`),
+  getScanWalkforward: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30) =>
+    request<WalkForwardResponse>(`/scan/quintile/walkforward?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}`),
+
+  // 行业研报库
+  getIndustryReports: () =>
+    request<IndustryReportsResponse>("/research/industry-reports"),
+
+  // 恒生科技研报库
+  getHSTechReports: () =>
+    request<IndustryReportsResponse>("/research/hstech-reports"),
+
+  // 恒生科技新闻
+  getHSTechNews: () =>
+    request<{ items: NewsItem[]; cached: boolean }>("/hstech/news"),
+
+  // 走势预测
+  getForecast: (market: string, code: string, months = 6, context = 0, nocache = 0) =>
+    request<ForecastResponse>(`/forecast/${market}/${encodeURIComponent(code)}?months=${months}&context=${context}${nocache ? "&nocache=1" : ""}`),
+  getForecastCalibration: (market: string, code: string, context = 0) =>
+    request<CalibrationResponse>(`/forecast/${market}/${encodeURIComponent(code)}/calibration?context=${context}`),
+  getForecastStrategy: (market: string, code: string, context = 0, costBps = 5) =>
+    request<StrategyResponse>(`/forecast/${market}/${encodeURIComponent(code)}/strategy?context=${context}&cost_bps=${costBps}`),
+  getStrategyRobustness: (codes: string, context = 0, costBps = 5) =>
+    request<RobustnessResponse>(`/forecast/robustness?codes=${encodeURIComponent(codes)}&context=${context}&cost_bps=${costBps}`),
+  getHSTechSmartT: (period = "ALL", refresh = false) =>
+    request<SmartTResponse>(`/hstech/smart-t?period=${period}${refresh ? "&refresh=true" : ""}`),
 
   // Alpha Zoo API
   listAlphas: (params: AlphaListParams = {}) => {
@@ -273,6 +307,58 @@ export interface WatchlistQuote {
   error?: string;
 }
 
+export interface FactorScreening {
+  id: string;
+  zoo: string;
+  ir: number;
+  mono: number;
+  q_means: number[];
+  kept: boolean;
+}
+
+export interface QuintileResponse {
+  rebal_days: number;
+  cost_bps: number;
+  n_periods: number;
+  quintile_returns: Record<string, number[]>;
+  long_short: number[];
+  dates: string[];
+  summary: Record<string, { total_return: number; annual_return: number; annual_vol: number; sharpe: number; max_drawdown: number }>;
+  spread_summary: { total_return: number; annual_return: number; annual_vol: number; sharpe: number; max_drawdown: number };
+  long_q?: string;
+  short_q?: string;
+  screening?: FactorScreening[];
+}
+
+export interface WalkForwardFold {
+  fold: number;
+  is_start: string;
+  is_end: string;
+  oos_start: string;
+  oos_end: string;
+  n_factors_kept: number;
+  factors_kept: string[];
+  oos_ls_return: number;
+  oos_periods?: number;
+}
+
+export interface WalkForwardResponse {
+  rebal_days: number;
+  cost_bps: number;
+  is_days: number;
+  oos_days: number;
+  n_folds: number;
+  folds: WalkForwardFold[];
+  quintile_returns: Record<string, number[]>;
+  long_short: number[];
+  dates: string[];
+  n_periods: number;
+  summary: Record<string, { total_return: number; annual_return: number; annual_vol: number; sharpe: number; max_drawdown: number }>;
+  spread_summary: { total_return: number; annual_return: number; annual_vol: number; sharpe: number; max_drawdown: number };
+  long_q?: string;
+  short_q?: string;
+}
+
 export interface MarketIndex {
   code: string;
   name: string;
@@ -280,6 +366,224 @@ export interface MarketIndex {
   price: number;
   change_pct: number;
   prev_close: number;
+}
+
+export interface NewsItem {
+  title: string;
+  summary: string;
+  time: string;
+  source: string;
+  url: string;
+}
+
+export interface IndustryReport {
+  date: string;
+  org: string;
+  title: string;
+  segment: string;
+  url: string;
+  source?: string;
+}
+
+export interface IndustryReportsResponse {
+  reports: IndustryReport[];
+  cached: boolean;
+  stale?: boolean;
+  error?: string;
+  begin: string;
+  end: string;
+}
+
+export interface ForecastResponse {
+  code: string;
+  name: string;
+  market: string;
+  horizon: number;
+  history: PriceHistoryBar[];
+  future_dates: string[];
+  model: { point: number[]; p10: number[]; p50: number[]; p90: number[] } | null;
+  model_available: boolean;
+  model_error?: string | null;
+  conformal_q?: number | null;
+  context_used?: number | null;
+  context_available?: number | null;
+  baselines: { random_walk: number[]; drift: number[] };
+  cached?: boolean;
+}
+
+export interface CalibrationResponse {
+  code: string;
+  name: string;
+  market: string;
+  model_available: boolean;
+  n_folds: number;
+  bt_horizon: number;
+  context_used?: number | null;
+  directional_accuracy?: { model: number | null; drift: number; n: number };
+  mae?: { model: number | null; random_walk: number | null; drift: number | null };
+  skill_vs_random_walk?: number | null;
+  interval_coverage_80?: number | null;
+  interval_score?: { model: number | null; random_walk: number | null };
+  interval_score_skill?: number | null;
+  mean_interval_width_pct?: number | null;
+  conformal?: {
+    target: number;
+    coverage_raw: number;
+    coverage_conformal: number;
+    width_ratio: number | null;
+  } | null;
+  overlay?: {
+    context_dates: string[];
+    context: number[];
+    future_dates: string[];
+    p10: number[];
+    p50: number[];
+    p90: number[];
+    realized: number[];
+    q?: number | null;
+  } | null;
+}
+
+export interface StrategyLikeMetrics {
+  total_return: number;
+  annual_return: number;
+  annual_vol: number;
+  sharpe: number;
+  max_drawdown: number;
+  calmar: number;
+}
+
+export interface StrategyMetrics {
+  total_return: number;
+  annual_return: number;
+  annual_vol: number;
+  max_drawdown: number;
+  sharpe: number;
+  win_rate: number;
+  trade_count: number;
+  excess_return: number;
+  information_ratio: number;
+  [k: string]: number;
+}
+
+export interface TradeSignal {
+  entry_date: string;
+  exit_date: string;
+  entry_price: number;
+  exit_price: number;
+  pnl_pct: number;
+  holding_bars: number;
+  exit_reason: string;
+}
+
+export interface StrategyLeg {
+  label?: string;
+  metrics: StrategyMetrics;
+  equity: [string, number][];
+  trades?: TradeSignal[];
+}
+
+export interface StrategyResponse {
+  code: string;
+  name: string;
+  market: string;
+  model_available: boolean;
+  params?: { rebalance: number; cost_bps: number; lead: number; eval_days: number; n_days: number };
+  strategies?: { band_reversion: StrategyLeg; median_trend: StrategyLeg; vol_target: StrategyLeg };
+  buy_and_hold?: StrategyLeg;
+  dca?: StrategyLeg | null;
+  beats_buy_and_hold?: boolean;
+  best_excess_return?: number;
+  vol_target_calmar_better?: boolean;
+  cached?: boolean;
+  error?: string;
+}
+
+export interface RobustnessAgg {
+  median: number | null;
+  mean: number | null;
+  pct_positive: number | null;
+}
+
+export interface RobustnessRow {
+  code: string;
+  market: string;
+  bh_return: number;
+  band_reversion_excess: number;
+  median_trend_excess: number;
+  vol_target_excess: number;
+  band_reversion_max_dd: number;
+  vol_target_max_dd: number;
+  [k: string]: number | string;
+}
+
+export interface RobustnessResponse {
+  summary: {
+    n: number;
+    per_name: RobustnessRow[];
+    excess: { band_reversion: RobustnessAgg; median_trend: RobustnessAgg; vol_target: RobustnessAgg };
+    vol_target_dd_better_pct: number | null;
+  };
+  errors: { code: string; market: string; error: string }[];
+  params: { context: number; rebalance: number; cost_bps: number };
+}
+
+export interface SmartTEvent {
+  date: string;
+  action: string;
+  price: number;
+  cash: number;
+  shares: number;
+  pnl: number;
+  effective_cost: number;
+  position_ratio: number;
+  reason: string;
+}
+
+export interface SmartTResponse {
+  code: string;
+  name: string;
+  market: string;
+  period: string;
+  params: {
+    initial_position: number;
+    core_position: number;
+    tranche: number;
+    buy_gap: number;
+    sell_rebound: number;
+    cost_take_profit: number;
+    max_trades_per_month: number;
+  };
+  current_signal: {
+    action: string;
+    reason: string;
+    suggested_cash: number;
+    price: number;
+    effective_cost: number;
+    trapped_gap: number;
+    position_ratio: number;
+    cash_ratio: number;
+    rsi: number | null;
+  };
+  summary: {
+    final_value: number;
+    cash: number;
+    shares: number;
+    realized_profit: number;
+    effective_cost: number;
+    cost_reduction: number;
+    trade_count: number;
+    sell_count: number;
+    win_rate: number;
+  };
+  metrics: {
+    smart_t: StrategyLikeMetrics;
+    buy_and_hold: StrategyLikeMetrics;
+  };
+  smart_t: { label: string; equity: [string, number][] };
+  buy_and_hold: { label: string; equity: [string, number][] };
+  events: SmartTEvent[];
+  cached?: boolean;
 }
 
 // --- Swarm types ---

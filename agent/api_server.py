@@ -1509,6 +1509,118 @@ async def get_market_indices():
     return cn + hk + us
 
 
+_INDUSTRY_REPORTS_CACHE: dict[str, tuple[float, list]] = {}
+_INDUSTRY_REPORTS_TTL = 6 * 3600
+_HSTECH_REPORTS_CACHE: dict[str, tuple[float, list]] = {}
+
+
+@app.get("/research/industry-reports")
+async def get_industry_reports(months: int = 6, max_pages: int = 50):
+    """机器人产业链行业研报 (东财 qType=1, 不传个股代码)."""
+    import datetime as _dt
+    import time as _time
+
+    end = _dt.date.today()
+    begin = end - _dt.timedelta(days=months * 31)
+    begin_s, end_s = begin.isoformat(), end.isoformat()
+    cache_key = f"{begin_s}:{end_s}:{max_pages}"
+
+    cached = _INDUSTRY_REPORTS_CACHE.get(cache_key)
+    if cached and (_time.time() - cached[0]) < _INDUSTRY_REPORTS_TTL:
+        return {"reports": cached[1], "cached": True, "begin": begin_s, "end": end_s}
+
+    from backtest.loaders.a_stock_data_research import collect_industry_reports
+
+    try:
+        reports = await asyncio.to_thread(
+            collect_industry_reports, begin_s, end_s, max_pages
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("industry reports fetch failed: %s", exc)
+        if cached:
+            return {"reports": cached[1], "cached": True, "stale": True,
+                    "begin": begin_s, "end": end_s}
+        return {"reports": [], "error": str(exc), "begin": begin_s, "end": end_s}
+
+    _INDUSTRY_REPORTS_CACHE[cache_key] = (_time.time(), reports)
+    return {"reports": reports, "cached": False, "begin": begin_s, "end": end_s}
+
+
+@app.get("/research/hstech-reports")
+async def get_hstech_reports(months: int = 2, max_pages: int = 30):
+    """恒生科技相关行业研报（东财+问财，按恒生科技/港股科技关键词筛选）。"""
+    import datetime as _dt
+    import time as _time
+
+    end = _dt.date.today()
+    begin = end - _dt.timedelta(days=months * 31)
+    begin_s, end_s = begin.isoformat(), end.isoformat()
+    cache_key = f"hstech:{begin_s}:{end_s}:{max_pages}"
+
+    cached = _HSTECH_REPORTS_CACHE.get(cache_key)
+    if cached and (_time.time() - cached[0]) < _INDUSTRY_REPORTS_TTL:
+        return {"reports": cached[1], "cached": True, "begin": begin_s, "end": end_s}
+
+    from backtest.loaders.a_stock_data_research import collect_hstech_reports
+
+    try:
+        reports = await asyncio.to_thread(
+            collect_hstech_reports, begin_s, end_s, max_pages
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hstech reports fetch failed: %s", exc)
+        if cached:
+            return {"reports": cached[1], "cached": True, "stale": True,
+                    "begin": begin_s, "end": end_s}
+        return {"reports": [], "error": str(exc), "begin": begin_s, "end": end_s}
+
+    _HSTECH_REPORTS_CACHE[cache_key] = (_time.time(), reports)
+    return {"reports": reports, "cached": False, "begin": begin_s, "end": end_s}
+
+
+_NEWS_CACHE: dict[str, tuple[float, list]] = {}
+_NEWS_TTL = 48 * 3600
+
+
+def _fetch_hstech_news() -> list[dict]:
+    """Fetch recent news for HSTECH-related keywords via akshare."""
+    import akshare as ak
+
+    keywords = ["恒生科技", "港股科技"]
+    seen_titles: set[str] = set()
+    items: list[dict] = []
+    for kw in keywords:
+        try:
+            df = ak.stock_news_em(symbol=kw)
+            for _, row in df.iterrows():
+                title = str(row.get("新闻标题", "")).strip()
+                if not title or title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                items.append({
+                    "title": title,
+                    "summary": str(row.get("新闻内容", "")).strip()[:200],
+                    "time": str(row.get("发布时间", "")),
+                    "source": str(row.get("文章来源", "")),
+                    "url": str(row.get("新闻链接", "")),
+                })
+        except Exception:
+            continue
+    items.sort(key=lambda x: x["time"], reverse=True)
+    return items[:30]
+
+
+@app.get("/hstech/news")
+async def get_hstech_news():
+    cached = _NEWS_CACHE.get("hstech")
+    if cached and (time.time() - cached[0]) < _NEWS_TTL:
+        return {"items": cached[1], "cached": True}
+
+    items = await asyncio.to_thread(_fetch_hstech_news)
+    _NEWS_CACHE["hstech"] = (time.time(), items)
+    return {"items": items, "cached": False}
+
+
 def _fetch_hk_indices() -> list[dict]:
     """Fetch Hang Seng, HSTECH, and HSCEI quotes via akshare (Sina source)."""
     try:
@@ -2061,6 +2173,205 @@ async def get_watchlist_valuation(
         return {"code": code.strip().upper(), "market": market, "metric": metric, "period": period, "points": points}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Valuation fetch failed: {exc}")
+
+
+# ── Trend forecast + HSTECH smart strategies ────────────────────────────────
+
+_FORECAST_CACHE: dict[str, tuple[float, dict]] = {}
+_FORECAST_TTL = 48 * 3600
+_CALIB_CACHE: dict[str, tuple[float, dict]] = {}
+_CALIB_TTL = 48 * 3600
+_STRATEGY_CACHE: dict[str, tuple[float, dict]] = {}
+_STRATEGY_TTL = 24 * 3600
+_SMART_T_CACHE: dict[str, tuple[float, dict]] = {}
+_SMART_T_TTL = 24 * 3600
+
+
+@app.get("/forecast/{market}/{code}")
+async def get_forecast(
+    market: str,
+    code: str,
+    months: int = Query(6, ge=1, le=12),
+    context: int = Query(0, ge=0),
+    nocache: int = Query(0),
+):
+    """Price forecast cone with transparent baseline models."""
+    from src.forecast import service
+
+    market = market.lower()
+    horizon = max(1, min(months, 12)) * 21
+    key = f"{market}:{code.upper()}:{horizon}:{context}"
+    if not nocache:
+        cached = _FORECAST_CACHE.get(key)
+        if cached and (time.time() - cached[0]) < _FORECAST_TTL:
+            return {**cached[1], "cached": True}
+    try:
+        hist = await asyncio.to_thread(_fetch_price_history, code.strip(), "ALL", market)
+        bars = hist.get("bars", [])
+        if not bars:
+            raise HTTPException(status_code=404, detail=f"no history for {code}")
+        result = await asyncio.to_thread(
+            service.build_forecast, bars, horizon, True, context or None
+        )
+        payload = {
+            "code": code.strip().upper(),
+            "name": hist.get("name", code),
+            "market": market,
+            **result,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"forecast failed: {exc}") from exc
+    _FORECAST_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
+
+
+@app.get("/forecast/{market}/{code}/calibration")
+async def get_forecast_calibration(
+    market: str,
+    code: str,
+    bt_horizon: int = Query(63, ge=10, le=252),
+    context: int = Query(0, ge=0),
+):
+    """Walk-forward backtest: TimesFM vs naive baselines."""
+    from src.forecast import backtest
+
+    market = market.lower()
+    key = f"calib:{market}:{code.upper()}:{bt_horizon}:{context}"
+    cached = _CALIB_CACHE.get(key)
+    if cached and (time.time() - cached[0]) < _CALIB_TTL:
+        return {**cached[1], "cached": True}
+    try:
+        hist = await asyncio.to_thread(_fetch_price_history, code.strip(), "ALL", market)
+        bars = hist.get("bars", [])
+        if not bars:
+            raise HTTPException(status_code=404, detail=f"no history for {code}")
+        result = await asyncio.to_thread(
+            backtest.calibration, bars, bt_horizon, context or None
+        )
+        payload = {
+            "code": code.strip().upper(),
+            "name": hist.get("name", code),
+            "market": market,
+            **result,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"calibration failed: {exc}") from exc
+    _CALIB_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
+
+
+@app.get("/forecast/{market}/{code}/strategy")
+async def get_forecast_strategy(
+    market: str,
+    code: str,
+    context: int = Query(0, ge=0),
+    rebalance: int = Query(5, ge=1, le=63),
+    cost_bps: float = Query(5.0, ge=0, le=200),
+):
+    """Walk-forward backtest of forecast-driven strategies vs buy-and-hold."""
+    from src.forecast import strategy
+
+    market = market.lower()
+    key = f"strategy:{market}:{code.upper()}:{context}:{rebalance}:{cost_bps}"
+    cached = _STRATEGY_CACHE.get(key)
+    if cached and (time.time() - cached[0]) < _STRATEGY_TTL:
+        return {**cached[1], "cached": True}
+    try:
+        hist = await asyncio.to_thread(_fetch_price_history, code.strip(), "ALL", market)
+        bars = hist.get("bars", [])
+        if not bars:
+            raise HTTPException(status_code=404, detail=f"no history for {code}")
+        result = await asyncio.to_thread(
+            strategy.backtest_strategy, bars, context or None, rebalance, cost_bps
+        )
+        payload = {
+            "code": code.strip().upper(),
+            "name": hist.get("name", code),
+            "market": market,
+            **result,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"strategy backtest failed: {exc}") from exc
+    _STRATEGY_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
+
+
+@app.get("/forecast/robustness")
+async def get_strategy_robustness(
+    codes: str,
+    context: int = Query(0, ge=0),
+    rebalance: int = Query(5, ge=1, le=63),
+    cost_bps: float = Query(5.0, ge=0, le=200),
+):
+    """Cross-stock robustness: run forecast strategies across many names."""
+    from src.forecast import strategy
+
+    pairs = []
+    for tok in codes.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        mk, _, cd = tok.partition(":")
+        pairs.append((mk.lower(), cd if cd else mk))
+    pairs = pairs[:8]
+
+    items: list[dict] = []
+    errors: list[dict] = []
+    for mk, cd in pairs:
+        try:
+            payload = await get_forecast_strategy(
+                mk, cd, context=context, rebalance=rebalance, cost_bps=cost_bps
+            )
+            items.append(payload)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"market": mk, "code": cd, "error": str(exc)})
+
+    return {
+        "summary": strategy.summarize_robustness(items),
+        "errors": errors,
+        "params": {"context": context, "rebalance": rebalance, "cost_bps": cost_bps},
+    }
+
+
+@app.get("/hstech/smart-t")
+async def get_hstech_smart_t(
+    response: Response,
+    period: str = Query("ALL", description="1Y / 5Y / ALL"),
+    refresh: bool = Query(False),
+):
+    """Smart swing/T backtest for a trapped HSTECH ETF proxy position."""
+    from src.forecast.smart_t import run_smart_t
+
+    response.headers["Cache-Control"] = "no-store"
+    period = period.upper()
+    if period not in {"1Y", "5Y", "ALL"}:
+        raise HTTPException(status_code=400, detail="period must be one of ['1Y', '5Y', 'ALL']")
+    key = f"hstech-smart-t:{period}:v1"
+    cached = _SMART_T_CACHE.get(key)
+    if not refresh and cached and (time.time() - cached[0]) < _SMART_T_TTL:
+        return {**cached[1], "cached": True}
+    try:
+        hist = await asyncio.to_thread(_fetch_price_history, "03033", period, "hk")
+        result = await asyncio.to_thread(run_smart_t, hist.get("bars", []))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"smart T failed: {exc}") from exc
+    payload = {
+        "code": "03033",
+        "name": hist.get("name", "恒生科技指数 ETF"),
+        "market": "hk",
+        "period": period,
+        **result,
+    }
+    _SMART_T_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
 
 
 def _terminate_current_process() -> None:

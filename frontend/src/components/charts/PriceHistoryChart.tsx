@@ -13,6 +13,46 @@ interface Props {
   onPeriodChange: (p: PriceHistoryPeriod) => void;
   loading?: boolean;
   height?: number;
+  showRisk?: boolean;
+}
+
+/** Max drawdown over the displayed window + recovery time of that episode.
+ *
+ * maxDD: deepest peak-to-trough drop (negative fraction). recoveryDays: calendar
+ * days from the trough back up to the prior peak; null if not yet recovered, in
+ * which case ``sinceTroughDays`` counts days from the trough to the last bar. */
+function computeDrawdown(bars: PriceHistoryBar[]): {
+  maxDD: number; recovered: boolean; recoveryDays: number | null;
+  sincePeakDays: number; recoveredPct: number;
+} | null {
+  if (bars.length < 2) return null;
+  let peak = bars[0].close, peakIdx = 0;
+  let maxDD = 0, troughIdx = -1, ddPeakIdx = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const c = bars[i].close;
+    if (c > peak) { peak = c; peakIdx = i; }
+    const dd = peak > 0 ? c / peak - 1 : 0;
+    if (dd < maxDD) { maxDD = dd; troughIdx = i; ddPeakIdx = peakIdx; }
+  }
+  if (troughIdx < 0 || maxDD === 0) {
+    return { maxDD: 0, recovered: true, recoveryDays: 0, sincePeakDays: 0, recoveredPct: 100 };
+  }
+  const dayDiff = (a: string, b: string) =>
+    Math.round((new Date(b.slice(0, 10)).getTime() - new Date(a.slice(0, 10)).getTime()) / 86400000);
+  const peakValue = bars[ddPeakIdx].close;
+  for (let j = troughIdx + 1; j < bars.length; j++) {
+    if (bars[j].close >= peakValue) {
+      return { maxDD, recovered: true, recoveryDays: dayDiff(bars[troughIdx].date, bars[j].date), sincePeakDays: 0, recoveredPct: 100 };
+    }
+  }
+  // Not recovered: days since the PEAK (how long this drawdown has lasted) +
+  // how far back up from the trough toward the prior peak.
+  const troughValue = bars[troughIdx].close;
+  const span = peakValue - troughValue;
+  const last = bars[bars.length - 1].close;
+  const recoveredPct = span > 0 ? Math.min(Math.max((last - troughValue) / span * 100, 0), 100) : 0;
+  return { maxDD, recovered: false, recoveryDays: null,
+           sincePeakDays: dayDiff(bars[ddPeakIdx].date, bars[bars.length - 1].date), recoveredPct };
 }
 
 // Change over the displayed range — computed from the exact plotted bars so
@@ -31,7 +71,7 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   return val.slice(5); // MM-DD
 }
 
-export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300 }: Props) {
+export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
 
@@ -41,6 +81,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
   const absChange = lastClose - firstClose;
   const pctChange = firstClose ? (absChange / firstClose) * 100 : 0;
   const up = absChange >= 0;
+  const dd = showRisk && hasData ? computeDrawdown(bars) : null;
 
   useEffect(() => {
     if (!ref.current || bars.length < 2) return;
@@ -174,13 +215,12 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
         <div className="flex items-baseline gap-2">
           {hasData && !loading ? (
             <>
-              <span className={cn("text-2xl font-bold tabular-nums leading-none", changeClass(up))}>
-                {up ? "+" : ""}{pctChange.toFixed(2)}%
+              <span className="text-2xl font-bold tabular-nums leading-none text-foreground">
+                {lastClose.toFixed(2)}
               </span>
-              <span className={cn("text-sm font-medium tabular-nums", changeClass(up))}>
-                {up ? "+" : ""}{absChange.toFixed(2)}
+              <span className={cn("text-base font-medium tabular-nums text-muted-foreground")}>
+                {period} 区间涨跌：<span className={changeClass(up)}>{up ? "+" : ""}{pctChange.toFixed(2)}%</span>
               </span>
-              <span className="text-xs text-muted-foreground">区间涨跌</span>
             </>
           ) : (
             <span className="text-2xl font-bold text-muted-foreground/40 tabular-nums leading-none">—</span>
@@ -203,6 +243,28 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           ))}
         </div>
       </div>
+
+      {/* Risk metrics over the displayed window: max drawdown + recovery time */}
+      {dd && !loading && (
+        <div className="flex items-center gap-4 text-[11px] -mt-1">
+          <span className="text-muted-foreground">
+            最大回撤{" "}
+            <b className={cn("tabular-nums", dd.maxDD < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+              {(dd.maxDD * 100).toFixed(1)}%
+            </b>
+          </span>
+          <span className="text-muted-foreground">
+            回撤修复{" "}
+            {dd.maxDD === 0 ? (
+              <b className="text-foreground">—</b>
+            ) : dd.recovered ? (
+              <b className="tabular-nums text-emerald-600 dark:text-emerald-400">{dd.recoveryDays} 天</b>
+            ) : (
+              <b className="tabular-nums text-amber-600 dark:text-amber-400">暂未修复（距高点 {dd.sincePeakDays} 天 · 已恢复 {dd.recoveredPct.toFixed(0)}%）</b>
+            )}
+          </span>
+        </div>
+      )}
 
       {/* Chart area — distinct keys so React never reuses one <div> as another
           (a reused node leaves a stale ECharts instance attached). */}

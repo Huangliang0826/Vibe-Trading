@@ -264,6 +264,15 @@ export function Agent() {
   const { connect, disconnect, onStatusChange } = useSSE();
 
   const urlSessionId = searchParams.get("session");
+  const urlPrompt = searchParams.get("prompt");
+
+  useEffect(() => {
+    if (urlPrompt) {
+      setInput(urlPrompt);
+      searchParams.delete("prompt");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [urlPrompt]);
 
   /* Smart scroll — only auto-scroll when near bottom */
   const isNearBottom = useCallback(() => {

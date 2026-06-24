@@ -48,6 +48,7 @@ _SP500_CONSTITUENT_SOURCE_DATE = "2026-05-17"
 # Concurrent Tushare ``pro.daily`` fetches when building CSI300. Free tier
 # allows ~200 calls/min; 4 workers stays well under that with a 300-name list.
 _CSI300_FETCH_WORKERS = 4
+_HK_FETCH_WORKERS = 4
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +64,8 @@ _UNIVERSE_TAG = {
     "csi300": "equity_cn",
     "sp500": "equity_us",
     "btc-usdt": "crypto",
+    "hstech": "equity_hk",
+    "hkconnect": "equity_hk",
 }
 
 
@@ -91,7 +94,7 @@ def _load_universe_panel(
     with one column per instrument.
 
     Args:
-        universe: ``csi300`` | ``sp500`` | ``btc-usdt``.
+        universe: ``csi300`` | ``sp500`` | ``btc-usdt`` | ``hstech``.
         period: ``YYYY-YYYY`` or ``YYYY-MM-DD/YYYY-MM-DD``.
         use_cache: When True (default) reuse a pickle in
             ``~/.vibe-trading/cache/`` if the same universe+period was fetched
@@ -121,6 +124,10 @@ def _load_universe_panel(
         panel = _load_sp500_panel(start, end)
     elif universe == "btc-usdt":
         panel = _load_btc_panel(start, end)
+    elif universe == "hstech":
+        panel = _load_hstech_panel(start, end)
+    elif universe == "hkconnect":
+        panel = _load_hkconnect_panel(start, end)
     else:  # pragma: no cover — guarded above
         raise ValueError(f"unhandled universe {universe!r}")
 
@@ -241,6 +248,43 @@ _SP500_FALLBACK_CODES = [
     "CRM", "ACN", "BAC", "TMO", "ORCL", "CSCO", "ABT", "WFC", "DHR",
     "VZ", "PFE", "INTC", "DIS", "CMCSA", "AMD", "TXN", "PM", "QCOM",
     "NEE", "RTX", "HON", "T", "IBM",
+]
+
+
+# Hang Seng TECH Index constituents (30 stocks). Curated from the official
+# HSTECH composition as of 2026-06. Codes use project-style ``XXXX.HK``
+# notation (yfinance loader zero-pads to 4 digits automatically).
+_HSTECH_CODES = [
+    "700.HK",    # Tencent
+    "9988.HK",   # Alibaba
+    "3690.HK",   # Meituan
+    "9999.HK",   # NetEase
+    "981.HK",    # SMIC
+    "9618.HK",   # JD.com
+    "1810.HK",   # Xiaomi
+    "268.HK",    # Kingdee
+    "3888.HK",   # Kingsoft
+    "9888.HK",   # Baidu
+    "1024.HK",   # Kuaishou
+    "2018.HK",   # AAC Technologies
+    "6060.HK",   # ZhongAn Online
+    "241.HK",    # Alibaba Health
+    "2382.HK",   # Sunny Optical
+    "285.HK",    # BYD Electronic
+    "992.HK",    # Lenovo
+    "6618.HK",   # JD Health
+    "9626.HK",   # Bilibili
+    "9698.HK",   # GDS Holdings
+    "1347.HK",   # Hua Hong Semi
+    "2015.HK",   # Li Auto
+    "9868.HK",   # XPeng
+    "9866.HK",   # NIO
+    "780.HK",    # Tongcheng Travel
+    "9961.HK",   # Trip.com
+    "9901.HK",   # New Oriental
+    "2013.HK",   # Weimob
+    "772.HK",    # China Literature
+    "909.HK",    # Ming Yuan Cloud
 ]
 
 
@@ -415,6 +459,89 @@ def _load_btc_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
     panel = _wide_from_fetched(fetched, include_amount=False)
     if all(k in panel for k in ("open", "high", "low", "close")):
         panel["vwap"] = (panel["open"] + panel["high"] + panel["low"] + panel["close"]) / 4.0
+    return panel
+
+
+def _load_hstech_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
+    """HSTECH 30-stock panel via yfinance. Adds vwap = typical price."""
+    from backtest.loaders.registry import resolve_loader
+
+    loader = resolve_loader("hk_equity")
+    fetched = _retry(lambda: loader.fetch(list(_HSTECH_CODES), start, end)) or {}
+    logger.info("hstech: fetched %d / %d symbols", len(fetched), len(_HSTECH_CODES))
+
+    panel = _wide_from_fetched(fetched, include_amount=False)
+    if all(k in panel for k in ("open", "high", "low", "close")):
+        panel["vwap"] = (panel["open"] + panel["high"] + panel["low"] + panel["close"]) / 4.0
+
+    panel["_meta"] = {
+        "universe": "hstech",
+        "survivorship_bias": True,
+        "constituent_source": "manual curation (HSTECH 30)",
+        "constituent_count": len(_HSTECH_CODES),
+    }
+    return panel
+
+
+def _fetch_hsci_codes() -> list[str]:
+    """Get HSCI (Hang Seng Composite Index) constituents from hsi.com.hk API.
+
+    Falls back to a cached file if the API is unreachable.
+    """
+    import json as _json
+    import requests
+
+    cache_path = Path.home() / ".vibe-trading" / "cache" / "hsci_constituents.json"
+
+    try:
+        r = requests.get(
+            "https://www.hsi.com.hk/data/eng/rt/index-series/hsci/constituents.do",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        constituents = data["indexSeriesList"][0]["indexList"][0]["constituentContent"]
+        codes = [c["code"].zfill(4) + ".HK" for c in constituents]
+        logger.info("hsci: fetched %d constituents from hsi.com.hk", len(codes))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(_json.dumps({"codes": codes, "count": len(codes)}))
+        return codes
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hsci API failed (%s); trying cache", exc)
+
+    if cache_path.is_file():
+        cached = _json.loads(cache_path.read_text())
+        codes = cached.get("codes", [])
+        if codes:
+            logger.info("hsci: loaded %d codes from cache", len(codes))
+            return codes
+
+    raise RuntimeError("hkconnect: could not fetch HSCI constituents (API + cache both failed)")
+
+
+def _load_hkconnect_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
+    """港股通 500+ stock panel via yfinance (HSCI constituents)."""
+    from backtest.loaders.registry import resolve_loader
+
+    codes = _fetch_hsci_codes()
+    logger.info("hkconnect: %d HSCI codes to fetch via yfinance", len(codes))
+
+    loader = resolve_loader("hk_equity")
+    fetched = _retry(lambda: loader.fetch(codes, start, end)) or {}
+    logger.info("hkconnect: fetched %d / %d symbols", len(fetched), len(codes))
+
+    panel = _wide_from_fetched(fetched, include_amount=False)
+    if all(k in panel for k in ("open", "high", "low", "close")):
+        panel["vwap"] = (panel["open"] + panel["high"] + panel["low"] + panel["close"]) / 4.0
+
+    panel["_meta"] = {
+        "universe": "hkconnect",
+        "survivorship_bias": True,
+        "constituent_source": "hsi.com.hk HSCI constituents",
+        "constituent_count": len(codes),
+        "fetched_count": len(fetched),
+    }
     return panel
 
 
@@ -819,7 +946,7 @@ class AlphaBenchTool(BaseTool):
             },
             "universe": {
                 "type": "string",
-                "description": "csi300 | sp500 | btc-usdt (resolved via existing data tools).",
+                "description": "csi300 | sp500 | btc-usdt | hstech (resolved via existing data tools).",
             },
             "period": {
                 "type": "string",

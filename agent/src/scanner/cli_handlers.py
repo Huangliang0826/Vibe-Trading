@@ -50,12 +50,14 @@ def _build_scan(universe: str, asof: str, top: int) -> ScanResult:
     """Load the manifest, build all providers, run the scan."""
     from src.factors.registry import Registry
     from src.scanner.providers.anomaly import AnomalyProvider
+    from src.scanner.providers.event import EventProvider
     from src.scanner.providers.factor_rank import FactorRankProvider
 
-    manifest = load_factor_manifest()
+    manifest = load_factor_manifest(universe=universe)
     providers = [
         FactorRankProvider(manifest=manifest, registry=Registry(), top_n=top),
         AnomalyProvider(top_n=top),
+        EventProvider(top_n=top),
     ]
     return run_scan(universe=universe, asof=asof, providers=providers)
 
