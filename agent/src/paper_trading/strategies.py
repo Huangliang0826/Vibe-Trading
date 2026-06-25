@@ -134,7 +134,189 @@ def generate_grid(
     return signal_map
 
 
+# ── Momentum Breakout ────────────────────────────────────────────────────────
+
+def generate_momentum_breakout(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Buy strength after a breakout, exit when trend weakens."""
+    lookback = max(int(params.get("lookback", 20)), 5)
+    exit_ma = max(int(params.get("exit_ma", 20)), 5)
+    stop_loss = float(params.get("stop_loss", 0.08))
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+
+        rolling_high = close.shift(1).rolling(lookback, min_periods=max(3, lookback // 2)).max()
+        trend_ma = close.rolling(exit_ma, min_periods=max(3, exit_ma // 2)).mean()
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        entry_price = 0.0
+
+        for i, price in enumerate(close):
+            if not in_position and pd.notna(rolling_high.iloc[i]) and price > rolling_high.iloc[i]:
+                in_position = True
+                entry_price = float(price)
+            elif in_position:
+                hit_stop = entry_price > 0 and price <= entry_price * (1 - stop_loss)
+                lost_trend = pd.notna(trend_ma.iloc[i]) and price < trend_ma.iloc[i]
+                if hit_stop or lost_trend:
+                    in_position = False
+                    entry_price = 0.0
+            weights.iloc[i] = target_w if in_position else 0.0
+
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Moving Average Cross ─────────────────────────────────────────────────────
+
+def generate_moving_average_cross(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Hold while the fast moving average is above the slow moving average."""
+    short_window = max(int(params.get("short_window", 20)), 2)
+    long_window = max(int(params.get("long_window", 60)), short_window + 1)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        fast = close.rolling(short_window, min_periods=max(2, short_window // 2)).mean()
+        slow = close.rolling(long_window, min_periods=max(3, long_window // 2)).mean()
+        signal_map[code] = ((fast > slow).astype(float) * _weight(h)).reindex(close.index).fillna(0.0)
+    return signal_map
+
+
+# ── RSI Reversion ────────────────────────────────────────────────────────────
+
+def generate_rsi_reversion(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Buy oversold weakness and exit after overbought rebounds."""
+    window = max(int(params.get("window", 14)), 2)
+    buy_below = float(params.get("buy_below", 35))
+    sell_above = float(params.get("sell_above", 65))
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        rsi = _rsi(close, window)
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        for i, value in enumerate(rsi):
+            if not in_position and pd.notna(value) and value <= buy_below:
+                in_position = True
+            elif in_position and pd.notna(value) and value >= sell_above:
+                in_position = False
+            weights.iloc[i] = _weight(h) if in_position else 0.0
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Volatility Target ────────────────────────────────────────────────────────
+
+def generate_volatility_target(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Scale exposure down when realised volatility rises."""
+    window = max(int(params.get("window", 20)), 5)
+    target_vol = max(float(params.get("target_vol", 0.18)), 0.01)
+    min_weight_ratio = max(float(params.get("min_weight_ratio", 0.15)), 0.0)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        realised_vol = close.pct_change().rolling(window, min_periods=max(3, window // 2)).std() * np.sqrt(252)
+        ratio = (target_vol / realised_vol.replace(0, np.nan)).clip(lower=min_weight_ratio, upper=1.0)
+        signal_map[code] = (ratio.fillna(min_weight_ratio) * _weight(h)).reindex(close.index).fillna(0.0)
+    return signal_map
+
+
+# ── Drawdown Rebalance ──────────────────────────────────────────────────────
+
+def generate_drawdown_rebalance(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Add exposure in drawdowns, trim after recovery toward prior highs."""
+    first_level = float(params.get("first_level", 0.05))
+    second_level = float(params.get("second_level", 0.10))
+    third_level = float(params.get("third_level", 0.15))
+    recovery_trim = float(params.get("recovery_trim", 0.03))
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        peak = close.cummax().replace(0, np.nan)
+        drawdown = (close / peak - 1).fillna(0.0)
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+
+        for i, dd in enumerate(drawdown):
+            loss = abs(min(float(dd), 0.0))
+            if loss >= third_level:
+                ratio = 1.0
+            elif loss >= second_level:
+                ratio = 0.75
+            elif loss >= first_level:
+                ratio = 0.5
+            else:
+                ratio = 0.25
+
+            near_high = loss <= recovery_trim
+            if near_high:
+                ratio = min(ratio, 0.25)
+            weights.iloc[i] = ratio * target_w
+
+        signal_map[code] = weights
+    return signal_map
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _rsi(close: pd.Series, window: int) -> pd.Series:
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(window, min_periods=max(2, window // 2)).mean()
+    loss = (-delta.clip(upper=0)).rolling(window, min_periods=max(2, window // 2)).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return (100 - (100 / (1 + rs))).fillna(50.0)
+
 
 def _to_code(holding: PaperHolding) -> str:
     """Build the internal code used by backtest loaders.
@@ -162,4 +344,14 @@ def generate_signals(
         return generate_dca(holdings, data_map, params)
     if strategy_name == "grid":
         return generate_grid(holdings, data_map, params)
+    if strategy_name == "momentum_breakout":
+        return generate_momentum_breakout(holdings, data_map, params)
+    if strategy_name == "moving_average_cross":
+        return generate_moving_average_cross(holdings, data_map, params)
+    if strategy_name == "rsi_reversion":
+        return generate_rsi_reversion(holdings, data_map, params)
+    if strategy_name == "volatility_target":
+        return generate_volatility_target(holdings, data_map, params)
+    if strategy_name == "drawdown_rebalance":
+        return generate_drawdown_rebalance(holdings, data_map, params)
     raise ValueError(f"Unknown strategy: {strategy_name}")

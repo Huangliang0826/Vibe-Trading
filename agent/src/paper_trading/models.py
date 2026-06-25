@@ -22,7 +22,17 @@ class PaperHolding(BaseModel):
 
 
 class StrategyConfig(BaseModel):
-    name: Literal["buy_and_hold", "dca", "grid"] = "buy_and_hold"
+    name: Literal[
+        "buy_and_hold",
+        "dca",
+        "grid",
+        "momentum_breakout",
+        "moving_average_cross",
+        "rsi_reversion",
+        "volatility_target",
+        "drawdown_rebalance",
+        "smart_dca",
+    ] = "buy_and_hold"
     params: dict[str, Any] = Field(default_factory=dict)
 
 

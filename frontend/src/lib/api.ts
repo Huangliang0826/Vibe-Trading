@@ -23,12 +23,38 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
   let detail = `HTTP ${res.status}`;
   try {
     const body = await res.json();
-    detail = body.detail || body.message || detail;
+    detail = formatApiErrorDetail(body.detail || body.message || detail);
   } catch { /* ignore */ }
   if (res.status === 401 || res.status === 403) {
     detail = AUTH_REQUIRED_MESSAGE;
   }
   return new ApiError(detail, res.status);
+}
+
+function formatApiErrorDetail(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const record = item as Record<string, unknown>;
+          const loc = Array.isArray(record.loc) ? record.loc.join(".") : "";
+          const msg = typeof record.msg === "string" ? record.msg : JSON.stringify(record);
+          return loc ? `${loc}: ${msg}` : msg;
+        }
+        return String(item);
+      })
+      .join("; ");
+  }
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -536,7 +562,16 @@ export interface PaperHolding {
 }
 
 export interface PaperStrategyConfig {
-  name: "buy_and_hold" | "dca" | "grid";
+  name:
+    | "buy_and_hold"
+    | "dca"
+    | "grid"
+    | "momentum_breakout"
+    | "moving_average_cross"
+    | "rsi_reversion"
+    | "volatility_target"
+    | "drawdown_rebalance"
+    | "smart_dca";
   params: Record<string, unknown>;
 }
 

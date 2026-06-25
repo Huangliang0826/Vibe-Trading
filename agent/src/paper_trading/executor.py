@@ -60,9 +60,10 @@ def run_paper_trading_backtest(run_id: str, store: PaperTradingStore) -> None:
 
         initial_cash = run.initial_total_usd
 
-        if run.strategy.name == "dca":
+        if run.strategy.name in {"dca", "smart_dca"}:
             equity_series, trades = _run_dca(
                 initial_cash, equity_holdings, data_map, run.strategy.params,
+                smart=run.strategy.name == "smart_dca",
             )
         else:
             signal_map = generate_signals(
@@ -123,6 +124,7 @@ def _run_dca(
     holdings: List[PaperHolding],
     data_map: Dict[str, pd.DataFrame],
     params: Dict[str, Any],
+    smart: bool = False,
 ) -> tuple:
     """Fixed-dollar DCA: buy a fixed amount each period, accumulate shares."""
     frequency = params.get("frequency", "monthly")
@@ -170,6 +172,8 @@ def _run_dca(
                 if price <= 0:
                     continue
                 amount = tranche_per_code[c]
+                if smart:
+                    amount *= _smart_dca_multiplier(data_map[c], ts, params)
                 if amount > cash:
                     amount = cash
                 if amount <= 0:
@@ -220,6 +224,46 @@ def _run_dca(
         ))
 
     return equity_series, trades
+
+
+def _smart_dca_multiplier(
+    df: pd.DataFrame,
+    ts: pd.Timestamp,
+    params: Dict[str, Any],
+) -> float:
+    """Adjust each DCA tranche using trend distance and realised volatility."""
+    history = df.loc[df.index <= ts].copy()
+    if history.empty:
+        return 1.0
+
+    close = history["close"].astype(float)
+    price = float(close.iloc[-1])
+    ma_window = max(int(params.get("ma_window", 60)), 5)
+    vol_window = max(int(params.get("vol_window", 20)), 5)
+    max_multiplier = max(float(params.get("max_multiplier", 2.0)), 1.0)
+    min_multiplier = max(float(params.get("min_multiplier", 0.3)), 0.0)
+
+    ma = float(close.rolling(ma_window, min_periods=max(5, ma_window // 3)).mean().iloc[-1])
+    multiplier = 1.0
+
+    if ma > 0 and np.isfinite(ma):
+        discount = price / ma - 1
+        if discount <= -0.12:
+            multiplier = 2.0
+        elif discount <= -0.07:
+            multiplier = 1.5
+        elif discount <= -0.03:
+            multiplier = 1.2
+        elif discount >= 0.10:
+            multiplier = 0.4
+        elif discount >= 0.05:
+            multiplier = 0.7
+
+    realised_vol = close.pct_change().rolling(vol_window, min_periods=max(5, vol_window // 2)).std().iloc[-1]
+    if pd.notna(realised_vol) and realised_vol * np.sqrt(252) > 0.35:
+        multiplier *= 0.75
+
+    return float(np.clip(multiplier, min_multiplier, max_multiplier))
 
 
 def _last_close(code: str, data_map: Dict[str, pd.DataFrame], before: pd.Timestamp) -> float:
