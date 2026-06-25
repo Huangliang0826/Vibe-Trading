@@ -171,6 +171,21 @@ export const api = {
       method: "DELETE",
     }),
 
+  // 模拟盘 (Paper Trading)
+  createPaperTradingRun: (body: PaperTradingCreate) =>
+    request<PaperTradingRun>("/paper-trading/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listPaperTradingRuns: () =>
+    request<PaperTradingList>("/paper-trading/runs"),
+  getPaperTradingRun: (runId: string) =>
+    request<PaperTradingRun>(`/paper-trading/runs/${encodeURIComponent(runId)}`),
+  deletePaperTradingRun: (runId: string) =>
+    request<{ status: string; run_id: string }>(`/paper-trading/runs/${encodeURIComponent(runId)}`, {
+      method: "DELETE",
+    }),
+
   // Scanner API
   getScanLatest: () => request<any>("/scan/latest"),
   getScanDates: () => request<{ dates: string[] }>("/scan/dates"),
@@ -510,6 +525,67 @@ export interface ResearchAnalysisListParams {
   query?: string;
   date?: string;
   limit?: number;
+}
+
+// ── Paper Trading types ──────────────────────────────────────────────────────
+
+export interface PaperHolding {
+  symbol: string;
+  market: "us" | "hk";
+  allocation_pct: number;
+}
+
+export interface PaperStrategyConfig {
+  name: "buy_and_hold" | "dca" | "grid";
+  params: Record<string, unknown>;
+}
+
+export interface PaperTradingCreate {
+  title?: string;
+  holdings: PaperHolding[];
+  strategy: PaperStrategyConfig;
+  start_date: string;
+  end_date: string;
+  initial_usd?: number;
+  initial_hkd?: number;
+}
+
+export interface PaperTradingRun {
+  run_id: string;
+  title: string;
+  holdings: PaperHolding[];
+  strategy: PaperStrategyConfig;
+  start_date: string;
+  end_date: string;
+  initial_usd: number;
+  initial_hkd: number;
+  initial_total_usd: number;
+  status: "queued" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  metrics: Record<string, unknown> | null;
+  equity_curve: EquityPoint[] | null;
+  trades: PaperTrade[] | null;
+  error: string | null;
+}
+
+export interface PaperTrade {
+  symbol: string;
+  direction: number;
+  entry_price: number;
+  exit_price: number;
+  entry_time: string;
+  exit_time: string;
+  size: number;
+  pnl: number;
+  pnl_pct: number;
+  exit_reason: string;
+  holding_bars: number;
+  commission: number;
+}
+
+export interface PaperTradingList {
+  items: PaperTradingRun[];
 }
 
 export interface ForecastResponse {

@@ -38,6 +38,13 @@ from src.research_analysis import (
     ResearchAnalysisStore,
     normalize_symbol,
 )
+from src.paper_trading import (
+    PaperTradingCreate,
+    PaperTradingList,
+    PaperTradingRun,
+    PaperTradingStatus,
+    PaperTradingStore,
+)
 from src.ui_services import build_run_analysis, load_run_context
 
 # UTF-8 on Windows
@@ -4275,6 +4282,100 @@ async def delete_research_analysis_run(run_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="research analysis run not found")
+    return {"status": "deleted", "run_id": run_id}
+
+
+# ============================================================================
+# Paper Trading (portfolio backtest) routes
+# ============================================================================
+
+_paper_trading_tasks: Dict[str, "asyncio.Task[Any]"] = {}
+_paper_trading_store: Optional[PaperTradingStore] = None
+
+
+def _get_paper_trading_store() -> PaperTradingStore:
+    global _paper_trading_store
+    if _paper_trading_store is None:
+        _paper_trading_store = PaperTradingStore()
+    return _paper_trading_store
+
+
+async def _execute_paper_trading(run_id: str) -> None:
+    store = _get_paper_trading_store()
+    try:
+        from src.paper_trading.executor import run_paper_trading_backtest
+        await asyncio.to_thread(run_paper_trading_backtest, run_id, store)
+    except Exception as exc:
+        logger.warning("paper trading backtest %s failed: %s", run_id, exc)
+        try:
+            store.fail_run(run_id, str(exc))
+        except Exception:
+            logger.exception("failed to persist paper trading failure for %s", run_id)
+
+
+@app.post(
+    "/paper-trading/runs",
+    response_model=PaperTradingRun,
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def create_paper_trading_run(payload: PaperTradingCreate):
+    """Create and start a portfolio backtest simulation."""
+    total_alloc = sum(h.allocation_pct for h in payload.holdings)
+    if abs(total_alloc - 100.0) > 0.01:
+        raise HTTPException(status_code=400, detail=f"Allocation must sum to 100%, got {total_alloc:.2f}%")
+
+    store = _get_paper_trading_store()
+    run = store.create_run(payload)
+    task = asyncio.create_task(_execute_paper_trading(run.run_id))
+    _paper_trading_tasks[run.run_id] = task
+    task.add_done_callback(
+        lambda t, rid=run.run_id: _paper_trading_tasks.pop(rid, None)
+        if _paper_trading_tasks.get(rid) is t
+        else None
+    )
+    return run
+
+
+@app.get(
+    "/paper-trading/runs",
+    response_model=PaperTradingList,
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def list_paper_trading_runs(limit: int = Query(50, ge=1, le=200)):
+    """List all paper trading backtest runs."""
+    runs = _get_paper_trading_store().list_runs(limit=limit)
+    return PaperTradingList(items=runs)
+
+
+@app.get(
+    "/paper-trading/runs/{run_id}",
+    response_model=PaperTradingRun,
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def get_paper_trading_run(run_id: str):
+    """Return a single paper trading backtest run with full results."""
+    try:
+        run = _get_paper_trading_store().get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="paper trading run not found")
+    return run
+
+
+@app.delete(
+    "/paper-trading/runs/{run_id}",
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def delete_paper_trading_run(run_id: str):
+    """Delete a paper trading backtest run."""
+    task = _paper_trading_tasks.pop(run_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+    try:
+        _get_paper_trading_store().delete_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "deleted", "run_id": run_id}
 
 

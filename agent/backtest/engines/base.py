@@ -226,6 +226,7 @@ class BaseEngine(ABC):
         self.equity_snapshots: List[EquitySnapshot] = []
         self._bar_idx: int = 0
         self._active_symbol: str = ""  # set by _rebalance/_close_position for subclass use
+        self._last_target_w: Dict[str, float] = {}
 
     # ── Market rule interface (subclass must implement) ──
 
@@ -532,11 +533,15 @@ class BaseEngine(ABC):
         # Close if target is flat or direction changed
         if current_pos is not None:
             need_close = target_dir == 0 or target_dir != current_pos.direction
+            if not need_close:
+                prev_w = self._last_target_w.get(symbol, abs(target_weight))
+                if abs(abs(target_weight) - prev_w) > 0.005:
+                    need_close = True
             if need_close:
                 if self.can_execute(symbol, 0, bar):
                     open_price = float(bar.get("open", bar.get("close", 0)))
                     price = self.apply_slippage(open_price, -current_pos.direction)
-                    self._close_position(symbol, price, ts, "signal")
+                    self._close_position(symbol, price, ts, "rebalance" if target_dir != 0 else "signal")
                 else:
                     return  # blocked (e.g. limit-down can't sell)
 
@@ -584,6 +589,8 @@ class BaseEngine(ABC):
                 entry_bar_idx=self._bar_idx,
                 entry_commission=comm,
             )
+
+        self._last_target_w[symbol] = abs(target_weight)
 
     def _close_position(
         self,

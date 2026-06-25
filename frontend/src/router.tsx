@@ -33,6 +33,9 @@ const HSTech = lazy(() =>
 const ResearchAnalysis = lazy(() =>
   import("@/pages/ResearchAnalysis").then((m) => ({ default: m.ResearchAnalysis })),
 );
+const PaperTrading = lazy(() =>
+  import("@/pages/PaperTrading").then((m) => ({ default: m.PaperTrading })),
+);
 
 function PageLoader() {
   return (
@@ -66,6 +69,7 @@ export const router = createBrowserRouter([
       { path: "/research-analysis", element: wrap(ResearchAnalysis) },
       { path: "/forecast", element: wrap(Forecast) },
       { path: "/hstech", element: wrap(HSTech) },
+      { path: "/paper-trading", element: wrap(PaperTrading) },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/compare", element: wrap(AlphaZoo) },

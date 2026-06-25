@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch } from "lucide-react";
+import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -16,6 +16,7 @@ const NAV = [
   { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
   { to: "/forecast", icon: LineChart, label: "走势预测" },
   { to: "/hstech", icon: Cpu, label: "恒生科技" },
+  { to: "/paper-trading", icon: Briefcase, label: "模拟盘" },
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 
