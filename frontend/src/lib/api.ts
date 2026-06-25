@@ -169,8 +169,12 @@ export const api = {
     request<IndustryReportsResponse>("/research/hstech-reports"),
 
   // 恒生科技新闻
-  getHSTechNews: () =>
-    request<{ items: NewsItem[]; cached: boolean }>("/hstech/news"),
+  getHSTechNews: (refresh = false) =>
+    request<{ items: NewsItem[]; cached: boolean }>(`/hstech/news${refresh ? "?refresh=true" : ""}`),
+  getHSTechNewsArchiveDates: () =>
+    request<{ dates: string[] }>("/hstech/news/archive/dates"),
+  getHSTechNewsArchive: (date: string) =>
+    request<{ date: string; items: NewsItem[] }>(`/hstech/news/archive?date=${encodeURIComponent(date)}`),
 
   // 走势预测
   getForecast: (market: string, code: string, months = 6, context = 0, nocache = 0) =>

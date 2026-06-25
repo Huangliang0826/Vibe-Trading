@@ -3,7 +3,7 @@ import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
-import type { PriceHistoryBar, PriceHistoryPeriod } from "@/lib/api";
+import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistQuote } from "@/lib/api";
 
 export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"];
 
@@ -14,6 +14,7 @@ interface Props {
   loading?: boolean;
   height?: number;
   showRisk?: boolean;
+  quote?: WatchlistQuote | null;
 }
 
 /** Max drawdown over the displayed window + recovery time of that episode.
@@ -108,16 +109,19 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   return val.slice(5); // MM-DD
 }
 
-export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false }: Props) {
+export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
 
   const hasData = bars.length >= 2;
   const firstClose = hasData ? bars[0].close : 0;
   const lastClose = hasData ? bars[bars.length - 1].close : 0;
-  const absChange = lastClose - firstClose;
-  const pctChange = firstClose ? (absChange / firstClose) * 100 : 0;
+  const hasLiveDayQuote = period === "1D" && !!quote && quote.price > 0 && quote.prev_close > 0;
+  const displayClose = hasLiveDayQuote ? quote.price : lastClose;
+  const absChange = hasLiveDayQuote ? quote.price - quote.prev_close : lastClose - firstClose;
+  const pctChange = hasLiveDayQuote ? (absChange / quote.prev_close) * 100 : firstClose ? (absChange / firstClose) * 100 : 0;
   const up = absChange >= 0;
+  const changeLabel = hasLiveDayQuote ? "今日涨跌" : `${period} 区间涨跌`;
   const dd = showRisk && hasData ? computeDrawdown(bars) : null;
   const dailyDca = showRisk && hasData && period !== "1D" ? computeDailyDca(bars) : null;
 
@@ -254,10 +258,10 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           {hasData && !loading ? (
             <>
               <span className="text-2xl font-bold tabular-nums leading-none text-foreground">
-                {lastClose.toFixed(2)}
+                {displayClose.toFixed(2)}
               </span>
               <span className={cn("text-base font-medium tabular-nums text-muted-foreground")}>
-                {period} 区间涨跌：<span className={changeClass(up)}>{up ? "+" : ""}{pctChange.toFixed(2)}%</span>
+                {changeLabel}：<span className={changeClass(up)}>{up ? "+" : ""}{pctChange.toFixed(2)}%</span>
               </span>
             </>
           ) : (

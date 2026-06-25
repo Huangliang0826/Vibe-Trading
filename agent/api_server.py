@@ -1581,6 +1581,84 @@ async def get_hstech_reports(months: int = 2, max_pages: int = 30):
 
 _NEWS_CACHE: dict[str, tuple[float, list]] = {}
 _NEWS_TTL = 48 * 3600
+_HSTECH_NEWS_ARCHIVE_DIR = AGENT_DIR / "data" / "hstech_news"
+
+
+def _hstech_news_date_key(value: Any) -> str:
+    text = str(value or "")
+    match = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text)
+    if match:
+        return f"{match.group(1)}-{match.group(2).zfill(2)}-{match.group(3).zfill(2)}"
+    return ""
+
+
+def _hstech_news_dedupe_key(item: dict) -> str:
+    return "|".join(
+        str(item.get(key, "")).strip()
+        for key in ("title", "time", "source")
+    )
+
+
+def _load_hstech_news_archive(date_key: str, archive_dir: Path | None = None) -> list[dict]:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_key or ""):
+        raise ValueError("date must be YYYY-MM-DD")
+    root = archive_dir or _HSTECH_NEWS_ARCHIVE_DIR
+    path = root / f"{date_key}.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("failed to read hstech news archive: %s", path)
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _store_hstech_news_archive(items: list[dict], archive_dir: Path | None = None) -> None:
+    root = archive_dir or _HSTECH_NEWS_ARCHIVE_DIR
+    by_date: dict[str, list[dict]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        date_key = _hstech_news_date_key(item.get("time"))
+        if not date_key:
+            continue
+        by_date.setdefault(date_key, []).append(item)
+
+    if not by_date:
+        return
+
+    root.mkdir(parents=True, exist_ok=True)
+    for date_key, date_items in by_date.items():
+        merged: dict[str, dict] = {}
+        for existing in _load_hstech_news_archive(date_key, root):
+            key = _hstech_news_dedupe_key(existing)
+            if key:
+                merged[key] = existing
+        for item in date_items:
+            key = _hstech_news_dedupe_key(item)
+            if key:
+                merged[key] = item
+
+        output = sorted(merged.values(), key=lambda x: str(x.get("time", "")), reverse=True)
+        path = root / f"{date_key}.json"
+        tmp_path = path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+
+
+def _hstech_news_archive_dates(archive_dir: Path | None = None) -> list[str]:
+    root = archive_dir or _HSTECH_NEWS_ARCHIVE_DIR
+    if not root.exists():
+        return []
+    dates = [
+        path.stem
+        for path in root.glob("*.json")
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.stem)
+    ]
+    return sorted(dates, reverse=True)
 
 
 def _fetch_hstech_news() -> list[dict]:
@@ -1612,14 +1690,31 @@ def _fetch_hstech_news() -> list[dict]:
 
 
 @app.get("/hstech/news")
-async def get_hstech_news():
+async def get_hstech_news(refresh: bool = Query(False, description="Bypass the in-memory news cache")):
     cached = _NEWS_CACHE.get("hstech")
-    if cached and (time.time() - cached[0]) < _NEWS_TTL:
+    if not refresh and cached and (time.time() - cached[0]) < _NEWS_TTL:
+        _store_hstech_news_archive(cached[1])
         return {"items": cached[1], "cached": True}
 
     items = await asyncio.to_thread(_fetch_hstech_news)
     _NEWS_CACHE["hstech"] = (time.time(), items)
+    await asyncio.to_thread(_store_hstech_news_archive, items)
     return {"items": items, "cached": False}
+
+
+@app.get("/hstech/news/archive/dates")
+async def get_hstech_news_archive_dates():
+    dates = await asyncio.to_thread(_hstech_news_archive_dates)
+    return {"dates": dates}
+
+
+@app.get("/hstech/news/archive")
+async def get_hstech_news_archive(date: str = Query(..., description="Archive date in YYYY-MM-DD format")):
+    try:
+        items = await asyncio.to_thread(_load_hstech_news_archive, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"date": date, "items": items}
 
 
 def _fetch_hk_indices() -> list[dict]:

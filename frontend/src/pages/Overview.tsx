@@ -353,6 +353,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   // Price view state
   const [period, setPeriod] = useState<PriceHistoryPeriod>("1Y");
   const [bars, setBars] = useState<PriceHistoryBar[]>([]);
+  const [quote, setQuote] = useState<WatchlistQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -367,16 +368,21 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.getWatchlistHistory(code, period, market)
-      .then((res) => {
+    Promise.all([
+      api.getWatchlistHistory(code, period, market),
+      api.getWatchlistQuote([code], market).catch(() => [] as WatchlistQuote[]),
+    ])
+      .then(([res, quoteList]) => {
         if (cancelled) return;
         setBars(res.bars);
+        setQuote(quoteList[0] || null);
         if (res.name) setName(res.name);
       })
       .catch((e) => {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "获取走势失败");
         setBars([]);
+        setQuote(null);
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -431,6 +437,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
             loading={loading}
             height={260}
             showRisk
+            quote={quote}
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>

@@ -1018,9 +1018,13 @@ function newsDateKey(time: string): string {
   return "";
 }
 
-function filterTodayNews(items: NewsItem[]): NewsItem[] {
-  const today = todayDateKey();
-  return items.filter((item) => newsDateKey(item.time) === today);
+function latestNewsDateKey(items: NewsItem[]): string {
+  return items.map((item) => newsDateKey(item.time)).filter(Boolean).sort().pop() || "";
+}
+
+function filterNewsByDate(items: NewsItem[], dateKey: string): NewsItem[] {
+  if (!dateKey) return [];
+  return items.filter((item) => newsDateKey(item.time) === dateKey);
 }
 
 type Tab = "forecast" | "news" | "report" | "research";
@@ -1051,6 +1055,7 @@ export function HSTech() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
   const [stockName, setStockName] = useState(HSTECH_NAME);
+  const [quote, setQuote] = useState<WatchlistQuote | null>(null);
 
   // Valuation state
   const [valPeriod, setValPeriod] = useState<ValuationPeriod>("5Y");
@@ -1095,11 +1100,11 @@ export function HSTech() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError, setNewsError] = useState<string | null>(null);
+  const [newsArchiveDates, setNewsArchiveDates] = useState<string[]>([]);
+  const [selectedNewsDate, setSelectedNewsDate] = useState("");
 
   // News LLM summary state
-  const [newsSummary, setNewsSummary] = useState<string>(() => {
-    try { return localStorage.getItem(`hstech-news-summary-${todayDateKey()}`) || ""; } catch { return ""; }
-  });
+  const [newsSummary, setNewsSummary] = useState("");
   const [newsSummaryLoading, setNewsSummaryLoading] = useState(false);
   const newsSummaryRef = useRef("");
   const { connect: connectNewsSummary, disconnect: disconnectNewsSummary } = useSSE();
@@ -1110,16 +1115,21 @@ export function HSTech() {
     let cancelled = false;
     setChartLoading(true);
     setChartError(null);
-    api.getWatchlistHistory(HSTECH_CODE, period, HSTECH_MARKET)
-      .then((res) => {
+    Promise.all([
+      api.getWatchlistHistory(HSTECH_CODE, period, HSTECH_MARKET),
+      api.getWatchlistQuote([HSTECH_CODE], HSTECH_MARKET).catch(() => [] as WatchlistQuote[]),
+    ])
+      .then(([res, quoteList]) => {
         if (cancelled) return;
         setBars(res.bars);
+        setQuote(quoteList[0] || null);
         if (res.name) setStockName(res.name);
       })
       .catch((e) => {
         if (cancelled) return;
         setChartError(e instanceof Error ? e.message : "获取走势失败");
         setBars([]);
+        setQuote(null);
       })
       .finally(() => { if (!cancelled) setChartLoading(false); });
     return () => { cancelled = true; };
@@ -1214,20 +1224,46 @@ export function HSTech() {
     }
   }, [reportLoading, bars, reports, connect, disconnect]);
 
-  const loadNews = useCallback(() => {
+  const loadNewsArchiveDates = useCallback(() => {
+    api.getHSTechNewsArchiveDates()
+      .then((res) => setNewsArchiveDates(res.dates || []))
+      .catch(() => setNewsArchiveDates([]));
+  }, []);
+
+  const loadNews = useCallback((refresh = false) => {
     setNewsLoading(true);
     setNewsError(null);
-    api.getHSTechNews()
-      .then((res) => setNews(res.items || []))
+    api.getHSTechNews(refresh)
+      .then((res) => {
+        const items = res.items || [];
+        setNews(items);
+        const dateKey = latestNewsDateKey(items);
+        setSelectedNewsDate(dateKey);
+        loadNewsArchiveDates();
+        if (refresh) setNewsSummary("");
+      })
       .catch((e) => setNewsError(e?.message || "获取新闻失败"))
+      .finally(() => setNewsLoading(false));
+  }, [loadNewsArchiveDates]);
+
+  useEffect(() => { loadNews(); }, [loadNews]);
+  useEffect(() => { loadNewsArchiveDates(); }, [loadNewsArchiveDates]);
+
+  const loadArchivedNews = useCallback((dateKey: string) => {
+    if (!dateKey) return;
+    setSelectedNewsDate(dateKey);
+    setNewsLoading(true);
+    setNewsError(null);
+    api.getHSTechNewsArchive(dateKey)
+      .then((res) => setNews(res.items || []))
+      .catch((e) => setNewsError(e?.message || "读取本地新闻存档失败"))
       .finally(() => setNewsLoading(false));
   }, []);
 
-  useEffect(() => { loadNews(); }, [loadNews]);
-
   const generateNewsSummary = useCallback(async () => {
-    const todayNews = filterTodayNews(news);
-    if (newsSummaryLoading || todayNews.length === 0) return;
+    const summaryDate = selectedNewsDate || latestNewsDateKey(news);
+    const summaryNews = filterNewsByDate(news, summaryDate);
+    if (newsSummaryLoading || summaryNews.length === 0) return;
     setNewsSummaryLoading(true);
     newsSummaryRef.current = "";
     setNewsSummary("");
@@ -1244,7 +1280,7 @@ export function HSTech() {
         "attempt.completed": () => {
           setNewsSummaryLoading(false);
           disconnectNewsSummary();
-          try { localStorage.setItem(`hstech-news-summary-${todayDateKey()}`, newsSummaryRef.current); } catch {}
+          try { localStorage.setItem(`hstech-news-summary-${summaryDate}`, newsSummaryRef.current); } catch {}
         },
         "attempt.failed": (d) => {
           setNewsSummaryLoading(false);
@@ -1257,12 +1293,12 @@ export function HSTech() {
         reconnect: () => {},
       });
 
-      await api.sendMessage(sid, buildNewsSummaryPrompt(todayNews));
+      await api.sendMessage(sid, buildNewsSummaryPrompt(summaryNews));
     } catch (e) {
       setNewsSummaryLoading(false);
       setNewsSummary(`请求失败：${e instanceof Error ? e.message : "未知错误"}`);
     }
-  }, [newsSummaryLoading, news, connectNewsSummary, disconnectNewsSummary]);
+  }, [newsSummaryLoading, news, selectedNewsDate, connectNewsSummary, disconnectNewsSummary]);
 
   const loadReports = useCallback(() => {
     setReportsLoading(true);
@@ -1322,7 +1358,20 @@ export function HSTech() {
     return () => { disconnect(); disconnectSummary(); disconnectNewsSummary(); };
   }, [disconnect, disconnectSummary, disconnectNewsSummary]);
 
-  const todayNewsCount = filterTodayNews(news).length;
+  const latestNewsDate = selectedNewsDate || latestNewsDateKey(news);
+  const latestDayNewsCount = filterNewsByDate(news, latestNewsDate).length;
+
+  useEffect(() => {
+    if (!latestNewsDate) {
+      setNewsSummary("");
+      return;
+    }
+    try {
+      setNewsSummary(localStorage.getItem(`hstech-news-summary-${latestNewsDate}`) || "");
+    } catch {
+      setNewsSummary("");
+    }
+  }, [latestNewsDate]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -1368,6 +1417,7 @@ export function HSTech() {
               loading={chartLoading}
               height={300}
               showRisk
+              quote={quote}
             />
             {chartError && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{chartError}</p>}
           </>
@@ -1490,14 +1540,14 @@ export function HSTech() {
             <div className="flex items-center gap-2">
               <button
                 onClick={generateNewsSummary}
-                disabled={newsSummaryLoading || todayNewsCount === 0}
+                disabled={newsSummaryLoading || latestDayNewsCount === 0}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
               >
                 {newsSummaryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {newsSummaryLoading ? "总结中..." : newsSummary ? "重新总结今日" : "AI 总结今日"}
+                {newsSummaryLoading ? "总结中..." : newsSummary ? "重新总结最新日" : "AI 总结最新日"}
               </button>
               <button
-                onClick={loadNews}
+                onClick={() => loadNews(true)}
                 disabled={newsLoading}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
               >
@@ -1507,11 +1557,30 @@ export function HSTech() {
             </div>
           </div>
 
+          {newsArchiveDates.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+              <span className="text-xs font-medium text-foreground">本地新闻日期</span>
+              <select
+                value={selectedNewsDate}
+                onChange={(e) => loadArchivedNews(e.target.value)}
+                disabled={newsLoading}
+                className="h-8 min-w-[140px] rounded-md border bg-background px-2 text-xs text-foreground disabled:opacity-50"
+              >
+                {newsArchiveDates.map((date) => (
+                  <option key={date} value={date}>{date}</option>
+                ))}
+              </select>
+              <span className="text-[11px] text-muted-foreground">
+                已保存 {newsArchiveDates.length} 天，AI 总结跟随选中日期
+              </span>
+            </div>
+          )}
+
           {(newsSummary || newsSummaryLoading) && (
             <div className="rounded-xl border bg-muted/30 p-4 mb-4">
               <div className="flex items-center gap-1.5 mb-2">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-medium text-primary">AI 今日新闻总结</span>
+                <span className="text-xs font-medium text-primary">AI 最新日新闻总结{latestNewsDate ? `（${latestNewsDate}）` : ""}</span>
               </div>
               <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed text-sm">
                 {renderMarkdown(newsSummary)}
@@ -1526,8 +1595,8 @@ export function HSTech() {
             <p className="text-xs text-red-500 dark:text-red-400 mb-3">{newsError}</p>
           )}
 
-          {!newsLoading && news.length > 0 && todayNewsCount === 0 && (
-            <p className="text-xs text-muted-foreground mb-3">今日暂无新闻，AI 总结仅在有当日新闻时可用。</p>
+          {!newsLoading && news.length > 0 && latestDayNewsCount > 0 && latestNewsDate !== todayDateKey() && (
+            <p className="text-xs text-muted-foreground mb-3">今日暂无新闻，当前新闻源最新日期为 {latestNewsDate}；AI 总结仅汇总该日期新闻。</p>
           )}
 
           {newsLoading && news.length === 0 ? (
