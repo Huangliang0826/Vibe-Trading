@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Cpu, RefreshCw, Loader2, BookOpen, ExternalLink, Sparkles, ChevronDown, ChevronUp, Newspaper, TrendingUp } from "lucide-react";
-import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type TradeSignal, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote, type SmartTResponse } from "@/lib/api";
+import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote, type SmartTResponse, type HSTechBestStrategyResponse } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { ForecastChart } from "@/components/charts/ForecastChart";
@@ -1067,12 +1067,11 @@ export function HSTech() {
   const [forecastLoading, setForecastLoading] = useState(false);
   const [forecastError, setForecastError] = useState<string | null>(null);
 
-  // Trade signal state
-  type SignalStrategy = "median_trend" | "band_reversion";
-  const [allTrades, setAllTrades] = useState<Record<string, TradeSignal[]>>({});
-  const [signalStrategy, setSignalStrategy] = useState<SignalStrategy>("median_trend");
-  const [tradesLoading, setTradesLoading] = useState(false);
-  const trades = allTrades[signalStrategy] || [];
+  // Best paper strategy state
+  const [bestStrategy, setBestStrategy] = useState<HSTechBestStrategyResponse | null>(null);
+  const [bestStrategyLoading, setBestStrategyLoading] = useState(false);
+  const [bestStrategyError, setBestStrategyError] = useState<string | null>(null);
+  const trades = bestStrategy?.best?.trades || [];
 
   // Analysis report state
   const [report, setReport] = useState<string>(() => {
@@ -1159,18 +1158,16 @@ export function HSTech() {
 
   useEffect(() => { loadForecast(); }, [loadForecast]);
 
-  const loadTrades = useCallback(() => {
-    setTradesLoading(true);
-    api.getForecastStrategy(HSTECH_MARKET, HSTECH_CODE, 512)
-      .then((res) => {
-        setAllTrades({
-          median_trend: res.strategies?.median_trend?.trades || [],
-          band_reversion: res.strategies?.band_reversion?.trades || [],
-        });
-      })
-      .catch(() => setAllTrades({}))
-      .finally(() => setTradesLoading(false));
+  const loadBestStrategy = useCallback((refresh = false) => {
+    setBestStrategyLoading(true);
+    setBestStrategyError(null);
+    api.getHSTechBestPaperStrategy(refresh)
+      .then(setBestStrategy)
+      .catch((e) => setBestStrategyError(e?.message || "最优策略回测失败"))
+      .finally(() => setBestStrategyLoading(false));
   }, []);
+
+  useEffect(() => { loadBestStrategy(false); }, [loadBestStrategy]);
 
   const generateReport = useCallback(async () => {
     if (reportLoading) return;
@@ -1467,40 +1464,15 @@ export function HSTech() {
                   {forecast.model_error === "timesfm_not_installed" ? "模型未安装，仅显示基线" : "模型不可用"}
                 </span>
               )}
-              {Object.keys(allTrades).length > 0 ? (
-                <div className="inline-flex items-center rounded-lg border text-xs overflow-hidden">
-                  {([["median_trend", "中位线趋势"], ["band_reversion", "区间均值回归"]] as const).map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => setSignalStrategy(key)}
-                      className={cn(
-                        "px-2.5 py-1.5 transition-colors",
-                        signalStrategy === key
-                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  <button
-                    onClick={loadTrades}
-                    disabled={tradesLoading}
-                    className="px-2 py-1.5 border-l text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    {tradesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={loadTrades}
-                  disabled={tradesLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
-                >
-                  {tradesLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TrendingUp className="h-3.5 w-3.5" />}
-                  {tradesLoading ? "加载中..." : "显示信号"}
-                </button>
-              )}
+              <button
+                onClick={() => loadBestStrategy(true)}
+                disabled={bestStrategyLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
+                title={bestStrategy?.best?.strategy?.label ? `当前最优：${bestStrategy.best.strategy.label}` : "运行模拟盘策略池，刷新最优买卖信号"}
+              >
+                {bestStrategyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TrendingUp className="h-3.5 w-3.5" />}
+                {bestStrategyLoading ? "策略回测中..." : bestStrategy?.best?.strategy?.label ? `最优策略：${bestStrategy.best.strategy.label}` : "最优策略"}
+              </button>
               <button
                 onClick={() => loadForecast(1)}
                 disabled={forecastLoading}
@@ -1521,6 +1493,36 @@ export function HSTech() {
           ) : forecast ? (
             <>
               <ForecastChart data={forecast} height={300} trades={trades.length > 0 ? trades : undefined} />
+              {(bestStrategy || bestStrategyError || bestStrategyLoading) && (
+                <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">AI 总结 · 模拟盘最优策略</p>
+                      {bestStrategy?.best?.metrics && (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          {bestStrategy.best.strategy.label || bestStrategy.best.strategy.name}
+                          <span className="mx-1">·</span>
+                          总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}
+                          <span className="mx-1">·</span>
+                          最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
+                          <span className="mx-1">·</span>
+                          夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
+                        </p>
+                      )}
+                    </div>
+                    {bestStrategy?.cached && <span className="text-[10px] text-muted-foreground">24小时缓存</span>}
+                  </div>
+                  {bestStrategyLoading ? (
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在运行模拟盘策略池…
+                    </p>
+                  ) : bestStrategyError ? (
+                    <p className="mt-2 text-xs text-red-500">{bestStrategyError}</p>
+                  ) : bestStrategy?.summary ? (
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{bestStrategy.summary}</p>
+                  ) : null}
+                </div>
+              )}
               <CalibrationSection market={HSTECH_MARKET} code={HSTECH_CODE} context={512} />
               <StrategySection market={HSTECH_MARKET} code={HSTECH_CODE} context={512} />
               <SmartTSection />

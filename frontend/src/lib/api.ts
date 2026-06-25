@@ -252,6 +252,8 @@ export const api = {
     request<RobustnessResponse>(`/forecast/robustness?codes=${encodeURIComponent(codes)}&context=${context}&cost_bps=${costBps}`),
   getHSTechSmartT: (period = "ALL", refresh = false) =>
     request<SmartTResponse>(`/hstech/smart-t?period=${period}${refresh ? "&refresh=true" : ""}`),
+  getHSTechBestPaperStrategy: (refresh = false, startDate = "2020-01-01") =>
+    request<HSTechBestStrategyResponse>(`/hstech/best-paper-strategy?start_date=${startDate}${refresh ? "&refresh=true" : ""}`),
 
   // Alpha Zoo API
   listAlphas: (params: AlphaListParams = {}) => {
@@ -571,7 +573,12 @@ export interface PaperStrategyConfig {
     | "rsi_reversion"
     | "volatility_target"
     | "drawdown_rebalance"
-    | "smart_dca";
+    | "smart_dca"
+    | "trend_volatility_filter"
+    | "donchian_breakout"
+    | "bollinger_reversion"
+    | "trailing_stop"
+    | "monthly_rebalance";
   params: Record<string, unknown>;
 }
 
@@ -621,6 +628,45 @@ export interface PaperTrade {
 
 export interface PaperTradingList {
   items: PaperTradingRun[];
+}
+
+export interface HSTechBestStrategyCandidate {
+  strategy: { name: string; label?: string; params?: Record<string, unknown> };
+  status: "completed" | "failed";
+  metrics: {
+    total_return?: number | null;
+    sharpe?: number | null;
+    max_drawdown?: number | null;
+    trade_count?: number | null;
+  } | null;
+  error?: string | null;
+}
+
+export interface HSTechBestStrategyRun {
+  run_id: string;
+  title: string;
+  status: "completed" | "failed";
+  strategy: { name: string; label?: string; params?: Record<string, unknown> };
+  start_date: string;
+  end_date: string;
+  metrics: Record<string, unknown> | null;
+  equity_curve: EquityPoint[];
+  trades: TradeSignal[];
+  paper_trades?: PaperTrade[];
+  error: string | null;
+}
+
+export interface HSTechBestStrategyResponse {
+  code: string;
+  name: string;
+  market: string;
+  start_date: string;
+  end_date: string;
+  initial_total_usd: number;
+  best: HSTechBestStrategyRun;
+  candidates: HSTechBestStrategyCandidate[];
+  summary: string;
+  cached?: boolean;
 }
 
 export interface ForecastResponse {

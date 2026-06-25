@@ -32,6 +32,11 @@ class StrategyConfig(BaseModel):
         "volatility_target",
         "drawdown_rebalance",
         "smart_dca",
+        "trend_volatility_filter",
+        "donchian_breakout",
+        "bollinger_reversion",
+        "trailing_stop",
+        "monthly_rebalance",
     ] = "buy_and_hold"
     params: dict[str, Any] = Field(default_factory=dict)
 

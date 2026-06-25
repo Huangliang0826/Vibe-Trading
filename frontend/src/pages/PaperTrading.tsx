@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Briefcase, Plus, Trash2, Loader2, Play, ChevronDown, ChevronRight } from "lucide-react";
-import { api, type PaperTradingRun, type PaperHolding, type PaperStrategyConfig, type PaperTrade, type WatchlistMarket, type WatchlistQuote } from "@/lib/api";
+import { ApiError, api, type PaperTradingRun, type PaperHolding, type PaperStrategyConfig, type PaperTrade, type PriceHistoryBar, type PriceHistoryPeriod, type WatchlistMarket, type WatchlistQuote } from "@/lib/api";
 import { PaperEquityChart } from "@/components/charts/PaperEquityChart";
+import { PaperHoldingPriceChart } from "@/components/charts/PaperHoldingPriceChart";
 import { cn } from "@/lib/utils";
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | "neutral" }) {
@@ -68,7 +69,12 @@ type StrategyName =
   | "rsi_reversion"
   | "volatility_target"
   | "drawdown_rebalance"
-  | "smart_dca";
+  | "smart_dca"
+  | "trend_volatility_filter"
+  | "donchian_breakout"
+  | "bollinger_reversion"
+  | "trailing_stop"
+  | "monthly_rebalance";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -80,11 +86,33 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "volatility_target", label: "波动率仓位", desc: "波动越高仓位越低，优先控制风险" },
   { value: "drawdown_rebalance", label: "回撤加仓", desc: "下跌分批提高仓位，接近前高降仓" },
   { value: "smart_dca", label: "智能定投增强", desc: "低估多投，过热少投，高波动降速" },
+  { value: "trend_volatility_filter", label: "趋势波动过滤", desc: "只在趋势向上时持有，并按波动率降仓" },
+  { value: "donchian_breakout", label: "唐奇安突破", desc: "突破长期高点买入，跌破近期低点退出" },
+  { value: "bollinger_reversion", label: "布林带反转", desc: "跌破下轨买入，回归均线后卖出" },
+  { value: "trailing_stop", label: "移动止损", desc: "趋势确认后买入，用移动止损保护利润" },
+  { value: "monthly_rebalance", label: "月度再平衡", desc: "每月把组合调回目标比例" },
 ];
 
 const STRATEGY_LABELS = Object.fromEntries(
   STRATEGY_OPTIONS.map((option) => [option.value, option.label]),
 ) as Record<StrategyName, string>;
+
+const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
+  buy_and_hold: "策略原理：一次性按目标比例买入并长期持有，主要赚取资产本身的长期涨幅。",
+  dca: "策略原理：把资金按固定频率分批投入，降低一次性买在高点的风险。",
+  grid: "策略原理：在历史价格区间内越跌越买、越涨越卖，主要捕捉震荡行情里的波段收益。",
+  momentum_breakout: "策略原理：价格突破近期高点时追随强势趋势，跌破趋势线或触发止损时退出。",
+  moving_average_cross: "策略原理：用短期均线和长期均线判断趋势，短线上穿长线时持有，下穿时离场。",
+  rsi_reversion: "策略原理：用 RSI 判断超买超卖，超卖时低吸，反弹到偏热区间后卖出。",
+  volatility_target: "策略原理：根据近期波动率动态调仓，波动越高仓位越低，优先控制风险暴露。",
+  drawdown_rebalance: "策略原理：价格从高点回撤越多越提高仓位，接近前高时降低仓位锁定恢复收益。",
+  smart_dca: "策略原理：在普通定投基础上根据均线偏离和波动率调整投入倍率，低估多投、过热少投。",
+  trend_volatility_filter: "策略原理：只有价格处于长期上升趋势时才持有，同时用波动率控制仓位大小。",
+  donchian_breakout: "策略原理：突破长期高点时买入，跌破近期低点时退出，属于经典趋势跟随方法。",
+  bollinger_reversion: "策略原理：价格跌破布林带下轨时认为短期偏离过大，买入等待回归均线后卖出。",
+  trailing_stop: "策略原理：趋势确认后买入，随后用移动止损线跟随价格上移，尽量保住已有利润。",
+  monthly_rebalance: "策略原理：每月把组合恢复到目标权重，卖出涨多的、补回跌多的，保持风险结构稳定。",
+};
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
   const params: Record<string, unknown> = {};
@@ -103,8 +131,96 @@ function compareRuns(a: PaperTradingRun, b: PaperTradingRun): number {
   return finiteNumber(bm.max_drawdown, -Infinity) - finiteNumber(am.max_drawdown, -Infinity);
 }
 
+function buildLatestTradeSummary(run: PaperTradingRun): string {
+  const trades = run.trades ?? [];
+  if (!trades.length) return "最新交易：暂无交易记录，当前没有可跟随的买卖动作。";
+
+  const events = trades.flatMap((trade) => {
+    const entryAction = trade.direction >= 0 ? "买入" : "卖出";
+    const exitAction = trade.direction >= 0 ? "卖出" : "买入平空";
+    return [
+      {
+        date: trade.entry_time,
+        action: entryAction,
+        symbol: trade.symbol,
+        price: trade.entry_price,
+        isEndClose: false,
+      },
+      {
+        date: trade.exit_time,
+        action: exitAction,
+        symbol: trade.symbol,
+        price: trade.exit_price,
+        isEndClose: trade.exit_reason === "end_of_backtest",
+      },
+    ];
+  }).sort((a, b) => b.date.localeCompare(a.date));
+
+  const latestActionable = events.find((event) => !event.isEndClose);
+  if (latestActionable) {
+    return `最新交易：${latestActionable.date} ${latestActionable.action} ${latestActionable.symbol}，价格 ${latestActionable.price.toFixed(2)}。`;
+  }
+
+  const latestEntry = events.find((event) => event.action === "买入" || event.action === "卖出");
+  if (latestEntry) {
+    return `最新交易：最近一次实际动作是 ${latestEntry.date} ${latestEntry.action} ${latestEntry.symbol}，价格 ${latestEntry.price.toFixed(2)}；之后没有新的主动信号，当前更接近继续持有或等待下一次信号。`;
+  }
+
+  return "最新交易：只有回测结束统计平仓记录，不代表策略主动发出买卖信号。";
+}
+
+function buildOptimalSummary(runs: PaperTradingRun[], bestRunId: string | null): string {
+  if (!bestRunId) return "";
+  const completed = runs.filter((run) => run.status === "completed" && run.metrics);
+  const best = completed.find((run) => run.run_id === bestRunId);
+  if (!best?.metrics) return "";
+
+  const sorted = [...completed].sort(compareRuns);
+  const second = sorted.find((run) => run.run_id !== bestRunId);
+  const bestName = STRATEGY_LABELS[best.strategy.name as StrategyName] || best.strategy.name;
+  const principle = STRATEGY_PRINCIPLES[best.strategy.name as StrategyName];
+  const bestSharpe = finiteNumber(best.metrics.sharpe);
+  const bestReturn = finiteNumber(best.metrics.total_return);
+  const bestDrawdown = finiteNumber(best.metrics.max_drawdown);
+  const bestTrades = finiteNumber(best.metrics.trade_count, best.trades?.length ?? 0);
+
+  const reasons: string[] = [
+    principle,
+    `${bestName} 在当前组合和日期区间里综合排名第一，主要因为它的夏普比率为 ${bestSharpe.toFixed(2)}，在“风险调整后收益”排序中最占优。`,
+  ];
+
+  if (second?.metrics) {
+    const secondName = STRATEGY_LABELS[second.strategy.name as StrategyName] || second.strategy.name;
+    const secondSharpe = finiteNumber(second.metrics.sharpe);
+    const secondReturn = finiteNumber(second.metrics.total_return);
+    const secondDrawdown = finiteNumber(second.metrics.max_drawdown);
+    reasons.push(
+      `相比第二名 ${secondName}，它的夏普差距为 ${(bestSharpe - secondSharpe).toFixed(2)}，总收益差距为 ${fmtPctValue((bestReturn - secondReturn) * 100)}，最大亏损差距为 ${fmtPctValue((bestDrawdown - secondDrawdown) * 100)}。`,
+    );
+  }
+
+  const drawdownText = bestDrawdown < -0.2 ? "回撤仍然偏高，适合作为候选而不是直接实盘规则。" : "回撤相对可控，说明它没有单纯靠放大风险取胜。";
+  const tradeText = bestTrades <= 2 ? "交易次数很少，结果更接近中长期持有表现。" : `交易次数为 ${bestTrades.toFixed(0)} 次，说明它通过更主动的调仓改善了表现。`;
+  reasons.push(`本次回测总收益为 ${fmtPctValue(bestReturn * 100)}，最大亏损为 ${fmtPctValue(bestDrawdown * 100)}；${drawdownText}${tradeText}`);
+  reasons.push(buildLatestTradeSummary(best));
+
+  return reasons.join(" ");
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function todayInputValue(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isMissingRunError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
 }
 
 function WatchlistQuickAdd({
@@ -180,8 +296,8 @@ export function PaperTrading() {
   const [gridCount, setGridCount] = useState(5);
 
   // ── Config state ──
-  const [startDate, setStartDate] = useState("2024-01-01");
-  const [endDate, setEndDate] = useState("2025-01-01");
+  const [startDate, setStartDate] = useState("2020-01-01");
+  const [endDate, setEndDate] = useState(() => todayInputValue());
   const [initialUsd, setInitialUsd] = useState(100000);
   const [initialHkd, setInitialHkd] = useState(1000000);
 
@@ -195,11 +311,21 @@ export function PaperTrading() {
   const [optimalBestRunId, setOptimalBestRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [singlePricePeriod, setSinglePricePeriod] = useState<PriceHistoryPeriod>("ALL");
+  const [singlePriceBars, setSinglePriceBars] = useState<PriceHistoryBar[]>([]);
+  const [singlePriceLoading, setSinglePriceLoading] = useState(false);
+  const [singlePriceError, setSinglePriceError] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Load history on mount ──
   useEffect(() => {
+    api.listPaperTradingRuns()
+      .then((res) => setRuns(res.items))
+      .catch(() => {});
+  }, []);
+
+  const refreshRuns = useCallback(() => {
     api.listPaperTradingRuns()
       .then((res) => setRuns(res.items))
       .catch(() => {});
@@ -245,11 +371,52 @@ export function PaperTrading() {
           pollRef.current = null;
           api.listPaperTradingRuns().then((res) => setRuns(res.items)).catch(() => {});
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        if (isMissingRunError(e)) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setActiveRun(null);
+          setError("这条回测记录已不存在，已刷新历史列表。");
+          refreshRuns();
+        }
+      }
     }, 1500);
-  }, []);
+  }, [refreshRuns]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const singleHolding = activeRun?.status === "completed"
+    ? activeRun.holdings.filter((holding) => holding.symbol.toUpperCase() !== "CASH")[0]
+    : null;
+  const hasSingleHolding = activeRun?.status === "completed"
+    && activeRun.holdings.filter((holding) => holding.symbol.toUpperCase() !== "CASH").length === 1
+    && !!singleHolding;
+
+  useEffect(() => {
+    if (!hasSingleHolding || !singleHolding) {
+      setSinglePriceBars([]);
+      setSinglePriceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSinglePriceLoading(true);
+    setSinglePriceError(null);
+    api.getWatchlistHistory(singleHolding.symbol, singlePricePeriod, singleHolding.market)
+      .then((res) => {
+        if (cancelled) return;
+        setSinglePriceBars(res.bars);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setSinglePriceBars([]);
+        setSinglePriceError(e instanceof Error ? e.message : "获取标的价格走势失败");
+      })
+      .finally(() => {
+        if (!cancelled) setSinglePriceLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [hasSingleHolding, singleHolding?.market, singleHolding?.symbol, singlePricePeriod]);
 
   // ── Add holding ──
   const addHoldingToPortfolio = (symbol: string, market: "us" | "hk", name?: string) => {
@@ -376,11 +543,24 @@ export function PaperTrading() {
       const deadline = Date.now() + 20 * 60 * 1000;
 
       while (Date.now() < deadline) {
-        const latest = await Promise.all(runIds.map((runId) => api.getPaperTradingRun(runId)));
-        latest.forEach((run) => latestById.set(run.run_id, run));
-        const finished = latest.filter((run) => run.status === "completed" || run.status === "failed").length;
-        setOptimalRuns(latest);
-        setOptimalProgress(`最优策略回测中：${finished}/${latest.length} 已完成`);
+        const latest = await Promise.all(runIds.map(async (runId) => {
+          try {
+            return await api.getPaperTradingRun(runId);
+          } catch (e) {
+            if (isMissingRunError(e)) return null;
+            throw e;
+          }
+        }));
+        const available = latest.filter((run): run is PaperTradingRun => run !== null);
+        const availableIds = new Set(available.map((run) => run.run_id));
+        runIds.forEach((runId) => {
+          if (!availableIds.has(runId)) latestById.delete(runId);
+        });
+        available.forEach((run) => latestById.set(run.run_id, run));
+        const missing = latest.length - available.length;
+        const finished = available.filter((run) => run.status === "completed" || run.status === "failed").length + missing;
+        setOptimalRuns(available);
+        setOptimalProgress(`最优策略回测中：${finished}/${latest.length} 已完成${missing ? `，${missing} 条记录已不存在` : ""}`);
         if (finished === latest.length) break;
         await delay(1500);
       }
@@ -416,7 +596,13 @@ export function PaperTrading() {
     try {
       const run = await api.getPaperTradingRun(runId);
       setActiveRun(run);
-    } catch { /* ignore */ }
+    } catch (e) {
+      if (isMissingRunError(e)) {
+        setActiveRun(null);
+        setError("这条回测记录已不存在，已刷新历史列表。");
+        refreshRuns();
+      }
+    }
   };
 
   const deleteRun = async (runId: string) => {
@@ -428,6 +614,7 @@ export function PaperTrading() {
   };
 
   const m = activeRun?.metrics;
+  const optimalSummary = buildOptimalSummary(optimalRuns, optimalBestRunId);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
@@ -702,6 +889,14 @@ export function PaperTrading() {
               </p>
             </div>
           </div>
+          {optimalSummary && (
+            <div className="mb-3 rounded-lg border bg-muted/30 px-3 py-2.5">
+              <p className="text-xs font-medium text-foreground">AI 总结</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {optimalSummary}
+              </p>
+            </div>
+          )}
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-xs">
               <thead>
@@ -828,6 +1023,27 @@ export function PaperTrading() {
                 <div className="rounded-xl border bg-card p-4">
                   <h3 className="text-sm font-semibold mb-3">组合走势</h3>
                   <PaperEquityChart data={activeRun.equity_curve} trades={activeRun.trades} height={300} />
+                </div>
+              )}
+
+              {hasSingleHolding && singleHolding && (
+                <div className="rounded-xl border bg-card p-4">
+                  <div className="mb-3">
+                    <h3 className="text-sm font-semibold">标的价格走势</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {holdingNames[holdingKey(singleHolding.symbol, singleHolding.market)] || singleHolding.symbol}
+                      <span className="ml-1 font-mono">{singleHolding.symbol}</span>
+                    </p>
+                  </div>
+                  <PaperHoldingPriceChart
+                    bars={singlePriceBars}
+                    trades={activeRun.trades}
+                    period={singlePricePeriod}
+                    onPeriodChange={setSinglePricePeriod}
+                    loading={singlePriceLoading}
+                    height={320}
+                  />
+                  {singlePriceError && <p className="mt-2 text-xs text-red-500">{singlePriceError}</p>}
                 </div>
               )}
 

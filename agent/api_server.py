@@ -2345,6 +2345,8 @@ _STRATEGY_CACHE: dict[str, tuple[float, dict]] = {}
 _STRATEGY_TTL = 24 * 3600
 _SMART_T_CACHE: dict[str, tuple[float, dict]] = {}
 _SMART_T_TTL = 24 * 3600
+_HSTECH_BEST_STRATEGY_CACHE: dict[str, tuple[float, dict]] = {}
+_HSTECH_BEST_STRATEGY_TTL = 24 * 3600
 
 
 def _forecast_disk_cache_path(key: str) -> Path:
@@ -2576,6 +2578,36 @@ async def get_hstech_smart_t(
         **result,
     }
     _SMART_T_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
+
+
+@app.get("/hstech/best-paper-strategy")
+async def get_hstech_best_paper_strategy(
+    response: Response,
+    start_date: str = Query("2020-01-01", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    end_date: str = Query("", pattern=r"^$|^\d{4}-\d{2}-\d{2}$"),
+    refresh: bool = Query(False),
+):
+    """Run the paper-trading strategy pool for 03033.HK and return the winner."""
+    from src.paper_trading.hstech_best import default_end_date, run_hstech_best_strategy
+
+    response.headers["Cache-Control"] = "no-store"
+    effective_end = end_date or default_end_date()
+    key = f"hstech-best-paper:{start_date}:{effective_end}:v1"
+    cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
+    if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
+        return {**cached[1], "cached": True}
+    try:
+        payload = await asyncio.to_thread(
+            run_hstech_best_strategy,
+            start_date,
+            effective_end,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"HSTECH best strategy failed: {exc}") from exc
+    _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), payload)
     return {**payload, "cached": False}
 
 

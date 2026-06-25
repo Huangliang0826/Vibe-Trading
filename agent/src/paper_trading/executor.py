@@ -232,7 +232,7 @@ def _smart_dca_multiplier(
     params: Dict[str, Any],
 ) -> float:
     """Adjust each DCA tranche using trend distance and realised volatility."""
-    history = df.loc[df.index <= ts].copy()
+    history = df.loc[df.index < ts].copy()
     if history.empty:
         return 1.0
 

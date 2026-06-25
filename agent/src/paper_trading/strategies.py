@@ -53,11 +53,12 @@ def generate_dca(
     """Gradual weight ramp on a fixed schedule.
 
     On each DCA date the target weight steps up by ``step``, reaching the full
-    allocation weight by the end of the period.  Between DCA dates the weight
-    holds at its last value (no sell signal).
+    allocation weight after ``steps_to_full`` periods.  Between DCA dates the
+    weight holds at its last value (no sell signal).
     """
     frequency = params.get("frequency", "monthly")
     freq = _FREQ_MAP.get(frequency, "MS")
+    steps_to_full = max(int(params.get("steps_to_full", 12)), 1)
 
     signal_map: Dict[str, pd.Series] = {}
     for h in holdings:
@@ -69,9 +70,8 @@ def generate_dca(
             continue
 
         dca_dates = pd.date_range(start=dates[0], end=dates[-1], freq=freq)
-        n_steps = max(len(dca_dates), 1)
         target_w = _weight(h)
-        step = target_w / n_steps
+        step = target_w / steps_to_full
 
         weights = pd.Series(0.0, index=dates)
         current_w = 0.0
@@ -90,15 +90,17 @@ def generate_grid(
     data_map: Dict[str, pd.DataFrame],
     params: Dict[str, Any],
 ) -> Dict[str, pd.Series]:
-    """Price-level grid: buy at lower grids, sell at upper grids.
+    """Price-level grid using only information available at each date.
 
-    The grid divides the price range [lower, upper] into ``grid_count`` equal
-    bands.  The target weight is proportional to how far below the midpoint
-    the price currently sits.  At the lower bound the weight equals the full
-    allocation; at the upper bound the weight is zero (fully sold).
+    Auto range uses a rolling historical low/high shifted by one bar, avoiding
+    future leakage. Exposure is stepped into ``grid_count`` bands: near the
+    lower bound the strategy approaches the full allocation, and near the upper
+    bound it approaches cash.
     """
     grid_count = max(int(params.get("grid_count", 5)), 2)
     auto_range = params.get("auto_range", True)
+    range_lookback = max(int(params.get("range_lookback", 120)), grid_count * 2)
+    range_buffer = max(float(params.get("range_buffer", 0.02)), 0.0)
 
     signal_map: Dict[str, pd.Series] = {}
     for h in holdings:
@@ -109,26 +111,40 @@ def generate_grid(
         if df.empty:
             continue
 
-        close = df["close"]
+        close = df["close"].astype(float)
 
-        if auto_range:
-            lower = float(close.min()) * 0.98
-            upper = float(close.max()) * 1.02
+        has_manual_bounds = params.get("lower_price") is not None and params.get("upper_price") is not None
+
+        if auto_range or not has_manual_bounds:
+            past_close = close.shift(1)
+            min_periods = max(3, min(range_lookback // 3, range_lookback))
+            rolling_low = past_close.rolling(range_lookback, min_periods=min_periods).min()
+            rolling_high = past_close.rolling(range_lookback, min_periods=min_periods).max()
+            expanding_low = past_close.expanding(min_periods=1).min()
+            expanding_high = past_close.expanding(min_periods=1).max()
+            lower_series = rolling_low.combine_first(expanding_low).fillna(close.iloc[0]) * (1 - range_buffer)
+            upper_series = rolling_high.combine_first(expanding_high).fillna(close.iloc[0]) * (1 + range_buffer)
         else:
-            lower = float(params.get("lower_price", close.min()))
-            upper = float(params.get("upper_price", close.max()))
-
-        if upper <= lower:
-            upper = lower * 1.1
+            lower = float(params["lower_price"])
+            upper = float(params["upper_price"])
+            if upper <= lower:
+                upper = lower * 1.1
+            lower_series = pd.Series(lower, index=close.index)
+            upper_series = pd.Series(upper, index=close.index)
 
         target_w = _weight(h)
-        grid_levels = np.linspace(lower, upper, grid_count + 1)
 
         weights = pd.Series(0.0, index=close.index)
         for i, price in enumerate(close):
-            bands_below = sum(1 for lvl in grid_levels if price <= lvl)
-            ratio = bands_below / grid_count
-            weights.iloc[i] = ratio * target_w
+            lower = float(lower_series.iloc[i])
+            upper = float(upper_series.iloc[i])
+            if not np.isfinite(lower) or not np.isfinite(upper) or upper <= lower:
+                weights.iloc[i] = weights.iloc[i - 1] if i > 0 else target_w * 0.5
+                continue
+            raw_ratio = (upper - float(price)) / (upper - lower)
+            ratio = float(np.clip(raw_ratio, 0.0, 1.0))
+            stepped_ratio = np.floor(ratio * grid_count + 0.5) / grid_count
+            weights.iloc[i] = float(np.clip(stepped_ratio * target_w, 0.0, target_w))
 
         signal_map[code] = weights
     return signal_map
@@ -308,6 +324,174 @@ def generate_drawdown_rebalance(
     return signal_map
 
 
+# ── Trend + Volatility Filter ────────────────────────────────────────────────
+
+def generate_trend_volatility_filter(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Hold only in an uptrend, then scale exposure by realised volatility."""
+    ma_window = max(int(params.get("ma_window", 120)), 10)
+    vol_window = max(int(params.get("vol_window", 20)), 5)
+    target_vol = max(float(params.get("target_vol", 0.18)), 0.01)
+    min_weight_ratio = max(float(params.get("min_weight_ratio", 0.10)), 0.0)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        trend_ma = close.rolling(ma_window, min_periods=max(5, ma_window // 3)).mean()
+        realised_vol = close.pct_change().rolling(vol_window, min_periods=max(3, vol_window // 2)).std() * np.sqrt(252)
+        vol_ratio = (target_vol / realised_vol.replace(0, np.nan)).clip(lower=min_weight_ratio, upper=1.0)
+        in_trend = close > trend_ma
+        weights = (in_trend.astype(float) * vol_ratio.fillna(min_weight_ratio) * _weight(h))
+        signal_map[code] = weights.reindex(close.index).fillna(0.0)
+    return signal_map
+
+
+# ── Donchian Breakout ────────────────────────────────────────────────────────
+
+def generate_donchian_breakout(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Buy new highs and exit when price breaks below a recent low."""
+    entry_window = max(int(params.get("entry_window", 55)), 5)
+    exit_window = max(int(params.get("exit_window", 20)), 3)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        entry_high = close.shift(1).rolling(entry_window, min_periods=max(3, entry_window // 3)).max()
+        exit_low = close.shift(1).rolling(exit_window, min_periods=max(3, exit_window // 3)).min()
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        for i, price in enumerate(close):
+            if not in_position and pd.notna(entry_high.iloc[i]) and price > entry_high.iloc[i]:
+                in_position = True
+            elif in_position and pd.notna(exit_low.iloc[i]) and price < exit_low.iloc[i]:
+                in_position = False
+            weights.iloc[i] = _weight(h) if in_position else 0.0
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Bollinger Reversion ──────────────────────────────────────────────────────
+
+def generate_bollinger_reversion(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Buy below the lower band and sell after mean reversion."""
+    window = max(int(params.get("window", 20)), 5)
+    band_width = max(float(params.get("band_width", 2.0)), 0.5)
+    exit_at = params.get("exit_at", "middle")
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        middle = close.rolling(window, min_periods=max(3, window // 2)).mean()
+        std = close.rolling(window, min_periods=max(3, window // 2)).std()
+        lower = middle - band_width * std
+        upper = middle + band_width * std
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        for i, price in enumerate(close):
+            if not in_position and pd.notna(lower.iloc[i]) and price < lower.iloc[i]:
+                in_position = True
+            elif in_position:
+                exit_level = upper.iloc[i] if exit_at == "upper" else middle.iloc[i]
+                if pd.notna(exit_level) and price >= exit_level:
+                    in_position = False
+            weights.iloc[i] = _weight(h) if in_position else 0.0
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Trailing Stop ────────────────────────────────────────────────────────────
+
+def generate_trailing_stop(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Enter on trend confirmation and protect gains with a trailing stop."""
+    ma_window = max(int(params.get("ma_window", 60)), 5)
+    trailing_stop = float(params.get("trailing_stop", 0.12))
+    reentry_buffer = float(params.get("reentry_buffer", 0.02))
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        trend_ma = close.rolling(ma_window, min_periods=max(5, ma_window // 3)).mean()
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        high_water = 0.0
+        for i, price in enumerate(close):
+            ma = trend_ma.iloc[i]
+            if not in_position and pd.notna(ma) and price > ma * (1 + reentry_buffer):
+                in_position = True
+                high_water = float(price)
+            elif in_position:
+                high_water = max(high_water, float(price))
+                hit_stop = high_water > 0 and price <= high_water * (1 - trailing_stop)
+                lost_trend = pd.notna(ma) and price < ma
+                if hit_stop or lost_trend:
+                    in_position = False
+                    high_water = 0.0
+            weights.iloc[i] = _weight(h) if in_position else 0.0
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Monthly Rebalance ────────────────────────────────────────────────────────
+
+def generate_monthly_rebalance(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Rebalance back to target allocation on the first trading day each month."""
+    initial_cash_ratio = max(float(params.get("initial_cash_ratio", 0.0)), 0.0)
+    active_ratio = max(1.0 - initial_cash_ratio, 0.0)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        dates = data_map[code].index
+        if dates.empty:
+            continue
+        weights = pd.Series(_weight(h) * active_ratio, index=dates)
+        month_start = pd.Series(dates.to_period("M"), index=dates).ne(pd.Series(dates.to_period("M"), index=dates).shift(1))
+        weights.loc[~month_start] = np.nan
+        signal_map[code] = weights.ffill().fillna(_weight(h) * active_ratio)
+    return signal_map
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _rsi(close: pd.Series, window: int) -> pd.Series:
@@ -354,4 +538,14 @@ def generate_signals(
         return generate_volatility_target(holdings, data_map, params)
     if strategy_name == "drawdown_rebalance":
         return generate_drawdown_rebalance(holdings, data_map, params)
+    if strategy_name == "trend_volatility_filter":
+        return generate_trend_volatility_filter(holdings, data_map, params)
+    if strategy_name == "donchian_breakout":
+        return generate_donchian_breakout(holdings, data_map, params)
+    if strategy_name == "bollinger_reversion":
+        return generate_bollinger_reversion(holdings, data_map, params)
+    if strategy_name == "trailing_stop":
+        return generate_trailing_stop(holdings, data_map, params)
+    if strategy_name == "monthly_rebalance":
+        return generate_monthly_rebalance(holdings, data_map, params)
     raise ValueError(f"Unknown strategy: {strategy_name}")
