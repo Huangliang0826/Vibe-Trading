@@ -30,6 +30,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 
 from src.goal.context import default_goal_criteria
+from src.research_analysis import (
+    ResearchAnalysisCreate,
+    ResearchAnalysisList,
+    ResearchAnalysisRun,
+    ResearchAnalysisStatus,
+    ResearchAnalysisStore,
+    normalize_symbol,
+)
 from src.ui_services import build_run_analysis, load_run_context
 
 # UTF-8 on Windows
@@ -4082,6 +4090,129 @@ async def stop_runner_endpoint(payload: LiveRunnerControlRequest):
         {"kind": "runner_stopped", "broker": broker},
     )
     return {"broker": broker, "stopped": True, "was_running": True}
+
+
+_research_analysis_tasks: Dict[str, "asyncio.Task[Any]"] = {}
+_research_analysis_store: Optional[ResearchAnalysisStore] = None
+
+
+def _get_research_analysis_store() -> ResearchAnalysisStore:
+    global _research_analysis_store
+    if _research_analysis_store is None:
+        _research_analysis_store = ResearchAnalysisStore()
+    return _research_analysis_store
+
+
+async def _execute_research_analysis(run_id: str) -> None:
+    store = _get_research_analysis_store()
+    run = store.get_run(run_id)
+    if run is None:
+        return
+    try:
+        store.update_status(run_id, ResearchAnalysisStatus.running, "TradingAgents 分析运行中")
+        from src.research_analysis.tradingagents_adapter import run_tradingagents_analysis
+
+        report, raw_decision, analysis_config, report_markdown = await asyncio.to_thread(
+            run_tradingagents_analysis,
+            run.symbol,
+            run.analysis_date,
+        )
+        store.complete_run(run_id, report, raw_decision, analysis_config, report_markdown)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("research analysis %s failed: %s", run_id, exc)
+        try:
+            store.fail_run(run_id, str(exc))
+        except Exception:
+            logger.exception("failed to persist research analysis failure for %s", run_id)
+
+
+@app.post(
+    "/research-analysis/runs",
+    response_model=ResearchAnalysisRun,
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def create_research_analysis_run(payload: ResearchAnalysisCreate):
+    """Create a persistent local TradingAgents research analysis run."""
+    try:
+        normalized = normalize_symbol(payload.symbol, payload.market)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    store = _get_research_analysis_store()
+    run = store.create_run(normalized, payload.analysis_date)
+    task = asyncio.create_task(_execute_research_analysis(run.run_id))
+    _research_analysis_tasks[run.run_id] = task
+    task.add_done_callback(
+        lambda t, rid=run.run_id: _research_analysis_tasks.pop(rid, None)
+        if _research_analysis_tasks.get(rid) is t
+        else None
+    )
+    return run
+
+
+@app.get(
+    "/research-analysis/runs",
+    response_model=ResearchAnalysisList,
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def list_research_analysis_runs(
+    symbol: str | None = Query(None),
+    market: str | None = Query(None),
+    rating: str | None = Query(None),
+    query: str | None = Query(None),
+    date: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List locally archived research analyses."""
+    normalized_symbol: str | None = None
+    if symbol:
+        try:
+            normalized_symbol = normalize_symbol(symbol, market or "auto").symbol
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    runs = _get_research_analysis_store().list_runs(
+        symbol=normalized_symbol,
+        market=market,
+        rating=rating,
+        query=query,
+        date_filter=date,
+        limit=limit,
+    )
+    return ResearchAnalysisList(items=runs)
+
+
+@app.get(
+    "/research-analysis/runs/{run_id}",
+    response_model=ResearchAnalysisRun,
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def get_research_analysis_run(run_id: str):
+    """Return a single archived research analysis run."""
+    try:
+        run = _get_research_analysis_store().get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="research analysis run not found")
+    return run
+
+
+@app.delete(
+    "/research-analysis/runs/{run_id}",
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def delete_research_analysis_run(run_id: str):
+    """Delete one local research analysis record and its files."""
+    task = _research_analysis_tasks.pop(run_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+    try:
+        deleted = _get_research_analysis_store().delete_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="research analysis run not found")
+    return {"status": "deleted", "run_id": run_id}
 
 
 # ============================================================================

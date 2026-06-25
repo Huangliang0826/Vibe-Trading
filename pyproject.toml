@@ -56,6 +56,7 @@ dependencies = [
     "matplotlib>=3.7.0",
     "weasyprint>=60.0",
     "prompt_toolkit>=3.0.0",
+    "tradingagents @ git+https://github.com/TauricResearch/TradingAgents.git",
 ]
 
 [tool.uv]
@@ -64,7 +65,13 @@ dependencies = [
 # httpx>=0.28. Override mootdx's stale upper cap so the lock stays resolvable and
 # `uv sync --extra a-stock` installs mootdx against modern httpx — this encodes
 # the manual `pip install 'httpx>=0.28.1'` step the mootdx skill already documents.
-override-dependencies = ["httpx>=0.28.0"]
+override-dependencies = [
+    "httpx>=0.28.0",
+    # TradingAgents 0.3.0 currently resolves langgraph-prebuilt newer than the
+    # project-pinned langgraph 1.0.10; keep the pair aligned until langgraph 1.1
+    # is adopted here.
+    "langgraph-prebuilt==1.0.10",
+]
 
 [project.urls]
 Homepage = "https://vibetrading.wiki/"

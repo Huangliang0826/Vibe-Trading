@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Bot, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, LayoutDashboard, Radar, LineChart, Cpu } from "lucide-react";
+import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -13,11 +13,9 @@ const APP_VERSION = "v0.1.9";
 const NAV = [
   { to: "/overview", icon: LayoutDashboard, label: "总览" },
   { to: "/scanner", icon: Radar, label: "机会扫描" },
+  { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
   { to: "/forecast", icon: LineChart, label: "走势预测" },
   { to: "/hstech", icon: Cpu, label: "恒生科技" },
-
-  { to: "/agent", icon: Bot, label: "智能体" },
-  { to: "/alpha-zoo", icon: Layers, label: "Alpha 因子库" },
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 
@@ -30,6 +28,7 @@ export function Layout() {
   const sseStatus = useAgentStore(s => s.sseStatus);
   const sseRetryAttempt = useAgentStore(s => s.sseRetryAttempt);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("qa-sidebar") === "collapsed");
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(() => localStorage.getItem("qa-sessions") !== "expanded");
 
   const activeSessionId = searchParams.get("session");
   const streamingSessionId = useAgentStore(s => s.streamingSessionId);
@@ -37,6 +36,10 @@ export function Layout() {
   useEffect(() => {
     localStorage.setItem("qa-sidebar", collapsed ? "collapsed" : "expanded");
   }, [collapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("qa-sessions", sessionsCollapsed ? "collapsed" : "expanded");
+  }, [sessionsCollapsed]);
 
   const loadSessions = () => {
     api.listSessions()
@@ -112,12 +115,16 @@ export function Layout() {
 
         {/* Sessions — hidden when collapsed */}
         {!collapsed && (
-          <div className="flex-1 overflow-auto border-t mt-2 flex flex-col">
+          <div className={cn("border-t mt-2 flex flex-col", sessionsCollapsed ? "shrink-0" : "flex-1 overflow-auto")}>
             <div className="flex items-center justify-between px-4 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <button
+                onClick={() => setSessionsCollapsed((v) => !v)}
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {sessionsCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                 <MessageSquare className="h-3.5 w-3.5" />
                 对话记录
-              </span>
+              </button>
               <Link
                 to="/agent"
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -127,7 +134,7 @@ export function Layout() {
               </Link>
             </div>
 
-            <div className="px-2 pb-2 space-y-0.5 overflow-auto flex-1">
+            {!sessionsCollapsed && <div className="px-2 pb-2 space-y-0.5 overflow-auto flex-1">
               {sessionsLoading ? (
                 <div className="space-y-1.5 px-2 py-1">
                   {[1, 2, 3].map((i) => (
@@ -202,7 +209,7 @@ export function Layout() {
                   </div>
                 );
               })}
-            </div>
+            </div>}
           </div>
         )}
 

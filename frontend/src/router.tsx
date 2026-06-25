@@ -30,6 +30,9 @@ const Forecast = lazy(() =>
 const HSTech = lazy(() =>
   import("@/pages/HSTech").then((m) => ({ default: m.HSTech })),
 );
+const ResearchAnalysis = lazy(() =>
+  import("@/pages/ResearchAnalysis").then((m) => ({ default: m.ResearchAnalysis })),
+);
 
 function PageLoader() {
   return (
@@ -60,6 +63,7 @@ export const router = createBrowserRouter([
       { path: "/compare", element: wrap(Compare) },
       { path: "/correlation", element: wrap(Correlation) },
       { path: "/scanner", element: wrap(Scanner) },
+      { path: "/research-analysis", element: wrap(ResearchAnalysis) },
       { path: "/forecast", element: wrap(Forecast) },
       { path: "/hstech", element: wrap(HSTech) },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },

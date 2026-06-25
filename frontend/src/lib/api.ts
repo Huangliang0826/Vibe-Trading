@@ -147,6 +147,30 @@ export const api = {
       body: JSON.stringify(settings),
     }),
 
+  // 投研分析
+  createResearchAnalysisRun: (body: ResearchAnalysisCreate) =>
+    request<ResearchAnalysisRun>("/research-analysis/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getResearchAnalysisRun: (runId: string) =>
+    request<ResearchAnalysisRun>(`/research-analysis/runs/${encodeURIComponent(runId)}`),
+  listResearchAnalysisRuns: (params: ResearchAnalysisListParams = {}) => {
+    const q = new URLSearchParams();
+    if (params.symbol) q.set("symbol", params.symbol);
+    if (params.market && params.market !== "all") q.set("market", params.market);
+    if (params.rating && params.rating !== "all") q.set("rating", params.rating);
+    if (params.query) q.set("query", params.query);
+    if (params.date) q.set("date", params.date);
+    if (params.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return request<ResearchAnalysisList>(`/research-analysis/runs${qs ? `?${qs}` : ""}`);
+  },
+  deleteResearchAnalysisRun: (runId: string) =>
+    request<{ status: string; run_id: string }>(`/research-analysis/runs/${encodeURIComponent(runId)}`, {
+      method: "DELETE",
+    }),
+
   // Scanner API
   getScanLatest: () => request<any>("/scan/latest"),
   getScanDates: () => request<{ dates: string[] }>("/scan/dates"),
@@ -410,6 +434,64 @@ export interface IndustryReportsResponse {
   error?: string;
   begin: string;
   end: string;
+}
+
+export type ResearchAnalysisRating = "buy" | "hold" | "sell";
+export type ResearchAnalysisStatus = "queued" | "running" | "completed" | "failed";
+export type ResearchAnalysisMarket = "auto" | "us" | "hk";
+
+export interface ResearchAnalysisCreate {
+  symbol: string;
+  market?: ResearchAnalysisMarket;
+  analysis_date?: string | null;
+}
+
+export interface ResearchAnalysisReport {
+  rating: ResearchAnalysisRating;
+  confidence: number;
+  horizon: string;
+  summary: string;
+  bull_case: string;
+  bear_case: string;
+  technical_view: string;
+  fundamental_view: string;
+  sentiment_news_view: string;
+  risk_factors: string[];
+  suggested_action: string;
+  disclaimer: string;
+  structured: boolean;
+}
+
+export interface ResearchAnalysisRun {
+  run_id: string;
+  symbol: string;
+  market: string;
+  company_name?: string | null;
+  analysis_date: string;
+  created_at: string;
+  updated_at: string;
+  status: ResearchAnalysisStatus;
+  rating?: ResearchAnalysisRating | null;
+  confidence?: number | null;
+  summary: string;
+  report?: ResearchAnalysisReport | null;
+  report_markdown: string;
+  raw_decision?: unknown;
+  error?: string | null;
+  analysis_config: Record<string, unknown>;
+}
+
+export interface ResearchAnalysisList {
+  items: ResearchAnalysisRun[];
+}
+
+export interface ResearchAnalysisListParams {
+  symbol?: string;
+  market?: "all" | "us" | "hk";
+  rating?: "all" | ResearchAnalysisRating;
+  query?: string;
+  date?: string;
+  limit?: number;
 }
 
 export interface ForecastResponse {
