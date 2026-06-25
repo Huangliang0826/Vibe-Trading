@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from typing_extensions import TypedDict
+
+logger = logging.getLogger(__name__)
 
 from src.research_analysis.models import ResearchAnalysisReport
 from src.research_analysis.storage import DISCLAIMER, fallback_report
@@ -162,7 +165,45 @@ def _ensure_langgraph_runtime_compat() -> None:
             Runtime.server_info = None  # type: ignore[attr-defined]
 
 
-def run_tradingagents_analysis(symbol: str, analysis_date: str) -> tuple[ResearchAnalysisReport, Any, dict[str, Any], str]:
+_NODE_LABEL: dict[str, str] = {
+    "Market Analyst": "📊 市场/技术分析中",
+    "market_tools": "📊 获取市场数据中",
+    "clear_market_messages": "📊 市场分析完成",
+    "Sentiment Analyst": "💬 情绪分析中",
+    "social_tools": "💬 获取社交媒体数据中",
+    "clear_social_messages": "💬 情绪分析完成",
+    "News Analyst": "📰 新闻分析中",
+    "news_tools": "📰 获取新闻数据中",
+    "clear_news_messages": "📰 新闻分析完成",
+    "Fundamentals Analyst": "📋 基本面分析中",
+    "fundamentals_tools": "📋 获取基本面数据中",
+    "clear_fundamentals_messages": "📋 基本面分析完成",
+    "Bull Researcher": "🐂 多方研究员辩论中",
+    "Bear Researcher": "🐻 空方研究员辩论中",
+    "Research Manager": "🎯 研究经理综合判断中",
+    "Trader": "💹 交易员制定计划中",
+    "Aggressive Analyst": "⚡ 激进风控分析师评估中",
+    "Neutral Analyst": "⚖️ 中立风控分析师评估中",
+    "Conservative Analyst": "🛡️ 保守风控分析师评估中",
+    "Portfolio Manager": "📝 组合经理最终决策中",
+}
+
+
+def resolve_company_name(symbol: str) -> str | None:
+    """Best-effort company name lookup via yfinance."""
+    try:
+        import yfinance as yf
+        info = yf.Ticker(symbol).info or {}
+        return info.get("longName") or info.get("shortName") or None
+    except Exception:
+        return None
+
+
+def run_tradingagents_analysis(
+    symbol: str,
+    analysis_date: str,
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[ResearchAnalysisReport, Any, dict[str, Any], str]:
     """Run TradingAgents synchronously; callers should offload this to a worker thread."""
     env_values = _dotenv_values()
     supported_llm_keys = [
@@ -207,8 +248,68 @@ def run_tradingagents_analysis(symbol: str, analysis_date: str) -> tuple[Researc
     elif provider == "openai":
         config["backend_url"] = _env("OPENAI_BASE_URL", env_values).strip() or config.get("backend_url")
     config["output_language"] = "Chinese"
+
+    if on_progress:
+        on_progress("🔧 初始化 TradingAgents 引擎")
+
     graph = TradingAgentsGraph(debug=False, config=config)
-    final_state, decision = graph.propagate(symbol, analysis_date)
+
+    # Use streaming to report per-node progress
+    graph.ticker = symbol
+    graph._resolve_pending_entries(symbol)
+
+    if graph.config.get("checkpoint_enabled"):
+        from tradingagents.graph.checkpointing import get_checkpointer, checkpoint_step
+        graph._checkpointer_ctx = get_checkpointer(graph.config["data_cache_dir"], symbol)
+        saver = graph._checkpointer_ctx.__enter__()
+        graph.graph = graph.workflow.compile(checkpointer=saver)
+
+    try:
+        past_context = graph.memory_log.get_past_context(symbol)
+        instrument_context = graph.resolve_instrument_context(symbol)
+        init_agent_state = graph.propagator.create_initial_state(
+            symbol, analysis_date, asset_type="stock",
+            past_context=past_context, instrument_context=instrument_context,
+        )
+        args = graph.propagator.get_graph_args()
+
+        if graph.config.get("checkpoint_enabled"):
+            from tradingagents.graph.checkpointing import thread_id
+            tid = thread_id(symbol, str(analysis_date))
+            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
+
+        final_state = {}
+        seen_nodes: set[str] = set()
+        for chunk in graph.graph.stream(init_agent_state, **args):
+            final_state.update(chunk)
+            for node_name in chunk:
+                if node_name not in seen_nodes:
+                    seen_nodes.add(node_name)
+                    label = _NODE_LABEL.get(node_name)
+                    if label and on_progress:
+                        on_progress(label)
+
+        graph.curr_state = final_state
+        graph._log_state(analysis_date, final_state)
+        graph.memory_log.store_decision(
+            ticker=symbol,
+            trade_date=analysis_date,
+            final_trade_decision=final_state["final_trade_decision"],
+        )
+        if graph.config.get("checkpoint_enabled"):
+            from tradingagents.graph.checkpointing import clear_checkpoint
+            clear_checkpoint(graph.config["data_cache_dir"], symbol, str(analysis_date))
+
+        decision = graph.process_signal(final_state["final_trade_decision"])
+    finally:
+        if graph._checkpointer_ctx is not None:
+            graph._checkpointer_ctx.__exit__(None, None, None)
+            graph._checkpointer_ctx = None
+            graph.graph = graph.workflow.compile()
+
+    if on_progress:
+        on_progress("✅ 分析完成，正在生成报告")
+
     report_markdown = state_to_markdown(final_state, decision) if isinstance(final_state, dict) else _raw_text(final_state)
     raw_decision = {
         "decision": decision,

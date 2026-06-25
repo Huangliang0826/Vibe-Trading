@@ -27,7 +27,7 @@ function changeColor(pct: number) {
   return "text-muted-foreground";
 }
 
-// localStorage helpers
+// localStorage helpers (used as fast cache, backend is source of truth)
 function loadList(key: string): string[] {
   try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
 }
@@ -182,7 +182,26 @@ function WatchlistColumn({
   const [addError, setAddError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Persist codes to localStorage whenever they change + notify parent
+  // Load from backend on mount (backend is source of truth)
+  useEffect(() => {
+    api.getWatchlistCodes(market).then((res) => {
+      if (res.codes.length > 0 || loadList(storageKey).length === 0) {
+        setCodes(res.codes);
+        saveList(storageKey, res.codes);
+      } else {
+        // First migration: push localStorage data to backend
+        const local = loadList(storageKey);
+        if (local.length > 0) {
+          api.setWatchlistCodes(market, local).catch(() => {});
+        }
+      }
+    }).catch(() => {
+      // Offline fallback: keep localStorage data
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [market]);
+
+  // Sync localStorage cache + notify parent
   useEffect(() => {
     saveList(storageKey, codes);
     onCodesChange?.(codes);
@@ -236,6 +255,7 @@ function WatchlistColumn({
       setQuotes((prev) => new Map(prev).set(code, result));
       setInputVal("");
       setAdding(false);
+      api.addWatchlistCode(market, code).catch(() => {});
     } catch {
       setAddError("获取行情失败，请检查代码");
     } finally {
@@ -246,6 +266,7 @@ function WatchlistColumn({
   const handleRemove = (code: string) => {
     setCodes((prev) => prev.filter((c) => c !== code));
     setQuotes((prev) => { const m = new Map(prev); m.delete(code); return m; });
+    api.removeWatchlistCode(market, code).catch(() => {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { AlertCircle, ChevronDown, ChevronRight, FileSearch, Loader2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api, type ResearchAnalysisListParams, type ResearchAnalysisRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -238,7 +240,9 @@ export function ResearchAnalysis() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">{run.symbol}</div>
+                        <div className="truncate text-sm font-semibold">
+                          {run.symbol}{run.company_name ? ` · ${run.company_name}` : ""}
+                        </div>
                         <div className="mt-1 text-xs text-muted-foreground">{run.analysis_date}</div>
                       </div>
                       <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[11px]", badgeClass(run.status))}>
@@ -312,7 +316,9 @@ export function ResearchAnalysis() {
                 <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-xl font-semibold">{selectedRun.symbol}</h2>
+                      <h2 className="text-xl font-semibold">
+                        {selectedRun.symbol}{selectedRun.company_name ? ` · ${selectedRun.company_name}` : ""}
+                      </h2>
                       <span className={cn("rounded-full border px-2 py-0.5 text-xs", badgeClass(selectedRun.status))}>
                         {STATUS_LABEL[selectedRun.status] || selectedRun.status}
                       </span>
@@ -363,9 +369,11 @@ export function ResearchAnalysis() {
                 )}
 
                 {report && !report.structured ? (
-                  <pre className="whitespace-pre-wrap rounded-md bg-muted p-4 text-sm leading-6 text-muted-foreground">
-                    {rawAnalysis || report.summary}
-                  </pre>
+                  <article className="prose prose-sm dark:prose-invert max-w-none rounded-md bg-muted p-4">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {rawAnalysis || report.summary}
+                    </ReactMarkdown>
+                  </article>
                 ) : report ? (
                   <article className="space-y-4">
                     <DetailSection title="核心结论">{report.summary}</DetailSection>
@@ -383,9 +391,11 @@ export function ResearchAnalysis() {
                     <DetailSection title="声明">{report.disclaimer}</DetailSection>
                   </article>
                 ) : selectedRun.report_markdown ? (
-                  <pre className="whitespace-pre-wrap rounded-md bg-muted p-4 text-sm leading-6 text-muted-foreground">
-                    {selectedRun.report_markdown}
-                  </pre>
+                  <article className="prose prose-sm dark:prose-invert max-w-none rounded-md bg-muted p-4">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {selectedRun.report_markdown}
+                    </ReactMarkdown>
+                  </article>
                 ) : null}
               </div>
             )}

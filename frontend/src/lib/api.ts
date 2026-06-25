@@ -274,6 +274,24 @@ export const api = {
   // 行情看板 — major index quotes (A-share + US)
   getMarketIndices: () => request<MarketIndex[]>("/market-indices"),
 
+  // 自选股持久化
+  getWatchlistCodes: (market: WatchlistMarket) =>
+    request<{ market: string; codes: string[] }>(`/watchlist/codes?market=${market}`),
+  setWatchlistCodes: (market: WatchlistMarket, codes: string[]) =>
+    request<{ market: string; codes: string[] }>(`/watchlist/codes?market=${market}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes }),
+    }),
+  addWatchlistCode: (market: WatchlistMarket, code: string) =>
+    request<{ market: string; codes: string[] }>(
+      `/watchlist/codes/add?market=${market}&code=${encodeURIComponent(code)}`,
+      { method: "POST" },
+    ),
+  removeWatchlistCode: (market: WatchlistMarket, code: string) =>
+    request<{ market: string; codes: string[] }>(
+      `/watchlist/codes/remove?market=${market}&code=${encodeURIComponent(code)}`,
+      { method: "DELETE" },
+    ),
+
   // 自选股行情
   getWatchlistQuote: (codes: string[], market: WatchlistMarket) =>
     request<WatchlistQuote[]>(`/watchlist/quote?codes=${encodeURIComponent(codes.join(","))}&market=${market}`),

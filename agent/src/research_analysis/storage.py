@@ -211,6 +211,16 @@ class ResearchAnalysisStore:
         self.append_event(run_id, "completed", "分析完成")
         return run
 
+    def update_company_name(self, run_id: str, company_name: str) -> None:
+        run = self.get_run(run_id)
+        if run is None:
+            return
+        run.company_name = company_name
+        run.updated_at = utc_now()
+        self._write_run_files(run, run.raw_decision, run.report_markdown)
+        with self._connect() as conn:
+            conn.execute("UPDATE runs SET company_name = ? WHERE run_id = ?", (company_name, run_id))
+
     def fail_run(self, run_id: str, message: str) -> ResearchAnalysisRun:
         return self.update_status(run_id, ResearchAnalysisStatus.failed, summary="分析失败", error=message)
 

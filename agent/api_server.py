@@ -1851,6 +1851,54 @@ def _fetch_us_indices() -> list[dict]:
     return out
 
 
+# ── Watchlist persistence ────────────────────────────────────────────────
+
+from src.watchlist import WatchlistStore
+
+_watchlist_store: Optional[WatchlistStore] = None
+
+
+def _get_watchlist_store() -> WatchlistStore:
+    global _watchlist_store
+    if _watchlist_store is None:
+        _watchlist_store = WatchlistStore()
+    return _watchlist_store
+
+
+@app.get("/watchlist/codes", dependencies=[Depends(require_local_or_auth)])
+async def get_watchlist_codes(market: str = Query(..., description="'hk' or 'us'")):
+    """Return saved watchlist codes for a market."""
+    return {"market": market, "codes": _get_watchlist_store().get(market)}
+
+
+@app.put("/watchlist/codes", dependencies=[Depends(require_local_or_auth)])
+async def set_watchlist_codes(
+    market: str = Query(..., description="'hk' or 'us'"),
+    payload: dict = ...,
+):
+    """Replace the entire watchlist for a market."""
+    codes = payload.get("codes", [])
+    return {"market": market, "codes": _get_watchlist_store().set(market, codes)}
+
+
+@app.post("/watchlist/codes/add", dependencies=[Depends(require_local_or_auth)])
+async def add_watchlist_code(
+    market: str = Query(..., description="'hk' or 'us'"),
+    code: str = Query(..., description="Stock code to add"),
+):
+    """Add a single code to the watchlist."""
+    return {"market": market, "codes": _get_watchlist_store().add(market, code)}
+
+
+@app.delete("/watchlist/codes/remove", dependencies=[Depends(require_local_or_auth)])
+async def remove_watchlist_code(
+    market: str = Query(..., description="'hk' or 'us'"),
+    code: str = Query(..., description="Stock code to remove"),
+):
+    """Remove a single code from the watchlist."""
+    return {"market": market, "codes": _get_watchlist_store().remove(market, code)}
+
+
 @app.get("/watchlist/quote")
 async def get_watchlist_quote(
     codes: str = Query(..., description="Comma-separated stock codes"),
@@ -4110,14 +4158,29 @@ async def _execute_research_analysis(run_id: str) -> None:
         return
     try:
         store.update_status(run_id, ResearchAnalysisStatus.running, "TradingAgents 分析运行中")
-        from src.research_analysis.tradingagents_adapter import run_tradingagents_analysis
+
+        from src.research_analysis.tradingagents_adapter import resolve_company_name, run_tradingagents_analysis
+
+        # Resolve company name
+        company_name = await asyncio.to_thread(resolve_company_name, run.symbol)
+        if company_name:
+            store.update_company_name(run_id, company_name)
+
+        def on_progress(message: str) -> None:
+            try:
+                store.update_status(run_id, ResearchAnalysisStatus.running, message)
+            except Exception:
+                pass
 
         report, raw_decision, analysis_config, report_markdown = await asyncio.to_thread(
             run_tradingagents_analysis,
             run.symbol,
             run.analysis_date,
+            on_progress,
         )
-        store.complete_run(run_id, report, raw_decision, analysis_config, report_markdown)
+        completed_run = store.complete_run(run_id, report, raw_decision, analysis_config, report_markdown)
+        if company_name and not completed_run.company_name:
+            store.update_company_name(run_id, company_name)
     except Exception as exc:  # noqa: BLE001
         logger.warning("research analysis %s failed: %s", run_id, exc)
         try:
