@@ -1,4 +1,9 @@
-from src.paper_trading.hstech_best import _candidate_row, _paired_trade_signals, summarize_best_strategy
+from src.paper_trading.hstech_best import (
+    _candidate_row,
+    _paired_trade_signals,
+    normalize_best_strategy_symbol,
+    summarize_best_strategy,
+)
 
 
 def test_paired_trade_signals_convert_paper_trade_rows():
@@ -69,6 +74,13 @@ def test_paired_trade_signals_convert_trade_record_rows():
     ]
 
 
+def test_normalize_best_strategy_symbol_handles_hk_and_us():
+    assert normalize_best_strategy_symbol("00700", "hk") == ("0700", "0700.HK", "0700")
+    assert normalize_best_strategy_symbol("0700.HK", "hk") == ("0700", "0700.HK", "0700")
+    assert normalize_best_strategy_symbol("AAPL", "us") == ("AAPL", "AAPL.US", "AAPL")
+    assert normalize_best_strategy_symbol("AAPL.US", "us") == ("AAPL", "AAPL.US", "AAPL")
+
+
 def test_summary_starts_with_strategy_principle_and_latest_trade():
     runs = [
         {
@@ -95,11 +107,11 @@ def test_summary_starts_with_strategy_principle_and_latest_trade():
         },
     ]
 
-    summary = summarize_best_strategy(runs, "donchian_breakout")
+    summary = summarize_best_strategy(runs, "donchian_breakout", display_code="0700")
 
     assert summary.startswith("策略原理：突破长期高点时买入")
     assert "唐奇安突破" in summary
-    assert "最新交易：2024-03-04 卖出 03033.HK" in summary
+    assert "最新交易：2024-03-04 卖出 0700" in summary
 
 
 def test_candidate_row_keeps_compact_metrics():

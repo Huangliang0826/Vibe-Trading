@@ -41,6 +41,9 @@ STRATEGY_LABELS: dict[str, str] = {
     "bollinger_reversion": "布林均值回归",
     "trailing_stop": "移动止损",
     "monthly_rebalance": "月度再平衡",
+    "macd_divergence": "MACD 背离",
+    "dual_momentum": "双动量轮动",
+    "vol_trend_rotation": "攻守轮动",
 }
 
 STRATEGY_PRINCIPLES: dict[str, str] = {
@@ -58,6 +61,9 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "bollinger_reversion": "策略原理：价格跌破布林带下轨时认为短期偏离过大，买入等待回归均线后卖出。",
     "trailing_stop": "策略原理：趋势确认后买入，随后用移动止损线跟随价格上移，尽量保住已有利润。",
     "monthly_rebalance": "策略原理：每月恢复到目标权重，保持风险结构稳定。",
+    "macd_divergence": "策略原理：当价格创新低但 MACD 抬高（底背离）且柱状图转向时买入，出现顶背离或 MACD 死叉时退出，捕捉动量反转。",
+    "dual_momentum": "策略原理：每月按近期涨幅排序，只在动量为正时持有该标的，否则转为现金。",
+    "vol_trend_rotation": "策略原理：趋势向上且波动低于自身长期均值时持有，否则转为现金，优先控制回撤。",
 }
 
 STRATEGY_NAMES: tuple[str, ...] = tuple(STRATEGY_LABELS)
@@ -71,6 +77,24 @@ def default_end_date() -> str:
     return date.today().isoformat()
 
 
+def normalize_best_strategy_symbol(code: str, market: str) -> tuple[str, str, str]:
+    """Return (paper_symbol, yahoo_symbol, display_code) for a single-symbol run."""
+    mk = market.lower().strip()
+    symbol = code.strip().upper()
+    if mk == "hk":
+        digits = "".join(ch for ch in symbol.replace(".HK", "") if ch.isdigit())
+        if not digits:
+            raise ValueError(f"Invalid HK symbol: {code}")
+        n = int(digits)
+        return f"{n:04d}", f"{n:04d}.HK", f"{n:04d}"
+    if mk == "us":
+        bare = symbol.replace(".US", "")
+        if not bare:
+            raise ValueError(f"Invalid US symbol: {code}")
+        return bare, f"{bare}.US", bare
+    raise ValueError("market must be 'hk' or 'us'")
+
+
 def run_hstech_best_strategy(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -78,14 +102,48 @@ def run_hstech_best_strategy(
     initial_hkd: float = 1_000_000.0,
 ) -> dict[str, Any]:
     """Run the paper-trading strategy pool for 3033.HK and display it as 03033.HK."""
+    return run_single_symbol_best_strategy(
+        code=HSTECH_PAPER_CODE,
+        market=HSTECH_PAPER_MARKET,
+        name=HSTECH_PAPER_NAME,
+        display_code=HSTECH_DISPLAY_CODE,
+        start_date=start_date,
+        end_date=end_date,
+        initial_usd=initial_usd,
+        initial_hkd=initial_hkd,
+        run_prefix="hstech",
+        title_prefix="HSTECH",
+    )
+
+
+def run_single_symbol_best_strategy(
+    code: str,
+    market: str,
+    name: str | None = None,
+    display_code: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    initial_usd: float = 100_000.0,
+    initial_hkd: float = 1_000_000.0,
+    run_prefix: str | None = None,
+    title_prefix: str | None = None,
+) -> dict[str, Any]:
+    """Run the paper-trading strategy pool for one HK/US symbol and return the winner."""
     start = start_date or default_start_date()
     end = end_date or default_end_date()
-    holding = PaperHolding(symbol=HSTECH_PAPER_CODE, market=HSTECH_PAPER_MARKET, allocation_pct=100.0)
+    mk = market.lower().strip()
+    paper_symbol, yahoo_symbol, normalized_display = normalize_best_strategy_symbol(code, mk)
+    shown_code = display_code or normalized_display
+    shown_name = name or shown_code
+    prefix = run_prefix or f"{mk}-{normalized_display.lower()}"
+    title = title_prefix or shown_code
+
+    holding = PaperHolding(symbol=paper_symbol, market=mk, allocation_pct=100.0)
     initial_total_usd = round(initial_usd + initial_hkd * HKD_TO_USD, 2)
     loader = YFinanceLoader()
-    data_map = loader.fetch([f"{HSTECH_PAPER_CODE}.HK"], start, end, interval="1D")
+    data_map = loader.fetch([yahoo_symbol], start, end, interval="1D")
     if not data_map:
-        raise ValueError("No price data fetched for 3033.HK")
+        raise ValueError(f"No price data fetched for {yahoo_symbol}")
 
     runs = [
         _run_strategy(
@@ -95,20 +153,22 @@ def run_hstech_best_strategy(
             start_date=start,
             end_date=end,
             initial_total_usd=initial_total_usd,
+            run_prefix=prefix,
+            title_prefix=title,
         )
         for name in STRATEGY_NAMES
     ]
     completed = [run for run in runs if run["status"] == "completed" and run.get("metrics")]
     if not completed:
         failed = next((run for run in runs if run["status"] == "failed"), None)
-        raise ValueError((failed or {}).get("error") or "All HSTECH paper strategies failed")
+        raise ValueError((failed or {}).get("error") or f"All paper strategies failed for {shown_code}")
 
     best = sorted(completed, key=_strategy_sort_key)[0]
-    summary = summarize_best_strategy(runs, best["strategy"]["name"])
+    summary = summarize_best_strategy(runs, best["strategy"]["name"], display_code=shown_code)
     return {
-        "code": HSTECH_DISPLAY_CODE,
-        "name": HSTECH_PAPER_NAME,
-        "market": HSTECH_PAPER_MARKET,
+        "code": shown_code,
+        "name": shown_name,
+        "market": mk,
         "start_date": start,
         "end_date": end,
         "initial_total_usd": initial_total_usd,
@@ -133,6 +193,8 @@ def _run_strategy(
     start_date: str,
     end_date: str,
     initial_total_usd: float,
+    run_prefix: str = "hstech",
+    title_prefix: str = "HSTECH",
 ) -> dict[str, Any]:
     params = _strategy_params(strategy_name)
     try:
@@ -150,7 +212,7 @@ def _run_strategy(
             if not valid_codes:
                 raise ValueError("No valid signals generated")
             dates, close_df, target_pos, _ret_df = _align(data_map, signal_map, valid_codes)
-            engine = GlobalEquityEngine({"initial_cash": initial_total_usd}, market="hk")
+            engine = GlobalEquityEngine({"initial_cash": initial_total_usd}, market=holding.market)
             engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
             equity_series = pd.Series(
                 [s.equity for s in engine.equity_snapshots],
@@ -162,8 +224,8 @@ def _run_strategy(
         metrics["by_symbol"] = by_symbol_stats(trade_records)
         trades = _build_trades_list(trade_records)
         return {
-            "run_id": f"hstech-{strategy_name}",
-            "title": f"HSTECH 最优策略候选 - {STRATEGY_LABELS[strategy_name]}",
+            "run_id": f"{run_prefix}-{strategy_name}",
+            "title": f"{title_prefix} 最优策略候选 - {STRATEGY_LABELS[strategy_name]}",
             "status": "completed",
             "strategy": {"name": strategy_name, "label": STRATEGY_LABELS[strategy_name], "params": params},
             "start_date": start_date,
@@ -176,8 +238,8 @@ def _run_strategy(
         }
     except Exception as exc:  # noqa: BLE001 - keep one failed strategy from hiding the rest.
         return {
-            "run_id": f"hstech-{strategy_name}",
-            "title": f"HSTECH 最优策略候选 - {STRATEGY_LABELS[strategy_name]}",
+            "run_id": f"{run_prefix}-{strategy_name}",
+            "title": f"{title_prefix} 最优策略候选 - {STRATEGY_LABELS[strategy_name]}",
             "status": "failed",
             "strategy": {"name": strategy_name, "label": STRATEGY_LABELS[strategy_name], "params": params},
             "start_date": start_date,
@@ -243,7 +305,11 @@ def _candidate_row(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def summarize_best_strategy(runs: list[dict[str, Any]], best_strategy_name: str) -> str:
+def summarize_best_strategy(
+    runs: list[dict[str, Any]],
+    best_strategy_name: str,
+    display_code: str = HSTECH_DISPLAY_CODE,
+) -> str:
     completed = [run for run in runs if run.get("status") == "completed" and run.get("metrics")]
     best = next((run for run in completed if run["strategy"]["name"] == best_strategy_name), None)
     if best is None:
@@ -260,7 +326,7 @@ def summarize_best_strategy(runs: list[dict[str, Any]], best_strategy_name: str)
 
     parts = [
         STRATEGY_PRINCIPLES.get(best_strategy_name, f"策略原理：{best_name} 根据历史价格信号动态调整仓位。"),
-        f"{best_name} 在当前恒生科技 ETF 回测区间里综合排名第一，夏普比率为 {best_sharpe:.2f}，总收益为 {_fmt_pct(best_return)}，最大亏损为 {_fmt_pct(best_drawdown)}。",
+        f"{best_name} 在 {display_code} 当前回测区间里综合排名第一，夏普比率为 {best_sharpe:.2f}，总收益为 {_fmt_pct(best_return)}，最大亏损为 {_fmt_pct(best_drawdown)}。",
     ]
     if second and second.get("metrics"):
         second_metrics = second["metrics"]
@@ -271,11 +337,11 @@ def summarize_best_strategy(runs: list[dict[str, Any]], best_strategy_name: str)
         )
     risk_note = "回撤仍然偏高，适合作为候选信号而不是机械实盘指令。" if best_drawdown < -0.2 else "回撤相对可控，没有单纯靠承受更大亏损取胜。"
     parts.append(f"本次交易次数为 {trade_count} 次；{risk_note}")
-    parts.append(_latest_trade_summary(best.get("trades") or []))
+    parts.append(_latest_trade_summary(best.get("trades") or [], display_code))
     return " ".join(parts)
 
 
-def _latest_trade_summary(trades: list[dict[str, Any]]) -> str:
+def _latest_trade_summary(trades: list[dict[str, Any]], display_code: str = HSTECH_DISPLAY_CODE) -> str:
     if not trades:
         return "最新交易：暂无交易记录，当前没有可跟随的买卖动作。"
     actionable = [trade for trade in trades if trade.get("exit_reason") != "end_of_backtest"]
@@ -286,7 +352,7 @@ def _latest_trade_summary(trades: list[dict[str, Any]]) -> str:
             "之后没有新的主动卖出信号，当前更接近继续持有或等待下一次信号。"
         )
     return (
-        f"最新交易：{latest.get('exit_date')} 卖出 03033.HK，价格 {float(latest.get('exit_price') or 0):.2f}；"
+        f"最新交易：{latest.get('exit_date')} 卖出 {display_code}，价格 {float(latest.get('exit_price') or 0):.2f}；"
         "等待下一次买入信号。"
     )
 

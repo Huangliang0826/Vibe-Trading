@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
-import { LineChart, Loader2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
-import { api, type WatchlistMarket, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type RobustnessResponse } from "@/lib/api";
+import { LineChart, Loader2, AlertTriangle, ChevronDown, ChevronUp, TrendingUp } from "lucide-react";
+import { api, type WatchlistMarket, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type RobustnessResponse, type HSTechBestStrategyResponse } from "@/lib/api";
 import { ForecastChart } from "@/components/charts/ForecastChart";
 import { CalibrationChart } from "@/components/charts/CalibrationChart";
 import { StrategyEquityChart } from "@/components/charts/StrategyEquityChart";
@@ -291,6 +291,10 @@ function ForecastCard({ market, code, context }: { market: WatchlistMarket; code
   const [data, setData] = useState<ForecastResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [bestStrategy, setBestStrategy] = useState<HSTechBestStrategyResponse | null>(null);
+  const [bestStrategyLoading, setBestStrategyLoading] = useState(false);
+  const [bestStrategyError, setBestStrategyError] = useState<string | null>(null);
+  const trades = bestStrategy?.best?.trades || [];
 
   useEffect(() => {
     let cancelled = false;
@@ -303,9 +307,20 @@ function ForecastCard({ market, code, context }: { market: WatchlistMarket; code
     return () => { cancelled = true; };
   }, [market, code, context]);
 
+  const loadBestStrategy = useCallback((refresh = false) => {
+    setBestStrategyLoading(true);
+    setBestStrategyError(null);
+    api.getForecastBestPaperStrategy(market, code, refresh)
+      .then(setBestStrategy)
+      .catch((e) => setBestStrategyError(e?.message || "最优策略回测失败"))
+      .finally(() => setBestStrategyLoading(false));
+  }, [market, code]);
+
+  useEffect(() => { loadBestStrategy(false); }, [loadBestStrategy]);
+
   return (
     <div className="rounded-2xl border bg-card p-4">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-semibold text-foreground">{data?.name && data.name !== code ? data.name : code}</span>
           <span className="font-mono text-xs text-muted-foreground">{code}</span>
@@ -314,11 +329,35 @@ function ForecastCard({ market, code, context }: { market: WatchlistMarket; code
             <span className="text-[10px] text-muted-foreground/60">· 输入 {data.context_used} 日历史</span>
           )}
         </div>
-        {data && !data.model && (
-          <span className="text-[10px] text-yellow-600 dark:text-yellow-400">
-            {data.model_error === "timesfm_not_installed" ? "模型未安装，仅显示基线" : "模型不可用"}
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {bestStrategy?.best?.metrics && (
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
+                总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}
+              </span>
+              <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
+                最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
+              </span>
+              <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
+                夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
+              </span>
+            </div>
+          )}
+          <button
+            onClick={() => loadBestStrategy(true)}
+            disabled={bestStrategyLoading}
+            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+            title={bestStrategy?.best?.strategy?.label ? `当前最优：${bestStrategy.best.strategy.label}` : "运行模拟盘策略池，刷新最优买卖信号"}
+          >
+            {bestStrategyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TrendingUp className="h-3.5 w-3.5" />}
+            {bestStrategyLoading ? "策略回测中" : bestStrategy?.best?.strategy?.label ? `最优：${bestStrategy.best.strategy.label}` : "最优策略"}
+          </button>
+          {data && !data.model && (
+            <span className="text-[10px] text-yellow-600 dark:text-yellow-400">
+              {data.model_error === "timesfm_not_installed" ? "模型未安装，仅显示基线" : "模型不可用"}
+            </span>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -331,7 +370,37 @@ function ForecastCard({ market, code, context }: { market: WatchlistMarket; code
         </div>
       ) : data ? (
         <>
-          <ForecastChart data={data} />
+          <ForecastChart data={data} trades={trades.length > 0 ? trades : undefined} />
+          {(bestStrategy || bestStrategyError || bestStrategyLoading) && (
+            <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium text-foreground">AI 总结 · 模拟盘最优策略</p>
+                  {bestStrategy?.best?.metrics && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {bestStrategy.best.strategy.label || bestStrategy.best.strategy.name}
+                      <span className="mx-1">·</span>
+                      总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}
+                      <span className="mx-1">·</span>
+                      最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
+                      <span className="mx-1">·</span>
+                      夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
+                    </p>
+                  )}
+                </div>
+                {bestStrategy?.cached && <span className="text-[10px] text-muted-foreground">24小时缓存</span>}
+              </div>
+              {bestStrategyLoading ? (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在运行模拟盘策略池…
+                </p>
+              ) : bestStrategyError ? (
+                <p className="mt-2 text-xs text-red-500">{bestStrategyError}</p>
+              ) : bestStrategy?.summary ? (
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{bestStrategy.summary}</p>
+              ) : null}
+            </div>
+          )}
           <CalibrationSection market={market} code={code} context={context} />
           <StrategySection market={market} code={code} context={context} />
         </>

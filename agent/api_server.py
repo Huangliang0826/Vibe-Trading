@@ -2611,6 +2611,54 @@ async def get_hstech_best_paper_strategy(
     return {**payload, "cached": False}
 
 
+@app.get("/forecast/{market}/{code}/best-paper-strategy")
+async def get_forecast_best_paper_strategy(
+    response: Response,
+    market: str,
+    code: str,
+    start_date: str = Query("2020-01-01", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    end_date: str = Query("", pattern=r"^$|^\d{4}-\d{2}-\d{2}$"),
+    refresh: bool = Query(False),
+):
+    """Run the paper-trading strategy pool for one forecast/watchlist symbol."""
+    from src.paper_trading.hstech_best import (
+        default_end_date,
+        normalize_best_strategy_symbol,
+        run_single_symbol_best_strategy,
+    )
+
+    response.headers["Cache-Control"] = "no-store"
+    mk = market.lower().strip()
+    if mk not in {"hk", "us"}:
+        raise HTTPException(status_code=400, detail="market must be 'hk' or 'us'")
+    try:
+        _paper_symbol, _yahoo_symbol, display_code = normalize_best_strategy_symbol(code, mk)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    effective_end = end_date or default_end_date()
+    key = f"forecast-best-paper:{mk}:{display_code}:{start_date}:{effective_end}:v1"
+    cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
+    if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
+        return {**cached[1], "cached": True}
+    try:
+        name = _resolve_symbol_name(display_code, "hk_equity" if mk == "hk" else "us_equity")
+        payload = await asyncio.to_thread(
+            run_single_symbol_best_strategy,
+            display_code,
+            mk,
+            name,
+            display_code,
+            start_date,
+            effective_end,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"best strategy failed: {exc}") from exc
+    _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
+
+
 def _terminate_current_process() -> None:
     """Stop the current API process after the response has been sent."""
     time.sleep(0.25)

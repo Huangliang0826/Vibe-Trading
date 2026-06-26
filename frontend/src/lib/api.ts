@@ -254,6 +254,8 @@ export const api = {
     request<SmartTResponse>(`/hstech/smart-t?period=${period}${refresh ? "&refresh=true" : ""}`),
   getHSTechBestPaperStrategy: (refresh = false, startDate = "2020-01-01") =>
     request<HSTechBestStrategyResponse>(`/hstech/best-paper-strategy?start_date=${startDate}${refresh ? "&refresh=true" : ""}`),
+  getForecastBestPaperStrategy: (market: string, code: string, refresh = false, startDate = "2020-01-01") =>
+    request<HSTechBestStrategyResponse>(`/forecast/${market}/${encodeURIComponent(code)}/best-paper-strategy?start_date=${startDate}${refresh ? "&refresh=true" : ""}`),
 
   // Alpha Zoo API
   listAlphas: (params: AlphaListParams = {}) => {
@@ -578,7 +580,10 @@ export interface PaperStrategyConfig {
     | "donchian_breakout"
     | "bollinger_reversion"
     | "trailing_stop"
-    | "monthly_rebalance";
+    | "monthly_rebalance"
+    | "macd_divergence"
+    | "dual_momentum"
+    | "vol_trend_rotation";
   params: Record<string, unknown>;
 }
 
