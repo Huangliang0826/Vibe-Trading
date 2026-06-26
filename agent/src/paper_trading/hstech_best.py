@@ -192,6 +192,19 @@ def _run_strategy(
 
 def _paired_trade_signals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
+    if rows and "entry_time" in rows[0]:
+        for trade in rows:
+            signals.append({
+                "entry_date": str(trade.get("entry_time")),
+                "exit_date": str(trade.get("exit_time")),
+                "entry_price": float(trade.get("entry_price") or 0),
+                "exit_price": float(trade.get("exit_price") or trade.get("entry_price") or 0),
+                "pnl_pct": float(trade.get("pnl_pct") or 0),
+                "holding_bars": int(trade.get("holding_bars") or 0),
+                "exit_reason": str(trade.get("exit_reason") or "signal"),
+            })
+        return signals
+
     for i in range(0, len(rows), 2):
         entry = rows[i]
         exit_row = rows[i + 1] if i + 1 < len(rows) else entry

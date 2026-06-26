@@ -12,11 +12,11 @@ const APP_VERSION = "v0.1.9";
 
 const NAV = [
   { to: "/overview", icon: LayoutDashboard, label: "总览" },
+  { to: "/paper-trading", icon: Briefcase, label: "模拟盘" },
+  { to: "/hstech", icon: Cpu, label: "恒生科技" },
+  { to: "/forecast", icon: LineChart, label: "走势预测" },
   { to: "/scanner", icon: Radar, label: "机会扫描" },
   { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
-  { to: "/forecast", icon: LineChart, label: "走势预测" },
-  { to: "/hstech", icon: Cpu, label: "恒生科技" },
-  { to: "/paper-trading", icon: Briefcase, label: "模拟盘" },
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 

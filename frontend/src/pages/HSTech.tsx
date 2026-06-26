@@ -1261,6 +1261,16 @@ export function HSTech() {
     const summaryDate = selectedNewsDate || latestNewsDateKey(news);
     const summaryNews = filterNewsByDate(news, summaryDate);
     if (newsSummaryLoading || summaryNews.length === 0) return;
+    try {
+      const cached = localStorage.getItem(`hstech-news-summary-${summaryDate}`) || "";
+      if (cached.trim()) {
+        newsSummaryRef.current = cached;
+        setNewsSummary(cached);
+        return;
+      }
+    } catch {
+      // localStorage is best-effort; generate normally if it is unavailable.
+    }
     setNewsSummaryLoading(true);
     newsSummaryRef.current = "";
     setNewsSummary("");
@@ -1277,7 +1287,11 @@ export function HSTech() {
         "attempt.completed": () => {
           setNewsSummaryLoading(false);
           disconnectNewsSummary();
-          try { localStorage.setItem(`hstech-news-summary-${summaryDate}`, newsSummaryRef.current); } catch {}
+          try {
+            if (newsSummaryRef.current.trim()) {
+              localStorage.setItem(`hstech-news-summary-${summaryDate}`, newsSummaryRef.current);
+            }
+          } catch {}
         },
         "attempt.failed": (d) => {
           setNewsSummaryLoading(false);
@@ -1546,7 +1560,7 @@ export function HSTech() {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
               >
                 {newsSummaryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {newsSummaryLoading ? "总结中..." : newsSummary ? "重新总结最新日" : "AI 总结最新日"}
+                {newsSummaryLoading ? "总结中..." : newsSummary ? "已总结最新日" : "AI 总结最新日"}
               </button>
               <button
                 onClick={() => loadNews(true)}

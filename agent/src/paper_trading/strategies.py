@@ -492,6 +492,210 @@ def generate_monthly_rebalance(
     return signal_map
 
 
+# ── MACD Divergence ──────────────────────────────────────────────────────────
+
+def generate_macd_divergence(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Enter on bullish MACD divergence, exit on bearish divergence / cross-down.
+
+    A bullish divergence is when price prints a lower low over the lookback but
+    the MACD line prints a higher low — momentum is fading on the downside.  We
+    confirm with the histogram turning up before buying, and exit when the MACD
+    crosses below its signal line or a bearish divergence appears.  All inputs
+    use only past bars, so there is no look-ahead.
+    """
+    fast = max(int(params.get("fast", 12)), 2)
+    slow = max(int(params.get("slow", 26)), fast + 1)
+    signal_window = max(int(params.get("signal", 9)), 2)
+    lookback = max(int(params.get("lookback", 20)), 5)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+
+        ema_fast = close.ewm(span=fast, adjust=False).mean()
+        ema_slow = close.ewm(span=slow, adjust=False).mean()
+        macd = ema_fast - ema_slow
+        macd_signal = macd.ewm(span=signal_window, adjust=False).mean()
+        hist = macd - macd_signal
+
+        prev_close = close.shift(lookback)
+        prev_macd = macd.shift(lookback)
+        prev_hist = hist.shift(1)
+
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+
+        for i in range(len(close)):
+            price = float(close.iloc[i])
+            if i < lookback or pd.isna(prev_close.iloc[i]) or pd.isna(prev_macd.iloc[i]):
+                weights.iloc[i] = target_w if in_position else 0.0
+                continue
+
+            lower_low = price < float(prev_close.iloc[i])
+            macd_higher = float(macd.iloc[i]) > float(prev_macd.iloc[i])
+            hist_turning_up = pd.notna(prev_hist.iloc[i]) and float(hist.iloc[i]) > float(prev_hist.iloc[i])
+
+            higher_high = price > float(prev_close.iloc[i])
+            macd_lower = float(macd.iloc[i]) < float(prev_macd.iloc[i])
+            cross_down = float(macd.iloc[i]) < float(macd_signal.iloc[i])
+
+            if not in_position:
+                if lower_low and macd_higher and hist_turning_up:
+                    in_position = True
+            else:
+                bearish_div = higher_high and macd_lower
+                if bearish_div or cross_down:
+                    in_position = False
+
+            weights.iloc[i] = target_w if in_position else 0.0
+
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Dual Momentum ────────────────────────────────────────────────────────────
+
+def generate_dual_momentum(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Antonacci dual momentum across the portfolio's holdings.
+
+    On each monthly rebalance we rank holdings by their trailing ``lookback``
+    return (relative momentum) and hold only the ``top_n`` whose return is also
+    positive (absolute momentum) — the rest goes to cash.  The selected winners
+    split the portfolio's total budget equally and are held until the next
+    rebalance.  Returns are measured on past closes only, so no look-ahead.
+    """
+    lookback = max(int(params.get("lookback", 120)), 20)
+    top_n = max(int(params.get("top_n", 1)), 1)
+
+    codes = [_to_code(h) for h in holdings if _to_code(h) in data_map]
+    if not codes:
+        return {}
+
+    total_budget = sum(_weight(h) for h in holdings if _to_code(h) in data_map)
+    total_budget = min(total_budget, 1.0)
+
+    all_dates = sorted(set().union(*(data_map[c].index for c in codes)))
+    trading_idx = pd.DatetimeIndex(all_dates)
+
+    # Trailing return per code on the shared calendar (past data only).
+    mom: Dict[str, pd.Series] = {}
+    for c in codes:
+        close = data_map[c]["close"].astype(float).reindex(trading_idx).ffill()
+        mom[c] = close / close.shift(lookback) - 1.0
+
+    # Rebalance on the first trading day of each month.
+    months = pd.Series(trading_idx.to_period("M"), index=trading_idx)
+    is_rebalance = months.ne(months.shift(1))
+
+    weights = {c: pd.Series(0.0, index=trading_idx) for c in codes}
+    current: Dict[str, float] = {c: 0.0 for c in codes}
+
+    for ts in trading_idx:
+        if bool(is_rebalance.loc[ts]):
+            scored = [
+                (c, float(mom[c].loc[ts]))
+                for c in codes
+                if pd.notna(mom[c].loc[ts]) and float(mom[c].loc[ts]) > 0
+            ]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            winners = [c for c, _ in scored[:top_n]]
+            current = {c: 0.0 for c in codes}
+            if winners:
+                per = total_budget / len(winners)
+                for c in winners:
+                    current[c] = per
+        for c in codes:
+            weights[c].loc[ts] = current[c]
+
+    return {c: weights[c] for c in codes}
+
+
+# ── Volatility + Trend Rotation (risk-on / risk-off) ─────────────────────────
+
+def generate_vol_trend_rotation(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Risk-on / risk-off rotation between a risk asset and a defensive asset.
+
+    The **first holding** is the risk asset (e.g. an equity ETF); its own price
+    drives the regime signal.  The **second holding**, if present, is the
+    defensive asset (e.g. a bond ETF) that receives the budget during risk-off
+    (with a single holding, risk-off goes to cash).
+
+    Go *risk-on* (hold the risk asset) when its close is above the trend MA
+    **and** its short-window realised volatility is below its own trailing
+    long-run average.  Otherwise go *risk-off* (hold the defensive asset).
+    The regime is decided from each day's close and applied on the **next bar**
+    so there is no look-ahead.
+    """
+    ma_window = max(int(params.get("ma_window", 50)), 5)
+    vol_window = max(int(params.get("vol_window", 20)), 5)
+    vol_avg_window = max(int(params.get("vol_avg_window", 252)), vol_window * 2)
+
+    codes = [_to_code(h) for h in holdings if _to_code(h) in data_map]
+    if not codes:
+        return {}
+    risk_code = codes[0]
+    safe_code = codes[1] if len(codes) > 1 else None
+    total_budget = min(
+        sum(_weight(h) for h in holdings if _to_code(h) in data_map), 1.0
+    )
+
+    risk_close = data_map[risk_code]["close"].astype(float)
+    if risk_close.empty:
+        return {}
+
+    ma = risk_close.rolling(ma_window, min_periods=max(5, ma_window // 2)).mean()
+    vol = risk_close.pct_change().rolling(
+        vol_window, min_periods=max(3, vol_window // 2)
+    ).std()
+    vol_avg = vol.rolling(
+        vol_avg_window, min_periods=max(20, vol_avg_window // 4)
+    ).mean()
+
+    uptrend = risk_close > ma
+    calm = vol < vol_avg
+    # Decide at the close, act next bar.
+    risk_on = (uptrend & calm).shift(1).fillna(False).astype(bool)
+
+    risk_idx = risk_close.index
+    risk_w = pd.Series(0.0, index=risk_idx)
+    risk_w[risk_on] = total_budget
+    signal_map: Dict[str, pd.Series] = {risk_code: risk_w}
+
+    if safe_code is not None:
+        safe_idx = data_map[safe_code].index
+        # Map the regime onto the defensive asset's own calendar.
+        regime_safe = (
+            risk_on.reindex(risk_idx.union(safe_idx))
+            .ffill()
+            .reindex(safe_idx)
+            .fillna(False)
+            .astype(bool)
+        )
+        safe_w = pd.Series(0.0, index=safe_idx)
+        safe_w[~regime_safe] = total_budget
+        signal_map[safe_code] = safe_w
+
+    return signal_map
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _rsi(close: pd.Series, window: int) -> pd.Series:
@@ -548,4 +752,10 @@ def generate_signals(
         return generate_trailing_stop(holdings, data_map, params)
     if strategy_name == "monthly_rebalance":
         return generate_monthly_rebalance(holdings, data_map, params)
+    if strategy_name == "macd_divergence":
+        return generate_macd_divergence(holdings, data_map, params)
+    if strategy_name == "dual_momentum":
+        return generate_dual_momentum(holdings, data_map, params)
+    if strategy_name == "vol_trend_rotation":
+        return generate_vol_trend_rotation(holdings, data_map, params)
     raise ValueError(f"Unknown strategy: {strategy_name}")

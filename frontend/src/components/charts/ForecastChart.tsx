@@ -113,10 +113,10 @@ export function ForecastChart({ data, height = 320, trades }: Props) {
         const ei = dateIdx.get(tr.entry_date);
         const xi = dateIdx.get(tr.exit_date);
         if (ei != null) {
-          entryData.push([ei, tr.entry_price]);
+          entryData.push([tr.entry_date, tr.entry_price]);
         }
         if (xi != null) {
-          exitData.push([xi, tr.exit_price]);
+          exitData.push([tr.exit_date, tr.exit_price]);
         }
         // Shading: use entry or chart start, exit or chart end
         const areaStart = ei != null ? tr.entry_date : (xi != null ? allDates[0] : null);

@@ -38,6 +38,37 @@ def test_paired_trade_signals_convert_paper_trade_rows():
     ]
 
 
+def test_paired_trade_signals_convert_trade_record_rows():
+    rows = [
+        {
+            "symbol": "3033.HK",
+            "direction": 1,
+            "entry_price": 8.1682,
+            "exit_price": 7.8871,
+            "entry_time": "2020-11-06",
+            "exit_time": "2020-12-29",
+            "size": 27900,
+            "pnl": -7841.43,
+            "pnl_pct": -3.4409,
+            "exit_reason": "signal",
+            "holding_bars": 36,
+            "commission": 549.4007,
+        }
+    ]
+
+    assert _paired_trade_signals(rows) == [
+        {
+            "entry_date": "2020-11-06",
+            "exit_date": "2020-12-29",
+            "entry_price": 8.1682,
+            "exit_price": 7.8871,
+            "pnl_pct": -3.4409,
+            "holding_bars": 36,
+            "exit_reason": "signal",
+        }
+    ]
+
+
 def test_summary_starts_with_strategy_principle_and_latest_trade():
     runs = [
         {

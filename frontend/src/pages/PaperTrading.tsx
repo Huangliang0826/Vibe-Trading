@@ -74,7 +74,10 @@ type StrategyName =
   | "donchian_breakout"
   | "bollinger_reversion"
   | "trailing_stop"
-  | "monthly_rebalance";
+  | "monthly_rebalance"
+  | "macd_divergence"
+  | "dual_momentum"
+  | "vol_trend_rotation";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -91,11 +94,30 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "bollinger_reversion", label: "布林带反转", desc: "跌破下轨买入，回归均线后卖出" },
   { value: "trailing_stop", label: "移动止损", desc: "趋势确认后买入，用移动止损保护利润" },
   { value: "monthly_rebalance", label: "月度再平衡", desc: "每月把组合调回目标比例" },
+  { value: "macd_divergence", label: "MACD 背离", desc: "底背离买入，顶背离或死叉退出" },
+  { value: "dual_momentum", label: "双动量轮动", desc: "在组合内只持有动量最强且为正的标的" },
+  { value: "vol_trend_rotation", label: "攻守轮动", desc: "趋势向上且波动低时持第一只(股票)，否则换入第二只(债券)" },
 ];
 
 const STRATEGY_LABELS = Object.fromEntries(
   STRATEGY_OPTIONS.map((option) => [option.value, option.label]),
 ) as Record<StrategyName, string>;
+
+const OPTIMAL_HISTORY_TITLE_PREFIX = "最优策略候选 -";
+const OPTIMAL_HISTORY_RESET_KEY = "paper-trading-optimal-history-reset-v1";
+
+function isOptimalStrategyHistoryRun(run: PaperTradingRun): boolean {
+  return (run.title || "").startsWith(OPTIMAL_HISTORY_TITLE_PREFIX) && run.status === "completed";
+}
+
+async function loadOptimalHistoryRuns(clearExistingHistory = false): Promise<PaperTradingRun[]> {
+  const res = await api.listPaperTradingRuns();
+  if (clearExistingHistory) {
+    await Promise.all(res.items.map((run) => api.deletePaperTradingRun(run.run_id).catch(() => {})));
+    return [];
+  }
+  return res.items.filter(isOptimalStrategyHistoryRun);
+}
 
 const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   buy_and_hold: "策略原理：一次性按目标比例买入并长期持有，主要赚取资产本身的长期涨幅。",
@@ -112,6 +134,9 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   bollinger_reversion: "策略原理：价格跌破布林带下轨时认为短期偏离过大，买入等待回归均线后卖出。",
   trailing_stop: "策略原理：趋势确认后买入，随后用移动止损线跟随价格上移，尽量保住已有利润。",
   monthly_rebalance: "策略原理：每月把组合恢复到目标权重，卖出涨多的、补回跌多的，保持风险结构稳定。",
+  macd_divergence: "策略原理：当价格创新低但 MACD 抬高（底背离）且柱状图转向时买入，出现顶背离或 MACD 死叉时退出，捕捉动量反转。",
+  dual_momentum: "策略原理：每月按近期涨幅给组合内标的排名，只持有动量最强且收益为正的标的（绝对+相对动量），其余转为现金。",
+  vol_trend_rotation: "策略原理：以第一只(风险/股票)标的的价格判断行情——站上趋势均线且波动率低于自身一年均值时进攻持股，否则防守换入第二只(债券)标的，靠攻守切换控制回撤。需按“股票在前、债券在后”的顺序添加标的。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
@@ -320,14 +345,18 @@ export function PaperTrading() {
 
   // ── Load history on mount ──
   useEffect(() => {
-    api.listPaperTradingRuns()
-      .then((res) => setRuns(res.items))
+    const shouldClearExistingHistory = localStorage.getItem(OPTIMAL_HISTORY_RESET_KEY) !== "done";
+    loadOptimalHistoryRuns(shouldClearExistingHistory)
+      .then((items) => {
+        setRuns(items);
+        if (shouldClearExistingHistory) localStorage.setItem(OPTIMAL_HISTORY_RESET_KEY, "done");
+      })
       .catch(() => {});
   }, []);
 
   const refreshRuns = useCallback(() => {
-    api.listPaperTradingRuns()
-      .then((res) => setRuns(res.items))
+    loadOptimalHistoryRuns()
+      .then(setRuns)
       .catch(() => {});
   }, []);
 
@@ -369,7 +398,7 @@ export function PaperTrading() {
         if (run.status === "completed" || run.status === "failed") {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
-          api.listPaperTradingRuns().then((res) => setRuns(res.items)).catch(() => {});
+          refreshRuns();
         }
       } catch (e) {
         if (isMissingRunError(e)) {
@@ -578,12 +607,17 @@ export function PaperTrading() {
       }
 
       const best = [...completed].sort(compareRuns)[0];
+      await Promise.all(
+        finalRuns
+          .filter((run) => run.run_id !== best.run_id)
+          .map((run) => api.deletePaperTradingRun(run.run_id).catch(() => {})),
+      );
       setOptimalRuns(finalRuns);
       setOptimalBestRunId(best.run_id);
       setActiveRun(best);
       setStrategy(best.strategy.name as StrategyName);
       setOptimalProgress(`最优策略：${STRATEGY_LABELS[best.strategy.name as StrategyName] || best.strategy.name}`);
-      api.listPaperTradingRuns().then((res) => setRuns(res.items)).catch(() => {});
+      refreshRuns();
     } catch (e: any) {
       setError(e?.message || "最优策略回测失败");
     } finally {

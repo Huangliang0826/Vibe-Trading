@@ -37,6 +37,9 @@ class StrategyConfig(BaseModel):
         "bollinger_reversion",
         "trailing_stop",
         "monthly_rebalance",
+        "macd_divergence",
+        "dual_momentum",
+        "vol_trend_rotation",
     ] = "buy_and_hold"
     params: dict[str, Any] = Field(default_factory=dict)
 

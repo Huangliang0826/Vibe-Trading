@@ -62,6 +62,9 @@ export function PaperHoldingPriceChart({
     const closeByDate = new Map(dates.map((date, index) => [date, closes[index]]));
     const buyMarkers: unknown[] = [];
     const sellMarkers: unknown[] = [];
+    const holdingAreas: unknown[] = [];
+    const firstDate = dates[0];
+    const lastDate = dates[dates.length - 1];
 
     for (const trade of trades || []) {
       const entryDate = String(trade.entry_time).slice(0, 10);
@@ -74,6 +77,14 @@ export function PaperHoldingPriceChart({
       }
       if (exitY !== undefined) {
         (entryIsBuy ? sellMarkers : buyMarkers).push([exitDate, exitY, trade.symbol, trade.exit_price]);
+      }
+
+      if (entryDate <= lastDate && exitDate >= firstDate) {
+        const areaStart = entryDate < firstDate ? firstDate : entryDate;
+        const areaEnd = exitDate > lastDate ? lastDate : exitDate;
+        if (areaStart <= areaEnd) {
+          holdingAreas.push([{ xAxis: areaStart }, { xAxis: areaEnd }]);
+        }
       }
     }
 
@@ -151,6 +162,11 @@ export function PaperHoldingPriceChart({
               ],
             },
           },
+          markArea: holdingAreas.length > 0 ? {
+            silent: true,
+            itemStyle: { color: "rgba(16, 185, 129, 0.06)" },
+            data: holdingAreas,
+          } : undefined,
         },
         {
           name: "买入",
