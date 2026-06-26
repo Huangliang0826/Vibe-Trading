@@ -44,6 +44,10 @@ STRATEGY_LABELS: dict[str, str] = {
     "macd_divergence": "MACD 背离",
     "dual_momentum": "双动量轮动",
     "vol_trend_rotation": "攻守轮动",
+    "atr_trend_stop": "ATR 趋势止损",
+    "mean_reversion_scaleout": "均值回归分批止盈",
+    "enhanced_dca_trend": "趋势增强定投",
+    "breakout_pullback": "突破回踩确认",
 }
 
 STRATEGY_PRINCIPLES: dict[str, str] = {
@@ -64,6 +68,10 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "macd_divergence": "策略原理：当价格创新低但 MACD 抬高（底背离）且柱状图转向时买入，出现顶背离或 MACD 死叉时退出，捕捉动量反转。",
     "dual_momentum": "策略原理：每月按近期涨幅排序，只在动量为正时持有该标的，否则转为现金。",
     "vol_trend_rotation": "策略原理：趋势向上且波动低于自身长期均值时持有，否则转为现金，优先控制回撤。",
+    "atr_trend_stop": "策略原理：趋势突破时买入，并用 ATR 波动幅度计算动态止损线；价格继续上涨时止损线随高点上移，趋势破坏或触发止损时离场。",
+    "mean_reversion_scaleout": "策略原理：价格跌到统计下轨时认为短期超跌并买入，回到均线附近先减半，到上轨或触发止损时退出，用分批止盈降低反转失败风险。",
+    "enhanced_dca_trend": "策略原理：保留定投的分批建仓纪律，但长期趋势偏弱时降低目标仓位，趋势向上且价格仍偏低时提高投入，避免在弱势里机械满仓。",
+    "breakout_pullback": "策略原理：不在突破当天追高，而是先确认价格突破前高，再等待回踩突破位附近且不破短期支撑后买入，减少假突破带来的追高风险。",
 }
 
 STRATEGY_NAMES: tuple[str, ...] = tuple(STRATEGY_LABELS)
@@ -179,7 +187,7 @@ def run_single_symbol_best_strategy(
 
 
 def _strategy_params(strategy_name: str) -> dict[str, Any]:
-    if strategy_name in {"dca", "smart_dca"}:
+    if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend"}:
         return {"frequency": "monthly"}
     if strategy_name == "grid":
         return {"grid_count": 5}

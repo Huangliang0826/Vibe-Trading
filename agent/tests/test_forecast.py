@@ -90,6 +90,18 @@ def test_build_forecast_passes_context(monkeypatch):
     assert seen["context"] == 50
 
 
+def test_build_forecast_display_history_controls_chart_length(monkeypatch):
+    monkeypatch.setattr(service.engine, "is_available", lambda: False)
+
+    default_out = service.build_forecast(_bars(1500), horizon=5, with_model=False)
+    five_year_out = service.build_forecast(_bars(1500), horizon=5, with_model=False, display_history=1260)
+    all_out = service.build_forecast(_bars(1500), horizon=5, with_model=False, display_history=0)
+
+    assert len(default_out["history"]) == 756
+    assert len(five_year_out["history"]) == 1260
+    assert len(all_out["history"]) == 1500
+
+
 def test_build_forecast_filters_nan_close():
     bars = _bars(40)
     bars[-1]["close"] = float("nan")  # trailing incomplete session

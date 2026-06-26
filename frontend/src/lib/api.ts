@@ -242,8 +242,8 @@ export const api = {
     request<{ date: string; items: NewsItem[] }>(`/hstech/news/archive?date=${encodeURIComponent(date)}`),
 
   // 走势预测
-  getForecast: (market: string, code: string, months = 6, context = 0, nocache = 0) =>
-    request<ForecastResponse>(`/forecast/${market}/${encodeURIComponent(code)}?months=${months}&context=${context}${nocache ? "&nocache=1" : ""}`),
+  getForecast: (market: string, code: string, months = 6, context = 0, nocache = 0, displayHistory = -1) =>
+    request<ForecastResponse>(`/forecast/${market}/${encodeURIComponent(code)}?months=${months}&context=${context}&display_history=${displayHistory}${nocache ? "&nocache=1" : ""}`),
   getForecastCalibration: (market: string, code: string, context = 0) =>
     request<CalibrationResponse>(`/forecast/${market}/${encodeURIComponent(code)}/calibration?context=${context}`),
   getForecastStrategy: (market: string, code: string, context = 0, costBps = 5) =>
@@ -583,7 +583,11 @@ export interface PaperStrategyConfig {
     | "monthly_rebalance"
     | "macd_divergence"
     | "dual_momentum"
-    | "vol_trend_rotation";
+    | "vol_trend_rotation"
+    | "atr_trend_stop"
+    | "mean_reversion_scaleout"
+    | "enhanced_dca_trend"
+    | "breakout_pullback";
   params: Record<string, unknown>;
 }
 

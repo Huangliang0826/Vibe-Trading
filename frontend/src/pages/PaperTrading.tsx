@@ -77,7 +77,11 @@ type StrategyName =
   | "monthly_rebalance"
   | "macd_divergence"
   | "dual_momentum"
-  | "vol_trend_rotation";
+  | "vol_trend_rotation"
+  | "atr_trend_stop"
+  | "mean_reversion_scaleout"
+  | "enhanced_dca_trend"
+  | "breakout_pullback";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -97,6 +101,10 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "macd_divergence", label: "MACD 背离", desc: "底背离买入，顶背离或死叉退出" },
   { value: "dual_momentum", label: "双动量轮动", desc: "在组合内只持有动量最强且为正的标的" },
   { value: "vol_trend_rotation", label: "攻守轮动", desc: "趋势向上且波动低时持第一只(股票)，否则换入第二只(债券)" },
+  { value: "atr_trend_stop", label: "ATR 趋势止损", desc: "趋势突破后买入，用 ATR 动态止损保护利润" },
+  { value: "mean_reversion_scaleout", label: "均值回归分批止盈", desc: "超跌低吸，回归均线先减半，到上轨清仓" },
+  { value: "enhanced_dca_trend", label: "趋势增强定投", desc: "按期建仓，弱趋势降仓，趋势回暖再提高投入" },
+  { value: "breakout_pullback", label: "突破回踩确认", desc: "先突破前高，再等回踩不破支撑后买入" },
 ];
 
 const STRATEGY_LABELS = Object.fromEntries(
@@ -137,11 +145,15 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   macd_divergence: "策略原理：当价格创新低但 MACD 抬高（底背离）且柱状图转向时买入，出现顶背离或 MACD 死叉时退出，捕捉动量反转。",
   dual_momentum: "策略原理：每月按近期涨幅给组合内标的排名，只持有动量最强且收益为正的标的（绝对+相对动量），其余转为现金。",
   vol_trend_rotation: "策略原理：以第一只(风险/股票)标的的价格判断行情——站上趋势均线且波动率低于自身一年均值时进攻持股，否则防守换入第二只(债券)标的，靠攻守切换控制回撤。需按“股票在前、债券在后”的顺序添加标的。",
+  atr_trend_stop: "策略原理：趋势突破时买入，并用 ATR 波动幅度计算动态止损线；价格继续上涨时止损线随高点上移，趋势破坏或触发止损时离场。",
+  mean_reversion_scaleout: "策略原理：价格跌到统计下轨时认为短期超跌并买入，回到均线附近先减半，到上轨或触发止损时退出，用分批止盈降低反转失败风险。",
+  enhanced_dca_trend: "策略原理：保留定投的分批建仓纪律，但长期趋势偏弱时降低目标仓位，趋势向上且价格仍偏低时提高投入，避免在弱势里机械满仓。",
+  breakout_pullback: "策略原理：不在突破当天追高，而是先确认价格突破前高，再等待回踩突破位附近且不破短期支撑后买入，减少假突破带来的追高风险。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
   const params: Record<string, unknown> = {};
-  if (name === "dca" || name === "smart_dca") params.frequency = dcaFrequency;
+  if (name === "dca" || name === "smart_dca" || name === "enhanced_dca_trend") params.frequency = dcaFrequency;
   if (name === "grid") params.grid_count = gridCount;
   return params;
 }

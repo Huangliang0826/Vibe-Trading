@@ -1,8 +1,8 @@
 import pandas as pd
 
 from src.paper_trading.executor import _smart_dca_multiplier
-from src.paper_trading.models import PaperHolding
-from src.paper_trading.strategies import generate_dca, generate_grid
+from src.paper_trading.models import PaperHolding, StrategyConfig
+from src.paper_trading.strategies import generate_dca, generate_grid, generate_signals
 
 
 def _price_frame(close_values):
@@ -65,3 +65,25 @@ def test_dca_signal_ramp_does_not_size_steps_from_backtest_end():
     long_signal = generate_dca([holding], {"0700.HK": long}, params)["0700.HK"]
 
     pd.testing.assert_series_equal(short_signal, long_signal.reindex(short_signal.index))
+
+
+def test_new_strategy_names_are_accepted_and_generate_bounded_signals():
+    holding = PaperHolding(symbol="0700", market="hk", allocation_pct=80)
+    df = _price_frame([
+        100, 101, 102, 104, 106, 105, 103, 101, 99, 98,
+        100, 103, 107, 110, 112, 111, 109, 108, 111, 115,
+        118, 116, 113, 111, 114, 117, 121, 123, 120, 118,
+        121, 125, 128, 126, 124, 127, 131, 134, 132, 136,
+    ])
+
+    for name in [
+        "atr_trend_stop",
+        "mean_reversion_scaleout",
+        "enhanced_dca_trend",
+        "breakout_pullback",
+    ]:
+        StrategyConfig(name=name)
+        signal = generate_signals([holding], {"0700.HK": df}, name, {})["0700.HK"]
+        assert signal.index.equals(df.index)
+        assert signal.min() >= 0
+        assert signal.max() <= 0.8

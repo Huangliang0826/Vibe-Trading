@@ -13,8 +13,8 @@ const APP_VERSION = "v0.1.9";
 const NAV = [
   { to: "/overview", icon: LayoutDashboard, label: "总览" },
   { to: "/paper-trading", icon: Briefcase, label: "模拟盘" },
-  { to: "/hstech", icon: Cpu, label: "恒生科技" },
   { to: "/forecast", icon: LineChart, label: "走势预测" },
+  { to: "/hstech", icon: Cpu, label: "恒生科技" },
   { to: "/scanner", icon: Radar, label: "机会扫描" },
   { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
   { to: "/settings", icon: Settings, label: "设置" },
@@ -86,7 +86,7 @@ export function Layout() {
         <div className={cn("border-b", collapsed ? "p-2 flex justify-center" : "p-4")}>
           <Link to="/overview" className={cn("flex items-center font-bold text-base tracking-tight", collapsed ? "justify-center" : "gap-2")}>
             <BarChart3 className="h-5 w-5 text-primary shrink-0" />
-            {!collapsed && "黄梁的看板"}
+            {!collapsed && "Alpha Mind 量化之心"}
           </Link>
         </div>
 

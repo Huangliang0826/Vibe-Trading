@@ -42,6 +42,7 @@ def build_forecast(
     horizon: int = DEFAULT_HORIZON,
     with_model: bool = True,
     context: int | None = None,
+    display_history: int | None = None,
 ) -> dict:
     """Build the full forecast payload from a daily-close history.
 
@@ -104,10 +105,15 @@ def build_forecast(
         except Exception as exc:  # noqa: BLE001
             logger.warning("conformal adjustment skipped: %s", exc)
 
-    # Trim displayed history to ~2 trading years for chart readability — the
-    # model may consume far more (``context_used``), but a multi-year line would
-    # squash the 6-month forecast visually.
-    hist = bars[-756:]
+    # Trim displayed history separately from model input. The page's 1Y/2Y/5Y/ALL
+    # knob should visibly change the chart while still allowing the model to use
+    # the requested context for its own inference.
+    if display_history == 0:
+        hist = bars
+    elif display_history and display_history > 0:
+        hist = bars[-display_history:]
+    else:
+        hist = bars[-756:]
 
     return {
         "horizon": horizon,

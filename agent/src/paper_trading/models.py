@@ -40,6 +40,10 @@ class StrategyConfig(BaseModel):
         "macd_divergence",
         "dual_momentum",
         "vol_trend_rotation",
+        "atr_trend_stop",
+        "mean_reversion_scaleout",
+        "enhanced_dca_trend",
+        "breakout_pullback",
     ] = "buy_and_hold"
     params: dict[str, Any] = Field(default_factory=dict)
 

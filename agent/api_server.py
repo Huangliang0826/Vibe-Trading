@@ -2347,6 +2347,7 @@ _SMART_T_CACHE: dict[str, tuple[float, dict]] = {}
 _SMART_T_TTL = 24 * 3600
 _HSTECH_BEST_STRATEGY_CACHE: dict[str, tuple[float, dict]] = {}
 _HSTECH_BEST_STRATEGY_TTL = 24 * 3600
+_BEST_STRATEGY_DISK_CACHE_DIR = Path.home() / ".vibe-trading" / "cache" / "best_strategy"
 
 
 def _forecast_disk_cache_path(key: str) -> Path:
@@ -2389,12 +2390,53 @@ def _write_forecast_disk_cache(key: str, result: dict) -> None:
             pass
 
 
+def _best_strategy_disk_cache_path(key: str) -> Path:
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return _BEST_STRATEGY_DISK_CACHE_DIR / f"{digest}.json"
+
+
+def _read_best_strategy_disk_cache(key: str) -> dict | None:
+    path = _best_strategy_disk_cache_path(key)
+    try:
+        stat = path.stat()
+        if time.time() - stat.st_mtime > _HSTECH_BEST_STRATEGY_TTL:
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    result = payload.get("result") if isinstance(payload, dict) else None
+    return result if isinstance(result, dict) else None
+
+
+def _write_best_strategy_disk_cache(key: str, result: dict) -> None:
+    path = _best_strategy_disk_cache_path(key)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    payload = {
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "result": result,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.replace(path)
+    except Exception as exc:  # noqa: BLE001 - best-strategy cache is best-effort.
+        logger.warning("best strategy disk cache write failed for %s: %s", key, exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 @app.get("/forecast/{market}/{code}")
 async def get_forecast(
     market: str,
     code: str,
     months: int = Query(6, ge=1, le=12),
     context: int = Query(0, ge=0),
+    display_history: int = Query(-1, ge=-1),
     nocache: int = Query(0),
 ):
     """Price forecast cone with transparent baseline models."""
@@ -2402,7 +2444,7 @@ async def get_forecast(
 
     market = market.lower()
     horizon = max(1, min(months, 12)) * 21
-    key = f"{market}:{code.upper()}:{horizon}:{context}"
+    key = f"{market}:{code.upper()}:{horizon}:{context}:{display_history}"
     if not nocache:
         cached = _FORECAST_CACHE.get(key)
         if cached and (time.time() - cached[0]) < _FORECAST_TTL:
@@ -2417,7 +2459,12 @@ async def get_forecast(
         if not bars:
             raise HTTPException(status_code=404, detail=f"no history for {code}")
         result = await asyncio.to_thread(
-            service.build_forecast, bars, horizon, True, context or None
+            service.build_forecast,
+            bars,
+            horizon,
+            True,
+            context or None,
+            None if display_history < 0 else display_history,
         )
         payload = {
             "code": code.strip().upper(),
@@ -2597,6 +2644,11 @@ async def get_hstech_best_paper_strategy(
     cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
     if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
         return {**cached[1], "cached": True}
+    if not refresh:
+        disk_cached = _read_best_strategy_disk_cache(key)
+        if disk_cached is not None:
+            _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), disk_cached)
+            return {**disk_cached, "cached": True}
     try:
         payload = await asyncio.to_thread(
             run_hstech_best_strategy,
@@ -2608,6 +2660,7 @@ async def get_hstech_best_paper_strategy(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"HSTECH best strategy failed: {exc}") from exc
     _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), payload)
+    _write_best_strategy_disk_cache(key, payload)
     return {**payload, "cached": False}
 
 
@@ -2640,6 +2693,11 @@ async def get_forecast_best_paper_strategy(
     cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
     if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
         return {**cached[1], "cached": True}
+    if not refresh:
+        disk_cached = _read_best_strategy_disk_cache(key)
+        if disk_cached is not None:
+            _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), disk_cached)
+            return {**disk_cached, "cached": True}
     try:
         name = _resolve_symbol_name(display_code, "hk_equity" if mk == "hk" else "us_equity")
         payload = await asyncio.to_thread(
@@ -2656,6 +2714,7 @@ async def get_forecast_best_paper_strategy(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"best strategy failed: {exc}") from exc
     _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), payload)
+    _write_best_strategy_disk_cache(key, payload)
     return {**payload, "cached": False}
 
 

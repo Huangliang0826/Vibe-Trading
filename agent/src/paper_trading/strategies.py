@@ -466,6 +466,242 @@ def generate_trailing_stop(
     return signal_map
 
 
+# ── ATR Trend Stop ───────────────────────────────────────────────────────────
+
+def generate_atr_trend_stop(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Trend-following entry with an ATR-based protective stop.
+
+    Enter when price is above a trend MA and makes a recent high.  While in the
+    trade, trail a stop at ``highest_close - atr_multiple * ATR`` and exit when
+    price closes below it or loses the trend MA.
+    """
+    ma_window = max(int(params.get("ma_window", 80)), 10)
+    breakout_window = max(int(params.get("breakout_window", 20)), 5)
+    atr_window = max(int(params.get("atr_window", 14)), 3)
+    atr_multiple = max(float(params.get("atr_multiple", 3.0)), 0.5)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        df = data_map[code]
+        if df.empty:
+            continue
+
+        close = df["close"].astype(float)
+        high = df.get("high", close).astype(float)
+        low = df.get("low", close).astype(float)
+        trend_ma = close.rolling(ma_window, min_periods=max(5, ma_window // 3)).mean()
+        prior_high = close.shift(1).rolling(
+            breakout_window, min_periods=max(3, breakout_window // 2)
+        ).max()
+        atr = _atr(high, low, close, atr_window)
+
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        highest_close = 0.0
+
+        for i, price in enumerate(close):
+            ma = trend_ma.iloc[i]
+            breakout_level = prior_high.iloc[i]
+            current_atr = atr.iloc[i]
+
+            if not in_position:
+                if (
+                    pd.notna(ma)
+                    and pd.notna(breakout_level)
+                    and price > ma
+                    and price > breakout_level
+                ):
+                    in_position = True
+                    highest_close = float(price)
+            else:
+                highest_close = max(highest_close, float(price))
+                stop_level = highest_close - atr_multiple * float(current_atr) if pd.notna(current_atr) else -np.inf
+                hit_stop = price < stop_level
+                lost_trend = pd.notna(ma) and price < ma
+                if hit_stop or lost_trend:
+                    in_position = False
+                    highest_close = 0.0
+
+            weights.iloc[i] = target_w if in_position else 0.0
+
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Mean Reversion Scale-Out ─────────────────────────────────────────────────
+
+def generate_mean_reversion_scaleout(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Buy oversold weakness and scale out as price mean-reverts."""
+    window = max(int(params.get("window", 20)), 5)
+    band_width = max(float(params.get("band_width", 2.0)), 0.5)
+    stop_loss = max(float(params.get("stop_loss", 0.12)), 0.01)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+
+        middle = close.rolling(window, min_periods=max(3, window // 2)).mean()
+        std = close.rolling(window, min_periods=max(3, window // 2)).std()
+        lower = middle - band_width * std
+        upper = middle + band_width * std
+
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+        position_ratio = 0.0
+        entry_price = 0.0
+
+        for i, price in enumerate(close):
+            mid = middle.iloc[i]
+            low_band = lower.iloc[i]
+            high_band = upper.iloc[i]
+
+            if position_ratio <= 0:
+                if pd.notna(low_band) and price <= low_band:
+                    position_ratio = 1.0
+                    entry_price = float(price)
+            else:
+                if entry_price > 0 and price <= entry_price * (1 - stop_loss):
+                    position_ratio = 0.0
+                    entry_price = 0.0
+                elif pd.notna(high_band) and price >= high_band:
+                    position_ratio = 0.0
+                    entry_price = 0.0
+                elif pd.notna(mid) and price >= mid:
+                    position_ratio = min(position_ratio, 0.5)
+
+            weights.iloc[i] = target_w * position_ratio
+
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Enhanced DCA + Trend Filter ──────────────────────────────────────────────
+
+def generate_enhanced_dca_trend(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Ramp exposure on a DCA schedule, then reduce risk in weak trends."""
+    frequency = params.get("frequency", "monthly")
+    freq = _FREQ_MAP.get(frequency, "MS")
+    steps_to_full = max(int(params.get("steps_to_full", 12)), 1)
+    ma_window = max(int(params.get("ma_window", 120)), 10)
+    min_ratio = float(np.clip(float(params.get("min_ratio", 0.25)), 0.0, 1.0))
+    boost_ratio = max(float(params.get("boost_ratio", 1.25)), 1.0)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+
+        target_w = _weight(h)
+        base = pd.Series(0.0, index=close.index)
+        dca_dates = pd.date_range(start=close.index[0], end=close.index[-1], freq=freq)
+        current_w = 0.0
+        step = target_w / steps_to_full
+        for dca_date in dca_dates:
+            current_w = min(current_w + step, target_w)
+            base.loc[base.index >= dca_date] = current_w
+
+        ma = close.rolling(ma_window, min_periods=max(5, ma_window // 3)).mean()
+        distance = close / ma.replace(0, np.nan) - 1.0
+        trend_up = close > ma
+        ratio = pd.Series(1.0, index=close.index)
+        ratio.loc[~trend_up.fillna(False)] = min_ratio
+        ratio.loc[(trend_up.fillna(False)) & (distance <= -0.08)] = boost_ratio
+        signal_map[code] = (base * ratio).clip(lower=0.0, upper=target_w).fillna(0.0)
+    return signal_map
+
+
+# ── Breakout Pullback ────────────────────────────────────────────────────────
+
+def generate_breakout_pullback(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Wait for a breakout, then buy the first controlled pullback."""
+    breakout_window = max(int(params.get("breakout_window", 50)), 10)
+    confirm_window = max(int(params.get("confirm_window", 10)), 3)
+    pullback_pct = max(float(params.get("pullback_pct", 0.05)), 0.005)
+    stop_loss = max(float(params.get("stop_loss", 0.10)), 0.01)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+
+        prior_high = close.shift(1).rolling(
+            breakout_window, min_periods=max(5, breakout_window // 3)
+        ).max()
+        support = close.shift(1).rolling(
+            confirm_window, min_periods=max(3, confirm_window // 2)
+        ).min()
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+        breakout_level = 0.0
+        waiting_pullback = False
+        in_position = False
+        entry_price = 0.0
+
+        for i, price in enumerate(close):
+            high_level = prior_high.iloc[i]
+            support_level = support.iloc[i]
+
+            if not in_position:
+                if not waiting_pullback and pd.notna(high_level) and price > high_level:
+                    waiting_pullback = True
+                    breakout_level = float(high_level)
+                elif waiting_pullback:
+                    near_breakout = breakout_level > 0 and price <= breakout_level * (1 + pullback_pct)
+                    holds_support = pd.notna(support_level) and price >= support_level
+                    if near_breakout and holds_support:
+                        in_position = True
+                        waiting_pullback = False
+                        entry_price = float(price)
+                    elif breakout_level > 0 and price < breakout_level * (1 - stop_loss):
+                        waiting_pullback = False
+                        breakout_level = 0.0
+            else:
+                hit_stop = entry_price > 0 and price <= entry_price * (1 - stop_loss)
+                lost_support = pd.notna(support_level) and price < support_level
+                if hit_stop or lost_support:
+                    in_position = False
+                    entry_price = 0.0
+                    breakout_level = 0.0
+
+            weights.iloc[i] = target_w if in_position else 0.0
+
+        signal_map[code] = weights
+    return signal_map
+
+
 # ── Monthly Rebalance ────────────────────────────────────────────────────────
 
 def generate_monthly_rebalance(
@@ -706,6 +942,19 @@ def _rsi(close: pd.Series, window: int) -> pd.Series:
     return (100 - (100 / (1 + rs))).fillna(50.0)
 
 
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int) -> pd.Series:
+    prev_close = close.shift(1)
+    true_range = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return true_range.rolling(window, min_periods=max(2, window // 2)).mean()
+
+
 def _to_code(holding: PaperHolding) -> str:
     """Build the internal code used by backtest loaders.
 
@@ -758,4 +1007,12 @@ def generate_signals(
         return generate_dual_momentum(holdings, data_map, params)
     if strategy_name == "vol_trend_rotation":
         return generate_vol_trend_rotation(holdings, data_map, params)
+    if strategy_name == "atr_trend_stop":
+        return generate_atr_trend_stop(holdings, data_map, params)
+    if strategy_name == "mean_reversion_scaleout":
+        return generate_mean_reversion_scaleout(holdings, data_map, params)
+    if strategy_name == "enhanced_dca_trend":
+        return generate_enhanced_dca_trend(holdings, data_map, params)
+    if strategy_name == "breakout_pullback":
+        return generate_breakout_pullback(holdings, data_map, params)
     raise ValueError(f"Unknown strategy: {strategy_name}")
