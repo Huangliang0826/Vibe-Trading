@@ -27,7 +27,7 @@ export function MiniEquityChart({ data, height = 80 }: Props) {
       xAxis: { type: "category", data: data.map(d => d.time), show: false },
       yAxis: { type: "value", show: false, scale: true },
       series: [{
-        type: "line", data: values, symbol: "none", smooth: true,
+        type: "line", data: values, symbol: "none", smooth: false,
         lineStyle: { color, width: 1.5 },
         areaStyle: {
           color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1,

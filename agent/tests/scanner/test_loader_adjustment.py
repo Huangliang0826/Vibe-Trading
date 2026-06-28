@@ -27,6 +27,9 @@ def test_yfinance_download_requests_adjusted_prices():
         "yfinance must auto-adjust for splits/dividends; raw Close leaks false "
         "pct_change jumps on split days"
     )
+    assert captured.get("end") == "2024-01-05", (
+        "the loader contract treats end_date as inclusive, while yfinance end is exclusive"
+    )
 
 
 def test_alpaca_bars_request_uses_full_adjustment():

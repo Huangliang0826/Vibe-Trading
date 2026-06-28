@@ -1144,7 +1144,7 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
 
     if response.artifacts_equity_csv:
         filtered_equity = []
-        for row in response.artifacts_equity_csv[:1000]:
+        for row in response.artifacts_equity_csv:
             filtered_row: Dict[str, Any] = {}
             if "timestamp" in row:
                 filtered_row["time"] = row["timestamp"]
@@ -2157,6 +2157,38 @@ def _df_to_bars(df, intraday: bool) -> list[dict]:
     return rows
 
 
+def _price_period_baseline_date(period: str, today):
+    """Return the calendar boundary whose close anchors a period return."""
+    import calendar
+
+    if period == "YTD":
+        return today.replace(year=today.year - 1, month=12, day=31)
+    if period == "1M":
+        year = today.year if today.month > 1 else today.year - 1
+        month = today.month - 1 if today.month > 1 else 12
+        day = min(today.day, calendar.monthrange(year, month)[1])
+        return today.replace(year=year, month=month, day=day)
+    years = {"1Y": 1, "3Y": 3, "5Y": 5}.get(period)
+    if years:
+        try:
+            return today.replace(year=today.year - years)
+        except ValueError:  # February 29 -> February 28 in a non-leap year.
+            return today.replace(year=today.year - years, day=28)
+    return None
+
+
+def _trim_daily_history_to_period(df, period: str, today):
+    """Keep the exact period baseline plus every subsequent trading day."""
+    baseline = _price_period_baseline_date(period, today)
+    if baseline is None or df.empty:
+        return df
+
+    eligible = [i for i, ts in enumerate(df.index) if ts.date() <= baseline]
+    if not eligible:
+        return df
+    return df.iloc[eligible[-1]:]
+
+
 def _fetch_price_history(code: str, period: str, market_hint: str | None = None) -> dict:
     """Fetch OHLCV close+volume + name for a symbol over the period.
 
@@ -2214,13 +2246,15 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         return {"name": name, "bars": _df_to_bars(df.iloc[-keep_n:], intraday=False)}
 
     # ── Daily periods (1M / YTD / 1Y / 3Y / 5Y / ALL) ───────────────────────
-    period_days = {"1M": 45, "1Y": 400, "3Y": 1160, "5Y": 1885}
-    if period == "YTD":
-        start_str = f"{today.year}-01-01"
-    elif period == "ALL":
-        start_str = "1997-01-01"
+    baseline = _price_period_baseline_date(period, today)
+    if period == "ALL":
+        start_str = "1900-01-01"
+    elif baseline is not None:
+        # Fetch a small buffer so weekends and exchange holidays still have a
+        # prior close available as the exact return baseline.
+        start_str = (baseline - timedelta(days=14)).strftime("%Y-%m-%d")
     else:
-        start_str = (today - timedelta(days=period_days.get(period, 400))).strftime("%Y-%m-%d")
+        start_str = (today - timedelta(days=400)).strftime("%Y-%m-%d")
     end_str = today.strftime("%Y-%m-%d")
 
     result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
@@ -2229,8 +2263,7 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         return {"name": name, "bars": []}
 
     df = df.sort_index()
-    if len(df) > 3000:
-        df = df.iloc[-3000:]
+    df = _trim_daily_history_to_period(df, period, today)
     return {"name": name, "bars": _df_to_bars(df, intraday=False)}
 
 
@@ -2444,7 +2477,7 @@ async def get_forecast(
 
     market = market.lower()
     horizon = max(1, min(months, 12)) * 21
-    key = f"{market}:{code.upper()}:{horizon}:{context}:{display_history}"
+    key = f"forecast-v2:{market}:{code.upper()}:{horizon}:{context}:{display_history}"
     if not nocache:
         cached = _FORECAST_CACHE.get(key)
         if cached and (time.time() - cached[0]) < _FORECAST_TTL:
@@ -2640,7 +2673,7 @@ async def get_hstech_best_paper_strategy(
 
     response.headers["Cache-Control"] = "no-store"
     effective_end = end_date or default_end_date()
-    key = f"hstech-best-paper:{start_date}:{effective_end}:v1"
+    key = f"hstech-best-paper:{start_date}:{effective_end}:v2"
     cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
     if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
         return {**cached[1], "cached": True}
@@ -2689,7 +2722,7 @@ async def get_forecast_best_paper_strategy(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     effective_end = end_date or default_end_date()
-    key = f"forecast-best-paper:{mk}:{display_code}:{start_date}:{effective_end}:v1"
+    key = f"forecast-best-paper:{mk}:{display_code}:{start_date}:{effective_end}:v2"
     cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
     if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
         return {**cached[1], "cached": True}

@@ -132,6 +132,33 @@ class TestCommission:
         assert comm == pytest.approx(expected, abs=0.01)
 
 
+class TestFinalEquitySnapshot:
+    def test_final_snapshot_includes_forced_exit_commission(self) -> None:
+        dates = pd.bdate_range("2025-01-02", periods=2)
+        bars = pd.DataFrame(
+            {"open": [100.0, 100.0], "close": [100.0, 100.0]},
+            index=dates,
+        )
+        close_df = bars[["close"]].rename(columns={"close": "0700.HK"})
+        target_pos = pd.DataFrame({"0700.HK": [1.0, 1.0]}, index=dates)
+        engine = _hk_engine()
+
+        engine._execute_bars(
+            dates,
+            {"0700.HK": bars},
+            close_df,
+            target_pos,
+            ["0700.HK"],
+        )
+
+        final = engine.equity_snapshots[-1]
+        assert engine.trades[-1].exit_price == pytest.approx(engine.apply_slippage(100.0, -1))
+        assert final.equity == pytest.approx(engine.capital)
+        assert final.capital == pytest.approx(engine.capital)
+        assert final.unrealized == 0.0
+        assert final.positions == 0
+
+
 # ---------------------------------------------------------------------------
 # apply_slippage: US low vs HK moderate
 # ---------------------------------------------------------------------------

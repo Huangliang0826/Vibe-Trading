@@ -496,8 +496,21 @@ class BaseEngine(ABC):
         if len(dates) > 0:
             last_ts = dates[-1]
             for c in list(self.positions.keys()):
-                price = self._safe_price(close_df, last_ts, c, self.positions[c].entry_price)
+                position = self.positions[c]
+                close_price = self._safe_price(close_df, last_ts, c, position.entry_price)
+                price = self.apply_slippage(close_price, -position.direction)
                 self._close_position(c, price, last_ts, "end_of_backtest")
+            if self.equity_snapshots:
+                # The last bar was valued before forced liquidation. Replace it
+                # with settled cash so exit commissions are reflected in every
+                # downstream metric and chart without adding a duplicate date.
+                self.equity_snapshots[-1] = EquitySnapshot(
+                    timestamp=last_ts,
+                    capital=self.capital,
+                    unrealized=0.0,
+                    equity=self.capital,
+                    positions=0,
+                )
 
     def _calc_equity(self, close_df: pd.DataFrame, ts: pd.Timestamp) -> float:
         """Total equity = free cash + sum(margin + unrealised) per position."""

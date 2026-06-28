@@ -81,7 +81,12 @@ type StrategyName =
   | "atr_trend_stop"
   | "mean_reversion_scaleout"
   | "enhanced_dca_trend"
-  | "breakout_pullback";
+  | "breakout_pullback"
+  | "quality_momentum"
+  | "low_volatility_rotation"
+  | "volatility_squeeze_breakout"
+  | "risk_parity"
+  | "price_volume_efficiency";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -105,6 +110,11 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "mean_reversion_scaleout", label: "均值回归分批止盈", desc: "超跌低吸，回归均线先减半，到上轨清仓" },
   { value: "enhanced_dca_trend", label: "趋势增强定投", desc: "按期建仓，弱趋势降仓，趋势回暖再提高投入" },
   { value: "breakout_pullback", label: "突破回踩确认", desc: "先突破前高，再等回踩不破支撑后买入" },
+  { value: "quality_momentum", label: "收益质量动量", desc: "追强但惩罚高波动和深回撤，筛选更稳的强势标的" },
+  { value: "low_volatility_rotation", label: "低波动防守轮动", desc: "优先持有趋势未破、近期波动最低的标的" },
+  { value: "volatility_squeeze_breakout", label: "波动压缩突破", desc: "低波动压缩后向上突破且放量时买入" },
+  { value: "risk_parity", label: "组合风险平价", desc: "按近期波动反向分配仓位，让高波动标的少配" },
+  { value: "price_volume_efficiency", label: "量价效率轮动", desc: "买上涨高效且放量确认、下跌风险较低的标的" },
 ];
 
 const STRATEGY_LABELS = Object.fromEntries(
@@ -149,6 +159,11 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   mean_reversion_scaleout: "策略原理：价格跌到统计下轨时认为短期超跌并买入，回到均线附近先减半，到上轨或触发止损时退出，用分批止盈降低反转失败风险。",
   enhanced_dca_trend: "策略原理：保留定投的分批建仓纪律，但长期趋势偏弱时降低目标仓位，趋势向上且价格仍偏低时提高投入，避免在弱势里机械满仓。",
   breakout_pullback: "策略原理：不在突破当天追高，而是先确认价格突破前高，再等待回踩突破位附近且不破短期支撑后买入，减少假突破带来的追高风险。",
+  quality_momentum: "策略原理：每月按收益质量排序，既看过去涨幅，也扣除波动率和最大回撤惩罚，只持有表现强且回撤质量更好的标的。",
+  low_volatility_rotation: "策略原理：每月在趋势未破的标的里选择近期波动最低者，目标不是追求最强涨幅，而是优先降低组合波动和下行风险。",
+  volatility_squeeze_breakout: "策略原理：先等待布林带宽度/波动率降到历史低分位，随后只有价格向上突破且成交量确认时买入，捕捉压缩后的趋势释放。",
+  risk_parity: "策略原理：按近期波动率反向分配组合权重，波动大的标的少配，波动小的标的多配，让组合风险贡献更均衡。",
+  price_volume_efficiency: "策略原理：把价格行为切成上涨效率和下跌效率，再看成交量是否配合；上涨高效且放量确认加分，下跌高效且放量确认扣分，最后按综合 rank 轮动持有前几名。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
@@ -1068,7 +1083,12 @@ export function PaperTrading() {
               {activeRun.equity_curve && activeRun.equity_curve.length > 0 && (
                 <div className="rounded-xl border bg-card p-4">
                   <h3 className="text-sm font-semibold mb-3">组合走势</h3>
-                  <PaperEquityChart data={activeRun.equity_curve} trades={activeRun.trades} height={300} />
+                  <PaperEquityChart
+                    data={activeRun.equity_curve}
+                    initialCapital={activeRun.initial_total_usd}
+                    trades={activeRun.trades}
+                    height={300}
+                  />
                 </div>
               )}
 

@@ -48,6 +48,11 @@ STRATEGY_LABELS: dict[str, str] = {
     "mean_reversion_scaleout": "均值回归分批止盈",
     "enhanced_dca_trend": "趋势增强定投",
     "breakout_pullback": "突破回踩确认",
+    "quality_momentum": "收益质量动量",
+    "low_volatility_rotation": "低波动防守轮动",
+    "volatility_squeeze_breakout": "波动压缩突破",
+    "risk_parity": "组合风险平价",
+    "price_volume_efficiency": "量价效率轮动",
 }
 
 STRATEGY_PRINCIPLES: dict[str, str] = {
@@ -72,6 +77,11 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "mean_reversion_scaleout": "策略原理：价格跌到统计下轨时认为短期超跌并买入，回到均线附近先减半，到上轨或触发止损时退出，用分批止盈降低反转失败风险。",
     "enhanced_dca_trend": "策略原理：保留定投的分批建仓纪律，但长期趋势偏弱时降低目标仓位，趋势向上且价格仍偏低时提高投入，避免在弱势里机械满仓。",
     "breakout_pullback": "策略原理：不在突破当天追高，而是先确认价格突破前高，再等待回踩突破位附近且不破短期支撑后买入，减少假突破带来的追高风险。",
+    "quality_momentum": "策略原理：每月按收益质量排序，既看过去涨幅，也扣除波动率和最大回撤惩罚，只持有表现强且回撤质量更好的标的。",
+    "low_volatility_rotation": "策略原理：每月在趋势未破的标的里选择近期波动最低者，目标不是追求最强涨幅，而是优先降低组合波动和下行风险。",
+    "volatility_squeeze_breakout": "策略原理：先等待布林带宽度/波动率降到历史低分位，随后只有价格向上突破且成交量确认时买入，捕捉压缩后的趋势释放。",
+    "risk_parity": "策略原理：按近期波动率反向分配组合权重，波动大的标的少配，波动小的标的多配，让组合风险贡献更均衡。",
+    "price_volume_efficiency": "策略原理：把价格行为切成上涨效率和下跌效率，再看成交量是否配合；上涨高效且放量确认加分，下跌高效且放量确认扣分，最后按综合 rank 轮动持有前几名。",
 }
 
 STRATEGY_NAMES: tuple[str, ...] = tuple(STRATEGY_LABELS)

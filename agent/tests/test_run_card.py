@@ -149,6 +149,29 @@ def test_api_run_response_includes_run_card(tmp_path: Path) -> None:
     assert response.run_card == run_card
 
 
+def test_api_run_response_keeps_complete_equity_curve(tmp_path: Path) -> None:
+    import api_server
+
+    run_dir = tmp_path / "run_long"
+    artifacts = run_dir / "artifacts"
+    artifacts.mkdir(parents=True)
+    (run_dir / "state.json").write_text('{"status": "success"}\n', encoding="utf-8")
+    dates = pd.bdate_range("2020-01-01", periods=1_205)
+    pd.DataFrame(
+        {
+            "timestamp": dates.strftime("%Y-%m-%d"),
+            "equity": range(100_000, 101_205),
+            "drawdown": [0.0] * len(dates),
+        }
+    ).to_csv(artifacts / "equity.csv", index=False)
+
+    response = api_server._build_response_from_run_dir(run_dir, elapsed=0.0)
+
+    assert len(response.equity_curve or []) == 1_205
+    assert response.equity_curve[-1]["time"] == dates[-1].strftime("%Y-%m-%d")
+    assert response.equity_curve[-1]["equity"] == "101204"
+
+
 def test_runner_artifact_spec_surfaces_run_card_paths() -> None:
     runner = Runner()
 

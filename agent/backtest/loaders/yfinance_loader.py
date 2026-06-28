@@ -29,6 +29,7 @@ _INTERVAL_MAP = {
     "1H": "1h",
     "4H": "1h",
 }
+_CACHE_TIMEFRAME_VERSION = "inclusive-v2"
 
 
 def _to_yfinance_symbol(code: str) -> str:
@@ -79,7 +80,8 @@ def _download_history(
     Args:
         tickers: One or more yfinance symbols.
         start_date: Inclusive start date string.
-        end_date: End date string passed directly to yfinance.
+        end_date: Inclusive project end date; converted for yfinance's
+            exclusive ``end`` parameter.
         interval: yfinance interval string.
 
     Returns:
@@ -88,7 +90,7 @@ def _download_history(
     return yf.download(
         tickers,
         start=start_date,
-        end=end_date,
+        end=(pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
         interval=interval,
         auto_adjust=True,
         progress=False,
@@ -240,6 +242,7 @@ class DataLoader:
 
         requested_interval = str(interval or "1D").strip()
         yf_interval = _to_yfinance_interval(requested_interval)
+        cache_timeframe = f"{requested_interval}:{_CACHE_TIMEFRAME_VERSION}"
 
         symbol_groups: Dict[str, List[str]] = defaultdict(list)
         for code in codes:
@@ -255,7 +258,7 @@ class DataLoader:
             cached = loader_cache_get(
                 source=self.name,
                 symbol=symbol,
-                timeframe=requested_interval,
+                timeframe=cache_timeframe,
                 start_date=start_date,
                 end_date=end_date,
                 fields=None,
@@ -289,7 +292,7 @@ class DataLoader:
                 loader_cache_put(
                     source=self.name,
                     symbol=symbol,
-                    timeframe=requested_interval,
+                    timeframe=cache_timeframe,
                     start_date=start_date,
                     end_date=end_date,
                     fields=None,

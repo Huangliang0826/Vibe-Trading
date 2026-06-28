@@ -702,6 +702,293 @@ def generate_breakout_pullback(
     return signal_map
 
 
+# ── Quality Momentum ─────────────────────────────────────────────────────────
+
+def generate_quality_momentum(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Rank by return quality: momentum minus volatility and drawdown penalty."""
+    lookback = max(int(params.get("lookback", 120)), 20)
+    top_n = max(int(params.get("top_n", 1)), 1)
+    vol_penalty = max(float(params.get("vol_penalty", 0.6)), 0.0)
+    dd_penalty = max(float(params.get("dd_penalty", 0.8)), 0.0)
+
+    codes = [_to_code(h) for h in holdings if _to_code(h) in data_map]
+    if not codes:
+        return {}
+    total_budget = min(sum(_weight(h) for h in holdings if _to_code(h) in data_map), 1.0)
+    trading_idx = pd.DatetimeIndex(sorted(set().union(*(data_map[c].index for c in codes))))
+    months = pd.Series(trading_idx.to_period("M"), index=trading_idx)
+    is_rebalance = months.ne(months.shift(1))
+    weights = {c: pd.Series(0.0, index=trading_idx) for c in codes}
+    current = {c: 0.0 for c in codes}
+
+    close_map = {c: data_map[c]["close"].astype(float).reindex(trading_idx).ffill() for c in codes}
+    for ts in trading_idx:
+        if bool(is_rebalance.loc[ts]):
+            scored: list[tuple[str, float]] = []
+            for c in codes:
+                history = close_map[c].loc[:ts].tail(lookback + 1)
+                if len(history) < max(20, lookback // 3):
+                    continue
+                ret = float(history.iloc[-1] / history.iloc[0] - 1.0)
+                daily = history.pct_change().dropna()
+                vol = float(daily.std() * np.sqrt(252)) if not daily.empty else 0.0
+                peak = history.cummax().replace(0, np.nan)
+                max_dd = abs(float((history / peak - 1.0).min()))
+                score = ret - vol_penalty * vol - dd_penalty * max_dd
+                if ret > 0:
+                    scored.append((c, score))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            winners = [c for c, _ in scored[:top_n]]
+            current = {c: 0.0 for c in codes}
+            if winners:
+                per = total_budget / len(winners)
+                for c in winners:
+                    current[c] = per
+        for c in codes:
+            weights[c].loc[ts] = current[c]
+    return weights
+
+
+# ── Low Volatility Defensive Rotation ────────────────────────────────────────
+
+def generate_low_volatility_rotation(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Hold the lowest-volatility asset whose trend is not broken."""
+    window = max(int(params.get("window", 60)), 10)
+    trend_window = max(int(params.get("trend_window", 120)), 20)
+    top_n = max(int(params.get("top_n", 1)), 1)
+
+    codes = [_to_code(h) for h in holdings if _to_code(h) in data_map]
+    if not codes:
+        return {}
+    total_budget = min(sum(_weight(h) for h in holdings if _to_code(h) in data_map), 1.0)
+    trading_idx = pd.DatetimeIndex(sorted(set().union(*(data_map[c].index for c in codes))))
+    months = pd.Series(trading_idx.to_period("M"), index=trading_idx)
+    is_rebalance = months.ne(months.shift(1))
+    close_map = {c: data_map[c]["close"].astype(float).reindex(trading_idx).ffill() for c in codes}
+    weights = {c: pd.Series(0.0, index=trading_idx) for c in codes}
+    current = {c: 0.0 for c in codes}
+
+    for ts in trading_idx:
+        if bool(is_rebalance.loc[ts]):
+            scored: list[tuple[str, float]] = []
+            for c in codes:
+                close = close_map[c].loc[:ts]
+                if len(close) < max(20, window // 2):
+                    continue
+                vol = close.pct_change().tail(window).std()
+                ma = close.tail(trend_window).mean()
+                if pd.isna(vol) or pd.isna(ma) or close.iloc[-1] < ma:
+                    continue
+                scored.append((c, float(vol)))
+            scored.sort(key=lambda x: x[1])
+            winners = [c for c, _ in scored[:top_n]]
+            current = {c: 0.0 for c in codes}
+            if winners:
+                per = total_budget / len(winners)
+                for c in winners:
+                    current[c] = per
+        for c in codes:
+            weights[c].loc[ts] = current[c]
+    return weights
+
+
+# ── Volatility Squeeze Breakout ──────────────────────────────────────────────
+
+def generate_volatility_squeeze_breakout(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Buy only after volatility compression resolves into an upside breakout."""
+    window = max(int(params.get("window", 20)), 5)
+    squeeze_window = max(int(params.get("squeeze_window", 120)), window * 2)
+    breakout_window = max(int(params.get("breakout_window", 20)), 5)
+    width_quantile = float(np.clip(float(params.get("width_quantile", 0.25)), 0.05, 0.8))
+    stop_loss = max(float(params.get("stop_loss", 0.10)), 0.01)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        df = data_map[code]
+        if df.empty:
+            continue
+        close = df["close"].astype(float)
+        volume = df.get("volume", pd.Series(1.0, index=close.index)).astype(float)
+        middle = close.rolling(window, min_periods=max(3, window // 2)).mean()
+        std = close.rolling(window, min_periods=max(3, window // 2)).std()
+        band_width = (4 * std / middle.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+        squeeze_threshold = band_width.shift(1).rolling(
+            squeeze_window, min_periods=max(20, squeeze_window // 4)
+        ).quantile(width_quantile)
+        prior_high = close.shift(1).rolling(
+            breakout_window, min_periods=max(3, breakout_window // 2)
+        ).max()
+        vol_ma = volume.shift(1).rolling(window, min_periods=max(3, window // 2)).mean()
+
+        target_w = _weight(h)
+        weights = pd.Series(0.0, index=close.index)
+        in_position = False
+        entry_price = 0.0
+        for i, price in enumerate(close):
+            squeezed = pd.notna(squeeze_threshold.iloc[i]) and band_width.iloc[i] <= squeeze_threshold.iloc[i]
+            breakout = pd.notna(prior_high.iloc[i]) and price > prior_high.iloc[i]
+            volume_confirm = pd.isna(vol_ma.iloc[i]) or volume.iloc[i] >= vol_ma.iloc[i]
+            if not in_position and squeezed and breakout and volume_confirm:
+                in_position = True
+                entry_price = float(price)
+            elif in_position:
+                hit_stop = entry_price > 0 and price <= entry_price * (1 - stop_loss)
+                lost_middle = pd.notna(middle.iloc[i]) and price < middle.iloc[i]
+                if hit_stop or lost_middle:
+                    in_position = False
+                    entry_price = 0.0
+            weights.iloc[i] = target_w if in_position else 0.0
+        signal_map[code] = weights
+    return signal_map
+
+
+# ── Risk Parity ──────────────────────────────────────────────────────────────
+
+def generate_risk_parity(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Allocate the portfolio budget inversely to each asset's recent volatility."""
+    window = max(int(params.get("window", 60)), 5)
+    rebalance = params.get("rebalance", "monthly")
+
+    codes = [_to_code(h) for h in holdings if _to_code(h) in data_map]
+    if not codes:
+        return {}
+    total_budget = min(sum(_weight(h) for h in holdings if _to_code(h) in data_map), 1.0)
+    trading_idx = pd.DatetimeIndex(sorted(set().union(*(data_map[c].index for c in codes))))
+    if rebalance == "weekly":
+        periods = pd.Series(trading_idx.to_period("W"), index=trading_idx)
+    else:
+        periods = pd.Series(trading_idx.to_period("M"), index=trading_idx)
+    is_rebalance = periods.ne(periods.shift(1))
+    close_map = {c: data_map[c]["close"].astype(float).reindex(trading_idx).ffill() for c in codes}
+    weights = {c: pd.Series(0.0, index=trading_idx) for c in codes}
+    current = {c: total_budget / len(codes) for c in codes}
+
+    for ts in trading_idx:
+        if bool(is_rebalance.loc[ts]):
+            inv_vol: dict[str, float] = {}
+            for c in codes:
+                returns = close_map[c].loc[:ts].pct_change().tail(window).dropna()
+                vol = float(returns.std()) if not returns.empty else np.nan
+                inv_vol[c] = 1.0 / max(vol, 1e-6) if np.isfinite(vol) else 0.0
+            denom = sum(inv_vol.values())
+            if denom > 0:
+                current = {c: total_budget * inv_vol[c] / denom for c in codes}
+        for c in codes:
+            weights[c].loc[ts] = current[c]
+    return weights
+
+
+# ── Price / Volume Efficiency Rotation ───────────────────────────────────────
+
+def generate_price_volume_efficiency(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Cross-sectional rotation using split upside/downside price-volume efficiency.
+
+    Score components:
+    - high upside efficiency is good;
+    - high downside efficiency is bad;
+    - volume confirmation on efficient upside is good;
+    - volume confirmation on efficient downside is bad.
+    """
+    lookback = max(int(params.get("lookback", 60)), 8)
+    top_n = max(int(params.get("top_n", 3)), 1)
+    rebalance = params.get("rebalance", "monthly")
+
+    codes = [_to_code(h) for h in holdings if _to_code(h) in data_map]
+    if not codes:
+        return {}
+    total_budget = min(sum(_weight(h) for h in holdings if _to_code(h) in data_map), 1.0)
+    trading_idx = pd.DatetimeIndex(sorted(set().union(*(data_map[c].index for c in codes))))
+    if rebalance == "weekly":
+        periods = pd.Series(trading_idx.to_period("W"), index=trading_idx)
+    else:
+        periods = pd.Series(trading_idx.to_period("M"), index=trading_idx)
+    is_rebalance = periods.ne(periods.shift(1))
+    close_map = {c: data_map[c]["close"].astype(float).reindex(trading_idx).ffill() for c in codes}
+    volume_map = {
+        c: data_map[c].get("volume", pd.Series(1.0, index=data_map[c].index)).astype(float).reindex(trading_idx).ffill()
+        for c in codes
+    }
+    weights = {c: pd.Series(0.0, index=trading_idx) for c in codes}
+    current = {c: 0.0 for c in codes}
+
+    for ts in trading_idx:
+        if bool(is_rebalance.loc[ts]):
+            features: dict[str, dict[str, float]] = {}
+            for c in codes:
+                close = close_map[c].loc[:ts].tail(lookback + 1)
+                volume = volume_map[c].loc[:ts].tail(lookback + 1)
+                if len(close) < max(8, lookback // 3):
+                    continue
+                ret = close.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+                if ret.empty:
+                    continue
+                log_vol_change = np.log(volume.replace(0, np.nan)).diff().reindex(ret.index).replace([np.inf, -np.inf], np.nan)
+                up = ret.clip(lower=0)
+                down = (-ret.clip(upper=0))
+                up_sum = float(up.sum())
+                down_sum = float(down.sum())
+                up_eff = up_sum / (float(up.std()) * np.sqrt(len(up)) + 1e-6)
+                down_eff = down_sum / (float(down.std()) * np.sqrt(len(down)) + 1e-6)
+                up_corr = _safe_corr(up, log_vol_change)
+                down_corr = _safe_corr(down, log_vol_change)
+                total_ret = float(close.iloc[-1] / close.iloc[0] - 1.0)
+                if total_ret <= 0 and len(codes) > top_n:
+                    continue
+                features[c] = {
+                    "up_eff": up_eff,
+                    "down_eff": down_eff,
+                    "up_confirm": up_eff * max(up_corr, 0.0),
+                    "down_risk": down_eff * max(down_corr, 0.0),
+                }
+
+            scores: dict[str, float] = {}
+            if features:
+                up_rank = _rank_feature(features, "up_eff", ascending=True)
+                down_rank = _rank_feature(features, "down_eff", ascending=False)
+                up_confirm_rank = _rank_feature(features, "up_confirm", ascending=True)
+                down_risk_rank = _rank_feature(features, "down_risk", ascending=False)
+                for c in features:
+                    scores[c] = (
+                        0.35 * up_rank[c]
+                        + 0.25 * down_rank[c]
+                        + 0.25 * up_confirm_rank[c]
+                        + 0.15 * down_risk_rank[c]
+                    )
+
+            winners = [c for c, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]]
+            current = {c: 0.0 for c in codes}
+            if winners:
+                per = total_budget / len(winners)
+                for c in winners:
+                    current[c] = per
+        for c in codes:
+            weights[c].loc[ts] = current[c]
+    return weights
+
+
 # ── Monthly Rebalance ────────────────────────────────────────────────────────
 
 def generate_monthly_rebalance(
@@ -955,6 +1242,24 @@ def _atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int) -> pd.S
     return true_range.rolling(window, min_periods=max(2, window // 2)).mean()
 
 
+def _safe_corr(a: pd.Series, b: pd.Series) -> float:
+    aligned = pd.concat([a, b], axis=1).dropna()
+    if len(aligned) < 3:
+        return 0.0
+    if float(aligned.iloc[:, 0].std()) == 0.0 or float(aligned.iloc[:, 1].std()) == 0.0:
+        return 0.0
+    value = aligned.iloc[:, 0].corr(aligned.iloc[:, 1])
+    return float(value) if pd.notna(value) and np.isfinite(value) else 0.0
+
+
+def _rank_feature(features: dict[str, dict[str, float]], key: str, ascending: bool) -> dict[str, float]:
+    values = pd.Series({code: vals.get(key, 0.0) for code, vals in features.items()}, dtype=float)
+    if values.empty:
+        return {}
+    ranks = values.rank(method="average", ascending=ascending, pct=True)
+    return {code: float(score) for code, score in ranks.items()}
+
+
 def _to_code(holding: PaperHolding) -> str:
     """Build the internal code used by backtest loaders.
 
@@ -1015,4 +1320,14 @@ def generate_signals(
         return generate_enhanced_dca_trend(holdings, data_map, params)
     if strategy_name == "breakout_pullback":
         return generate_breakout_pullback(holdings, data_map, params)
+    if strategy_name == "quality_momentum":
+        return generate_quality_momentum(holdings, data_map, params)
+    if strategy_name == "low_volatility_rotation":
+        return generate_low_volatility_rotation(holdings, data_map, params)
+    if strategy_name == "volatility_squeeze_breakout":
+        return generate_volatility_squeeze_breakout(holdings, data_map, params)
+    if strategy_name == "risk_parity":
+        return generate_risk_parity(holdings, data_map, params)
+    if strategy_name == "price_volume_efficiency":
+        return generate_price_volume_efficiency(holdings, data_map, params)
     raise ValueError(f"Unknown strategy: {strategy_name}")

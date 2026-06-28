@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   data: EquityPoint[];
+  initialCapital: number;
   trades?: PaperTrade[] | null;
   height?: number;
 }
@@ -29,26 +30,30 @@ function shortDate(value: string) {
 const BUY_MARKER_COLOR = "#ef4444";
 const EQUITY_LINE_COLOR = "#94a3b8";
 
-export function PaperEquityChart({ data, trades = [], height = 300 }: Props) {
+export function computePaperEquityStats(data: EquityPoint[], initialCapital: number) {
+  const values = data.map((point) => Number(point.equity)).filter((value) => Number.isFinite(value));
+  if (values.length < 2 || !Number.isFinite(initialCapital) || initialCapital <= 0) return null;
+  const last = values[values.length - 1];
+  const totalReturn = last / initialCapital - 1;
+  const maxLoss = Math.min(0, ...values.map((value) => value / initialCapital - 1));
+  return {
+    initial: initialCapital,
+    last,
+    totalReturn,
+    maxLoss,
+    up: last >= initialCapital,
+  };
+}
+
+export function PaperEquityChart({ data, initialCapital, trades = [], height = 300 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
   const [mode, setMode] = useState<DisplayMode>("return");
 
-  const stats = useMemo(() => {
-    const values = data.map((point) => Number(point.equity)).filter((value) => Number.isFinite(value));
-    if (values.length < 2) return null;
-    const first = values[0];
-    const last = values[values.length - 1];
-    const totalReturn = first > 0 ? last / first - 1 : 0;
-    const maxDrawdown = Math.min(...data.map((point) => Number(point.drawdown)).filter((value) => Number.isFinite(value)));
-    return {
-      first,
-      last,
-      totalReturn,
-      maxDrawdown,
-      up: last >= first,
-    };
-  }, [data]);
+  const stats = useMemo(
+    () => computePaperEquityStats(data, initialCapital),
+    [data, initialCapital],
+  );
 
   useEffect(() => {
     if (!ref.current || data.length < 2 || !stats) return;
@@ -59,12 +64,12 @@ export function PaperEquityChart({ data, trades = [], height = 300 }: Props) {
     const values = data.map((point) => Number(point.equity));
     const valueByDate = new Map(dates.map((date, index) => [date, values[index]]));
     const lineData = mode === "return"
-      ? values.map((value) => stats.first > 0 ? (value / stats.first - 1) * 100 : 0)
+      ? values.map((value) => (value / stats.initial - 1) * 100)
       : values;
     const yForDate = (date: string) => {
       const equity = valueByDate.get(date);
       if (!Number.isFinite(equity)) return null;
-      return mode === "return" ? ((equity as number) / stats.first - 1) * 100 : equity as number;
+      return mode === "return" ? ((equity as number) / stats.initial - 1) * 100 : equity as number;
     };
     const buyMarkers: unknown[] = [];
     const sellMarkers: unknown[] = [];
@@ -98,7 +103,7 @@ export function PaperEquityChart({ data, trades = [], height = 300 }: Props) {
           if (!item) return "";
           const idx = dates.indexOf(item.axisValue);
           const equity = values[idx] ?? item.value;
-          const ret = stats.first > 0 ? equity / stats.first - 1 : 0;
+          const ret = equity / stats.initial - 1;
           return [
             `<b>${item.axisValue}</b>`,
             `${item.marker} 净值：<b>${money(equity)}</b>`,
@@ -140,7 +145,7 @@ export function PaperEquityChart({ data, trades = [], height = 300 }: Props) {
           type: "line",
           data: lineData,
           symbol: "none",
-          smooth: true,
+          smooth: false,
           z: 3,
           lineStyle: { color: lineColor, width: 2 },
           areaStyle: {
@@ -209,7 +214,7 @@ export function PaperEquityChart({ data, trades = [], height = 300 }: Props) {
             </span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            初始 {money(stats.first)} · 最大亏损 {pct(stats.maxDrawdown)}
+            初始 {money(stats.initial)} · 最大亏损 {pct(stats.maxLoss)}
           </p>
         </div>
         <div className="inline-flex w-fit rounded-md border bg-background p-1">

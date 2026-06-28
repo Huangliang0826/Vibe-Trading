@@ -587,7 +587,12 @@ export interface PaperStrategyConfig {
     | "atr_trend_stop"
     | "mean_reversion_scaleout"
     | "enhanced_dca_trend"
-    | "breakout_pullback";
+    | "breakout_pullback"
+    | "quality_momentum"
+    | "low_volatility_rotation"
+    | "volatility_squeeze_breakout"
+    | "risk_parity"
+    | "price_volume_efficiency";
   params: Record<string, unknown>;
 }
 
