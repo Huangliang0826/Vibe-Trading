@@ -2193,7 +2193,7 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
     """Fetch OHLCV close+volume + name for a symbol over the period.
 
     1D uses intraday 15m bars (trimmed to the exact session) for a
-    Yahoo-style intraday line; longer periods use daily closes. Intraday
+    Yahoo-style intraday price line; longer periods use daily closes. Intraday
     falls back to a short daily window if no intraday data is available.
 
     ``market_hint`` ('cn'/'hk'/'us') disambiguates codes that ``infer_market``
