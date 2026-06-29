@@ -2,6 +2,7 @@ from src.paper_trading.hstech_best import (
     _candidate_row,
     _paired_trade_signals,
     normalize_best_strategy_symbol,
+    strategy_params,
     summarize_best_strategy,
 )
 
@@ -139,3 +140,9 @@ def test_candidate_row_keeps_compact_metrics():
         },
         "error": None,
     }
+
+
+def test_strategy_params_exposes_catalog_defaults():
+    assert strategy_params("dca") == {"frequency": "monthly"}
+    assert strategy_params("grid") == {"grid_count": 5}
+    assert strategy_params("buy_and_hold") == {}

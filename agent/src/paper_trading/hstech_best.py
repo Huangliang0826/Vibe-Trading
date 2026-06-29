@@ -196,12 +196,15 @@ def run_single_symbol_best_strategy(
     }
 
 
-def _strategy_params(strategy_name: str) -> dict[str, Any]:
+def strategy_params(strategy_name: str) -> dict[str, Any]:
     if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend"}:
         return {"frequency": "monthly"}
     if strategy_name == "grid":
         return {"grid_count": 5}
     return {}
+
+
+_strategy_params = strategy_params
 
 
 def _run_strategy(
@@ -214,7 +217,7 @@ def _run_strategy(
     run_prefix: str = "hstech",
     title_prefix: str = "HSTECH",
 ) -> dict[str, Any]:
-    params = _strategy_params(strategy_name)
+    params = strategy_params(strategy_name)
     try:
         if strategy_name in {"dca", "smart_dca"}:
             equity_series, trade_records = _run_dca(
