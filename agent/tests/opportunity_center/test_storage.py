@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -13,6 +15,24 @@ from src.opportunity_center.models import (
     OpportunityItem,
 )
 from src.opportunity_center.storage import OpportunityStore
+
+
+class CoordinatedJobConnection(sqlite3.Connection):
+    read_barrier: threading.Barrier | None = None
+
+    def execute(self, sql, parameters=(), /):
+        normalized_sql = " ".join(sql.split())
+        is_job_update = normalized_sql.startswith("UPDATE refresh_jobs")
+        if is_job_update:
+            self._job_updated = True
+        cursor = super().execute(sql, parameters)
+        if (
+            normalized_sql.startswith("SELECT * FROM refresh_jobs WHERE job_id")
+            and not getattr(self, "_job_updated", False)
+            and self.read_barrier is not None
+        ):
+            self.read_barrier.wait(timeout=5)
+        return cursor
 
 
 def sample_item(
@@ -143,6 +163,30 @@ def test_snapshot_unique_key_is_idempotent(tmp_path):
     rows = store.get_history("hk", "0700", limit=20)
     assert len(rows) == 1
     assert rows[0].score == 80
+
+
+def test_backfilled_snapshot_score_change_uses_newest_strictly_earlier_date(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_snapshot(
+        sample_item(snapshot_date="2026-06-27", score=70),
+        trigger="scheduled",
+    )
+    store.upsert_snapshot(
+        sample_item(snapshot_date="2026-06-29", score=90),
+        trigger="scheduled",
+    )
+
+    backfilled = store.upsert_snapshot(
+        sample_item(snapshot_date="2026-06-28", score=80),
+        trigger="backfill",
+    )
+    updated = store.upsert_snapshot(
+        sample_item(snapshot_date="2026-06-28", score=85),
+        trigger="backfill",
+    )
+
+    assert backfilled.score_change == 10
+    assert updated.score_change == 15
 
 
 def test_news_analysis_cache_key_includes_stock_date_and_prompt(tmp_path):
@@ -362,6 +406,75 @@ def test_queued_job_terminal_transition_sets_finished_at_without_started_at(
     assert finished.status == terminal_status
     assert finished.started_at is None
     assert finished.finished_at == "2026-06-29T09:05:00Z"
+
+
+def test_concurrent_job_updates_write_timestamps_once_and_keep_progress(tmp_path, monkeypatch):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.create_job(
+        job_id="job-1",
+        markets=["hk"],
+        market_dates={"hk": "2026-06-29"},
+        trigger="scheduled",
+        total=4,
+    )
+    clock = threading.local()
+    monkeypatch.setattr("src.opportunity_center.storage.utc_now", lambda: clock.value)
+
+    def connect():
+        conn = sqlite3.connect(
+            store.db_path,
+            timeout=5,
+            factory=CoordinatedJobConnection,
+        )
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    monkeypatch.setattr(store, "_connect", connect)
+
+    def update(status, completed, timestamp):
+        clock.value = timestamp
+        return store.update_job("job-1", status=status, completed=completed)
+
+    def update_concurrently(updates):
+        CoordinatedJobConnection.read_barrier = threading.Barrier(2)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(update, *args) for args in updates]
+                return [future.result(timeout=10) for future in futures]
+        finally:
+            CoordinatedJobConnection.read_barrier = None
+
+    running_results = update_concurrently(
+        [
+            ("running", 1, "2026-06-29T10:05:00Z"),
+            ("running", 2, "2026-06-29T10:06:00Z"),
+        ]
+    )
+    started_at = {result.started_at for result in running_results}
+    assert len(started_at) == 1
+    assert None not in started_at
+    assert {result.status for result in running_results} == {"running"}
+    assert {result.completed for result in running_results} == {1, 2}
+
+    terminal_results = update_concurrently(
+        [
+            ("failed", 3, "2026-06-29T10:10:00Z"),
+            ("completed", 4, "2026-06-29T10:11:00Z"),
+        ]
+    )
+    finished_at = {result.finished_at for result in terminal_results}
+    assert len(finished_at) == 1
+    assert None not in finished_at
+    assert {result.status for result in terminal_results} == {"failed", "completed"}
+    assert {result.completed for result in terminal_results} == {3, 4}
+
+    clock.value = "2026-06-29T10:15:00Z"
+    final = store.update_job("job-1", status="completed", completed=5, total=5)
+    assert final.status == "completed"
+    assert final.completed == 5
+    assert final.total == 5
+    assert final.started_at in started_at
+    assert final.finished_at in finished_at
 
 
 def test_create_job_reuses_existing_active_job_transactionally(tmp_path):

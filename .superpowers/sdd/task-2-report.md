@@ -152,3 +152,36 @@ Final focused regression:
 
 - Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
 - Result: `19 passed in 0.43s`
+
+## Atomic Job Updates And Backfill Score Changes
+
+### Fixes
+
+- Replaced `update_job()`'s unlocked read-then-write sequence with one conditional `UPDATE`. SQLite now evaluates lifecycle timestamp transitions against the current persisted row while status, progress, totals, market dates, errors, and `updated_at` update atomically.
+- `started_at` and `finished_at` remain write-once under concurrent writers; later updates can still change status and progress without replacing either lifecycle timestamp.
+- Changed snapshot predecessor selection to the newest row for the same market/code whose `snapshot_date` is strictly earlier than the incoming snapshot date.
+- Same-day snapshot rewrites and historical backfills therefore compare against the same chronological predecessor and never against a future snapshot.
+
+### RED / GREEN Evidence
+
+RED after adding the concurrency and backfill regressions:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k 'concurrent_job_updates or backfilled_snapshot'`
+- Result: `2 failed, 14 deselected in 0.49s`
+- The concurrent writers returned two distinct `started_at` values, and the D2 backfill calculated `-10` from D3 instead of `10` from D1.
+
+GREEN after implementing the fixes:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k 'concurrent_job_updates or backfilled_snapshot'`
+- Result: `2 passed, 14 deselected in 0.45s`
+
+Final focused regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
+- Result: `21 passed in 0.43s`
+
+### Self-Review And Concerns
+
+- The concurrency regression uses separate SQLite connections in two threads and coordinates the old pre-update reads, so it deterministically reproduces stale lifecycle writes rather than relying on scheduler timing.
+- The conditional update still preserves omitted `completed`, `total`, and `market_dates` values and retains the existing behavior of clearing `error` when omitted.
+- Snapshot chronology relies on the existing ISO `YYYY-MM-DD` date representation, whose lexical order matches chronological order.

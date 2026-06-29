@@ -427,39 +427,45 @@ class OpportunityStore:
         market_dates: dict[str, str] | None = None,
     ) -> RefreshJob:
         now = utc_now()
+        market_dates_json = json.dumps(market_dates) if market_dates is not None else None
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM refresh_jobs WHERE job_id = ?", (job_id,)).fetchone()
-            if row is None:
-                raise ValueError("job not found")
-            started_at = row["started_at"]
-            if row["status"] == "queued" and status == "running" and started_at is None:
-                started_at = now
-            finished_at = row["finished_at"]
-            if (
-                row["status"] not in {"completed", "failed"}
-                and status in {"completed", "failed"}
-                and finished_at is None
-            ):
-                finished_at = now
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE refresh_jobs
-                SET status = ?, market_dates_json = ?, completed = ?, total = ?,
-                    started_at = ?, finished_at = ?, updated_at = ?, error = ?
+                SET status = ?,
+                    market_dates_json = COALESCE(?, market_dates_json),
+                    completed = COALESCE(?, completed),
+                    total = COALESCE(?, total),
+                    started_at = CASE
+                        WHEN status = 'queued' AND ? = 'running' AND started_at IS NULL THEN ?
+                        ELSE started_at
+                    END,
+                    finished_at = CASE
+                        WHEN status NOT IN ('completed', 'failed')
+                             AND ? IN ('completed', 'failed')
+                             AND finished_at IS NULL THEN ?
+                        ELSE finished_at
+                    END,
+                    updated_at = ?,
+                    error = ?
                 WHERE job_id = ?
                 """,
                 (
                     status,
-                    json.dumps(market_dates) if market_dates is not None else row["market_dates_json"],
-                    row["completed"] if completed is None else completed,
-                    row["total"] if total is None else total,
-                    started_at,
-                    finished_at,
+                    market_dates_json,
+                    completed,
+                    total,
+                    status,
+                    now,
+                    status,
+                    now,
                     now,
                     error,
                     job_id,
                 ),
             )
+            if cursor.rowcount == 0:
+                raise ValueError("job not found")
             updated = conn.execute("SELECT * FROM refresh_jobs WHERE job_id = ?", (job_id,)).fetchone()
         assert updated is not None
         return self._job_from_row(updated)
@@ -485,10 +491,7 @@ class OpportunityStore:
                 """
                 SELECT payload_json
                 FROM opportunity_snapshots
-                WHERE market = ? AND code = ?
-                  AND NOT (
-                    snapshot_date = ? AND score_version = ? AND strategy_version = ?
-                  )
+                WHERE market = ? AND code = ? AND snapshot_date < ?
                 ORDER BY snapshot_date DESC, updated_at DESC
                 LIMIT 1
                 """,
@@ -496,8 +499,6 @@ class OpportunityStore:
                     base_item.market,
                     base_item.code,
                     base_item.snapshot_date,
-                    base_item.score_version,
-                    base_item.strategy_version,
                 ),
             ).fetchone()
             previous_score = None
