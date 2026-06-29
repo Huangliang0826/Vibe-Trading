@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from src.opportunity_center.models import (
     SCORE_VERSION,
     STRATEGY_VERSION,
@@ -153,6 +155,38 @@ def test_news_analysis_cache_key_includes_stock_date_and_prompt(tmp_path):
     assert store.get_news_analysis("a1", "hk", "0700", "2026-06-29", "news-impact-v2") is None
 
 
+def test_canonical_url_conflict_returns_persisted_article_identity_for_analysis_cache(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    source = sample_source()
+    first = store.upsert_articles([sample_article(article_id="canonical-id")], source=source)
+    store.save_news_analysis(
+        sample_impact(article_id=first[0].article_id),
+        "2026-06-29",
+        "news-impact-v1",
+    )
+
+    repeated = store.upsert_articles(
+        [
+            sample_article(
+                article_id="changed-feed-id",
+                url="https://example.com/story?utm_campaign=repeat&ref=rss",
+            )
+        ],
+        source=source,
+    )
+
+    assert repeated[0].article_id == "canonical-id"
+    cached = store.get_news_analysis(
+        repeated[0].article_id,
+        "hk",
+        "0700",
+        "2026-06-29",
+        "news-impact-v1",
+    )
+    assert cached is not None
+    assert cached.article_id == "canonical-id"
+
+
 def test_upsert_articles_tracks_source_health_and_recent_articles(tmp_path):
     store = OpportunityStore(tmp_path / "opportunities.db")
     source = sample_source()
@@ -247,8 +281,34 @@ def test_list_latest_filters_before_limit(tmp_path):
     assert listing[0].code == "0700"
 
 
-def test_jobs_track_active_refresh_and_completed_market_dates(tmp_path):
-    store = OpportunityStore(tmp_path / "opportunities.db")
+@pytest.mark.parametrize("terminal_status", ["completed", "failed"])
+def test_jobs_persist_exact_transition_timestamps_and_migrate_legacy_schema(
+    tmp_path,
+    monkeypatch,
+    terminal_status,
+):
+    db_path = tmp_path / "opportunities.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE refresh_jobs (
+              job_id TEXT PRIMARY KEY, status TEXT NOT NULL, markets_json TEXT NOT NULL,
+              market_dates_json TEXT NOT NULL, trigger TEXT NOT NULL,
+              completed INTEGER NOT NULL, total INTEGER NOT NULL,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, error TEXT
+            )
+            """
+        )
+    timestamps = iter(
+        [
+            "2026-06-29T08:00:00Z",
+            "2026-06-29T08:05:00Z",
+            "2026-06-29T08:10:00Z",
+            "2026-06-29T08:15:00Z",
+        ]
+    )
+    monkeypatch.setattr("src.opportunity_center.storage.utc_now", lambda: next(timestamps))
+    store = OpportunityStore(db_path)
 
     created = store.create_job(
         job_id="job-1",
@@ -258,14 +318,85 @@ def test_jobs_track_active_refresh_and_completed_market_dates(tmp_path):
         total=2,
     )
     assert created.status == "queued"
+    assert created.created_at == "2026-06-29T08:00:00Z"
+    assert created.started_at is None
+    assert created.finished_at is None
     assert store.get_active_job() is not None
     assert store.has_market_refresh("hk", "2026-06-29") is False
 
     running = store.update_job("job-1", status="running", completed=1)
-    assert running.started_at is not None
+    assert running.started_at == "2026-06-29T08:05:00Z"
+    assert running.started_at != running.created_at
     assert store.get_active_job() is not None
 
-    completed = store.update_job("job-1", status="completed", completed=2)
-    assert completed.finished_at is not None
+    still_running = store.update_job("job-1", status="running", completed=1)
+    assert still_running.started_at == "2026-06-29T08:05:00Z"
+
+    finished = store.update_job("job-1", status=terminal_status, completed=2)
+    assert finished.started_at == "2026-06-29T08:05:00Z"
+    assert finished.finished_at == "2026-06-29T08:15:00Z"
+    assert finished.updated_at == "2026-06-29T08:15:00Z"
     assert store.get_active_job() is None
-    assert store.has_market_refresh("hk", "2026-06-29") is True
+    assert store.has_market_refresh("hk", "2026-06-29") is (terminal_status == "completed")
+
+
+def test_create_job_reuses_existing_active_job_transactionally(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    queued = store.create_job(
+        job_id="job-1",
+        markets=["hk"],
+        market_dates={"hk": "2026-06-29"},
+        trigger="scheduled",
+        total=1,
+    )
+
+    reused_queued = store.create_job(
+        job_id="job-2",
+        markets=["us"],
+        market_dates={"us": "2026-06-28"},
+        trigger="manual",
+        total=1,
+    )
+    store.update_job("job-1", status="running")
+    reused_running = store.create_job(
+        job_id="job-3",
+        markets=["us"],
+        market_dates={"us": "2026-06-28"},
+        trigger="manual",
+        total=1,
+    )
+
+    assert reused_queued.job_id == queued.job_id
+    assert reused_running.job_id == queued.job_id
+    assert reused_running.status == "running"
+    with store._connect() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM refresh_jobs").fetchone()[0]
+    assert count == 1
+
+
+def test_get_active_job_prefers_running_over_newer_queued_row(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.create_job(
+        job_id="running-job",
+        markets=["hk"],
+        market_dates={"hk": "2026-06-29"},
+        trigger="scheduled",
+        total=1,
+    )
+    store.update_job("running-job", status="running")
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO refresh_jobs (
+                job_id, status, markets_json, market_dates_json, trigger,
+                completed, total, created_at, updated_at, error
+            ) VALUES (?, 'queued', '[]', '{}', 'manual', 0, 1, ?, ?, NULL)
+            """,
+            ("newer-queued-job", "9999-01-01T00:00:00Z", "9999-01-01T00:00:00Z"),
+        )
+
+    active = store.get_active_job()
+
+    assert active is not None
+    assert active.job_id == "running-job"
+    assert active.status == "running"

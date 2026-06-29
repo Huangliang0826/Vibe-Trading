@@ -85,3 +85,49 @@
 ## Concerns
 
 - `refresh_jobs` does not have dedicated `started_at` / `finished_at` columns in the Task 2 schema, so `RefreshJob.started_at` and `finished_at` are derived from `created_at` / `updated_at` based on status. This is consistent within the current task surface, but later tasks may want to persist those timestamps explicitly if the schema is extended.
+
+## Task 2 Review Fixes
+
+### Fixes
+
+- Canonical URL conflicts now retain and return the already-persisted `article_id`. A feed item whose incoming ID changes therefore continues to address the same news-analysis cache entries.
+- Added nullable `started_at` and `finished_at` columns to new `refresh_jobs` tables and additive `ALTER TABLE` migration logic for existing Task 2 databases.
+- `update_job()` now records `started_at` only on `queued -> running` and `finished_at` only on `running -> completed/failed`, preserving the first transition timestamps on later updates.
+- `create_job()` now uses `BEGIN IMMEDIATE` to serialize active-job detection and insertion, returning an existing queued or running job instead of creating a competitor.
+- Active-job reads now deterministically prefer running jobs over queued jobs, then use stable creation-time and job-ID ordering.
+
+### RED / GREEN Evidence
+
+RED after adding the review regression tests:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v`
+- Result: `5 failed, 7 passed in 0.60s`
+- Expected failures covered canonical article identity, both terminal timestamp transitions, active-job deduplication, and running-over-newer-queued precedence.
+
+GREEN after implementing the fixes:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v`
+- Result: `12 passed in 0.52s`
+
+Final focused regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
+- Result: `17 passed in 0.50s`
+
+### Files Changed
+
+- `agent/src/opportunity_center/storage.py`
+- `agent/tests/opportunity_center/test_storage.py`
+- `.superpowers/sdd/task-2-report.md`
+
+### Self-Review
+
+- Canonical URL lookup is deliberately evaluated before incoming-ID lookup, making the persisted canonical identity authoritative when the two identifiers disagree.
+- Existing databases migrate without rebuilding or deleting `refresh_jobs`; historical rows keep null lifecycle timestamps rather than receiving fabricated values.
+- The active-job select and insert occur under one SQLite write reservation, preventing concurrent creators from both observing an empty active set.
+- A direct legacy-state regression confirms a newer queued row cannot hide an older running row even if such competing rows already exist.
+- No model changes were needed, and the unrelated forecast DCA baseline was not touched.
+
+### Concerns
+
+- Pre-migration jobs retain null `started_at` and `finished_at` because their true transition times cannot be reconstructed accurately. New transitions are persisted exactly.

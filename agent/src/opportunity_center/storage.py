@@ -123,10 +123,17 @@ class OpportunityStore:
                   job_id TEXT PRIMARY KEY, status TEXT NOT NULL, markets_json TEXT NOT NULL,
                   market_dates_json TEXT NOT NULL, trigger TEXT NOT NULL,
                   completed INTEGER NOT NULL, total INTEGER NOT NULL,
-                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, error TEXT
+                  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
+                  updated_at TEXT NOT NULL, error TEXT
                 );
                 """
             )
+            refresh_job_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(refresh_jobs)").fetchall()
+            }
+            for column in ("started_at", "finished_at"):
+                if column not in refresh_job_columns:
+                    conn.execute(f"ALTER TABLE refresh_jobs ADD COLUMN {column} TEXT")
 
     def upsert_articles(
         self,
@@ -219,11 +226,17 @@ class OpportunityStore:
                     """
                     SELECT article_id
                     FROM news_articles
-                    WHERE article_id = ? OR canonical_url = ?
+                    WHERE canonical_url = ?
                     """,
-                    (article.article_id, canonical_url),
+                    (canonical_url,),
                 ).fetchone()
                 if existing is None:
+                    existing = conn.execute(
+                        "SELECT article_id FROM news_articles WHERE article_id = ?",
+                        (article.article_id,),
+                    ).fetchone()
+                if existing is None:
+                    persisted_article_id = article.article_id
                     conn.execute(
                         """
                         INSERT INTO news_articles
@@ -243,6 +256,7 @@ class OpportunityStore:
                         ),
                     )
                 else:
+                    persisted_article_id = existing["article_id"]
                     conn.execute(
                         """
                         UPDATE news_articles
@@ -262,7 +276,11 @@ class OpportunityStore:
                             existing["article_id"],
                         ),
                     )
-                saved.append(article.model_copy(update={"url": canonical_url}))
+                saved.append(
+                    article.model_copy(
+                        update={"article_id": persisted_article_id, "url": canonical_url}
+                    )
+                )
         return saved
 
     def find_recent_articles(self, *, since: str | None = None, limit: int = 200) -> list[NewsArticle]:
@@ -363,13 +381,21 @@ class OpportunityStore:
         completed: int = 0,
         error: str | None = None,
     ) -> RefreshJob:
-        now = utc_now()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            active = self._active_job_row(conn)
+            if active is not None:
+                return self._job_from_row(active)
+
+            now = utc_now()
+            started_at = now if status == "running" else None
+            finished_at = now if status in {"completed", "failed"} else None
             conn.execute(
                 """
                 INSERT INTO refresh_jobs
-                    (job_id, status, markets_json, market_dates_json, trigger, completed, total, created_at, updated_at, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (job_id, status, markets_json, market_dates_json, trigger, completed, total,
+                     created_at, started_at, finished_at, updated_at, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -380,6 +406,8 @@ class OpportunityStore:
                     completed,
                     total,
                     now,
+                    started_at,
+                    finished_at,
                     now,
                     error,
                 ),
@@ -403,10 +431,17 @@ class OpportunityStore:
             row = conn.execute("SELECT * FROM refresh_jobs WHERE job_id = ?", (job_id,)).fetchone()
             if row is None:
                 raise ValueError("job not found")
+            started_at = row["started_at"]
+            if row["status"] == "queued" and status == "running" and started_at is None:
+                started_at = now
+            finished_at = row["finished_at"]
+            if row["status"] == "running" and status in {"completed", "failed"} and finished_at is None:
+                finished_at = now
             conn.execute(
                 """
                 UPDATE refresh_jobs
-                SET status = ?, market_dates_json = ?, completed = ?, total = ?, updated_at = ?, error = ?
+                SET status = ?, market_dates_json = ?, completed = ?, total = ?,
+                    started_at = ?, finished_at = ?, updated_at = ?, error = ?
                 WHERE job_id = ?
                 """,
                 (
@@ -414,6 +449,8 @@ class OpportunityStore:
                     json.dumps(market_dates) if market_dates is not None else row["market_dates_json"],
                     row["completed"] if completed is None else completed,
                     row["total"] if total is None else total,
+                    started_at,
+                    finished_at,
                     now,
                     error,
                     job_id,
@@ -425,15 +462,7 @@ class OpportunityStore:
 
     def get_active_job(self) -> RefreshJob | None:
         with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT *
-                FROM refresh_jobs
-                WHERE status NOT IN ('completed', 'failed')
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
+            row = self._active_job_row(conn)
         if row is None:
             return None
         return self._job_from_row(row)
@@ -632,20 +661,33 @@ class OpportunityStore:
         return False
 
     def _job_from_row(self, row: sqlite3.Row) -> RefreshJob:
-        status = row["status"]
         return RefreshJob(
             job_id=row["job_id"],
-            status=status,
+            status=row["status"],
             markets=list(_json_loads(row["markets_json"])),
             trigger=row["trigger"],
             completed=row["completed"],
             total=row["total"],
             created_at=row["created_at"],
-            started_at=row["created_at"] if status != "queued" else None,
-            finished_at=row["updated_at"] if status in {"completed", "failed"} else None,
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
             updated_at=row["updated_at"],
             error=row["error"],
         )
+
+    def _active_job_row(self, conn: sqlite3.Connection) -> sqlite3.Row | None:
+        return conn.execute(
+            """
+            SELECT *
+            FROM refresh_jobs
+            WHERE status IN ('running', 'queued')
+            ORDER BY
+                CASE status WHEN 'running' THEN 0 ELSE 1 END,
+                created_at ASC,
+                job_id ASC
+            LIMIT 1
+            """
+        ).fetchone()
 
     def _news_for_snapshot(self, market: str, code: str, snapshot_date: str) -> list[NewsImpact]:
         with self._connect() as conn:
