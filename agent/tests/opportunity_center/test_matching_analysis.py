@@ -95,6 +95,63 @@ def test_matching_priority_and_confidence():
     assert matches[0].confidence > matches[1].confidence > matches[2].confidence
 
 
+@pytest.mark.parametrize(
+    ("ticker", "unrelated_title"),
+    [
+        ("ON", "Conditions improve for retailers"),
+        ("AI", "Retail sales gain after holiday"),
+        ("IT", "Profits climb for grocers"),
+        ("CAT", "Education spending expands"),
+        ("RATES", "Corporate outlook improves"),
+    ],
+)
+def test_short_ascii_tickers_require_token_boundaries(ticker, unrelated_title):
+    from src.opportunity_center.matching import match_articles
+
+    context = StockContext(
+        market="us",
+        code=ticker,
+        company_name="Example Holdings",
+        aliases=[],
+        brands=[],
+        products=[],
+        sector="",
+        industry="",
+    )
+
+    assert match_articles(context, [make_article("embedded", unrelated_title)]) == []
+    exact = match_articles(context, [make_article("exact", f"{ticker}: shares rise")])
+    assert [match.match_level for match in exact] == ["direct"]
+
+
+@pytest.mark.parametrize(
+    ("alias", "unrelated_title"),
+    [
+        ("ON", "Conditions improve for retailers"),
+        ("AI", "Retail sales gain after holiday"),
+        ("IT", "Profits climb for grocers"),
+        ("CAT", "Education spending expands"),
+    ],
+)
+def test_short_ascii_aliases_require_token_boundaries(alias, unrelated_title):
+    from src.opportunity_center.matching import match_articles
+
+    context = StockContext(
+        market="us",
+        code="EXMPL",
+        company_name="Example Holdings",
+        aliases=[alias],
+        brands=[],
+        products=[],
+        sector="",
+        industry="",
+    )
+
+    assert match_articles(context, [make_article("embedded", unrelated_title)]) == []
+    exact = match_articles(context, [make_article("exact", f"({alias}) shares rise")])
+    assert [match.match_level for match in exact] == ["direct"]
+
+
 class StubLLM:
     def __init__(self, responses: list[str]):
         self.responses = list(responses)

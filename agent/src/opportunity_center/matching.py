@@ -94,9 +94,16 @@ def match_articles(context: StockContext, articles: list[NewsArticle]) -> list[N
 
 
 def _match_one(context: StockContext, article: NewsArticle) -> NewsMatch | None:
-    text = _normalize_text(f"{article.title} {article.summary}")
+    raw_text = f"{article.title} {article.summary}"
+    text = _normalize_text(raw_text)
+    separated_text = _normalize_with_separators(raw_text)
     direct_terms = _direct_terms(context)
-    matched_direct = [term for term in direct_terms if _contains_term(text, term)]
+    boundary_terms = _boundary_direct_terms(context)
+    matched_direct = [
+        term
+        for term in direct_terms
+        if _contains_term(text, term, separated_text, boundary_terms.get(term))
+    ]
     if matched_direct:
         confidence = 0.88
         if any(term in _normalize_text(" ".join(context.products + context.brands)) for term in matched_direct):
@@ -117,14 +124,15 @@ def _match_one(context: StockContext, article: NewsArticle) -> NewsMatch | None:
 
 
 def _direct_terms(context: StockContext) -> list[str]:
-    terms = [
-        context.code,
-        context.company_name,
-        *context.aliases,
-        *context.brands,
-        *context.products,
+    identity_terms = [
+        _normalize_text(value)
+        for value in [context.code, *context.aliases]
+        if _normalize_text(value)
     ]
-    return _expand_terms(terms)
+    descriptive_terms = _expand_terms(
+        [context.company_name, *context.brands, *context.products]
+    )
+    return _dedupe_strings(identity_terms + descriptive_terms)
 
 
 def _industry_terms(context: StockContext) -> list[str]:
@@ -147,8 +155,34 @@ def _expand_terms(values: list[str]) -> list[str]:
     return _dedupe_strings(expanded)
 
 
-def _contains_term(text: str, term: str) -> bool:
-    return bool(term) and term in text
+def _boundary_direct_terms(context: StockContext) -> dict[str, str]:
+    values = [context.code]
+    values.extend(
+        alias
+        for alias in context.aliases
+        if alias.isascii() and len(_normalize_text(alias)) <= 4
+    )
+    return {
+        _normalize_text(value): _normalize_with_separators(value)
+        for value in values
+        if _normalize_text(value)
+    }
+
+
+def _contains_term(
+    text: str,
+    term: str,
+    separated_text: str = "",
+    boundary_term: str | None = None,
+) -> bool:
+    if not term:
+        return False
+    if boundary_term is None:
+        return term in text
+    return re.search(
+        rf"(?<![0-9a-z]){re.escape(boundary_term)}(?![0-9a-z])",
+        separated_text,
+    ) is not None
 
 
 def _listify(value: Any) -> list[str]:
@@ -177,8 +211,12 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 
 def _normalize_text(value: str) -> str:
-    collapsed = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", " ", value).strip().lower()
+    collapsed = _normalize_with_separators(value)
     return collapsed.replace(" ", "")
+
+
+def _normalize_with_separators(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", " ", value).strip().lower()
 
 
 def _first_non_empty(*values: str) -> str:

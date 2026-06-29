@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -83,6 +84,31 @@ def test_parse_atom_and_strip_tracking_query():
     assert len(rows) == 1
     assert rows[0].url == "https://example.com/story"
     assert rows[0].title == "NVIDIA launches platform"
+
+
+def test_parse_atom_prefers_alternate_link_over_self_and_enclosure():
+    from src.opportunity_center.feeds import NewsSource, parse_feed
+
+    xml = """\
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <id>story-1</id>
+        <title>Multi-link story</title>
+        <link rel="self" href="https://example.com/feed/entry-1" />
+        <link rel="enclosure" href="https://cdn.example.com/audio.mp3" />
+        <link rel="alternate" href="https://example.com/story-1?utm_source=atom" />
+        <updated>2026-06-29T10:30:00Z</updated>
+      </entry>
+    </feed>
+    """
+
+    rows = parse_feed(
+        xml,
+        NewsSource(name="Example", hint="ai", type="rss", url="https://example.com/feed.xml"),
+        datetime(2026, 6, 29, tzinfo=timezone.utc),
+    )
+
+    assert [row.url for row in rows] == ["https://example.com/story-1"]
 
 
 def test_parse_feed_filters_old_entries_and_limits_to_six():
@@ -184,3 +210,79 @@ def test_feed_ingestor_dedupes_near_titles_against_recent_store_entries(tmp_path
         "Distinct robotics expansion",
         "NVIDIA launches new AI platform",
     ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<rss><channel><item></rss>",
+        "<html><body>Access denied</body></html>",
+    ],
+)
+def test_parse_feed_rejects_malformed_or_non_feed_payloads(payload):
+    from src.opportunity_center.feeds import FeedParseError, NewsSource, parse_feed
+
+    source = NewsSource(name="Broken", hint="ai", type="rss", url="https://broken.example/rss.xml")
+
+    with pytest.raises(FeedParseError, match="feed"):
+        parse_feed(payload, source, datetime(2026, 6, 29, tzinfo=timezone.utc))
+
+
+def test_parse_feed_accepts_valid_empty_feed():
+    from src.opportunity_center.feeds import NewsSource, parse_feed
+
+    source = NewsSource(name="Empty", hint="ai", type="rss", url="https://empty.example/rss.xml")
+
+    assert parse_feed(rss_xml([]), source, datetime(2026, 6, 29, tzinfo=timezone.utc)) == []
+
+
+def test_feed_ingestor_isolates_parse_failure_and_records_source_health(tmp_path, monkeypatch):
+    from src.opportunity_center.feeds import FeedIngestor
+
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    source_path = tmp_path / "sources.json"
+    source_path.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "name": "Broken Source",
+                        "hint": "ai",
+                        "type": "rss",
+                        "url": "https://broken.example/rss.xml",
+                    },
+                    {
+                        "name": "Working Source",
+                        "hint": "ai",
+                        "type": "rss",
+                        "url": "https://working.example/rss.xml",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    now = datetime(2026, 6, 29, 12, 0, tzinfo=timezone.utc)
+
+    async def fake_fetch_source(self, client, source):
+        if source.name == "Broken Source":
+            return "<html><body>Rate limited</body></html>"
+        return rss_xml([article_xml(0, now, title="Working story")])
+
+    monkeypatch.setattr("src.opportunity_center.feeds.FeedIngestor._fetch_source", fake_fetch_source)
+
+    saved = FeedIngestor(store, source_path).refresh(now)
+
+    assert [article.title for article in saved] == ["Working story"]
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        health = {
+            row["source_id"]: row
+            for row in conn.execute(
+                "SELECT source_id, consecutive_failures, last_success_at, last_error FROM news_sources"
+            ).fetchall()
+        }
+    assert health["broken-source"]["consecutive_failures"] == 1
+    assert "unsupported feed root" in health["broken-source"]["last_error"]
+    assert health["working-source"]["consecutive_failures"] == 0
+    assert health["working-source"]["last_success_at"] is not None

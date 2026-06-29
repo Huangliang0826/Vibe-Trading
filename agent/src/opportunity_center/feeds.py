@@ -32,6 +32,10 @@ MAX_CONCURRENCY = 12
 TITLE_SIMILARITY_THRESHOLD = 0.92
 
 
+class FeedParseError(ValueError):
+    """Raised when a response cannot be interpreted as an RSS or Atom feed."""
+
+
 class NewsSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,8 +61,9 @@ def canonicalize_url(url: str) -> str:
 
 def parse_feed(xml: str, source: NewsSource, now: datetime) -> list[NewsArticle]:
     root = _parse_xml(xml)
-    if root is None:
-        return []
+    root_name = _local_name(root.tag)
+    if root_name not in {"feed", "rss", "channel"}:
+        raise FeedParseError(f"unsupported feed root: {root_name or '<empty>'}")
 
     cutoff = _ensure_utc(now) - timedelta(days=DEFAULT_RECENT_DAYS)
     rows: list[NewsArticle] = []
@@ -181,12 +186,11 @@ class FeedIngestor:
         return kept
 
 
-def _parse_xml(xml: str) -> ElementTree.Element | None:
+def _parse_xml(xml: str) -> ElementTree.Element:
     try:
         return ElementTree.fromstring(xml.strip())
     except ElementTree.ParseError as exc:
-        logger.warning("malformed feed xml: %s", exc)
-        return None
+        raise FeedParseError(f"malformed feed XML: {exc}") from exc
 
 
 def _iter_entries(root: ElementTree.Element) -> list[ElementTree.Element]:
@@ -228,13 +232,22 @@ def _article_from_entry(entry: ElementTree.Element, source: NewsSource) -> NewsA
 
 
 def _entry_link(entry: ElementTree.Element) -> str:
+    atom_candidates: list[str] = []
     for child in entry:
         if _local_name(child.tag) != "link":
             continue
         href = child.attrib.get("href")
-        if href:
-            return href.strip()
-        if child.text:
+        rel = child.attrib.get("rel", "alternate").strip().lower()
+        if href and rel in {"", "alternate"}:
+            candidate = href.strip()
+            parsed = urlparse(candidate)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                atom_candidates.append(candidate)
+    if atom_candidates:
+        return atom_candidates[0]
+
+    for child in entry:
+        if _local_name(child.tag) == "link" and child.text:
             return child.text.strip()
     return ""
 
