@@ -173,11 +173,24 @@ function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: 
   return params;
 }
 
+// Balance score: reward total return, penalise the worst loss-from-principal
+// at 2× weight. Higher is better. This is the primary "最优策略" criterion —
+// it favours strategies that pair strong returns with a controlled max loss.
+const MAX_LOSS_PENALTY = 2;
+
+function balanceScore(metrics: Record<string, unknown>): number {
+  const ret = finiteNumber(metrics.total_return, -Infinity);
+  if (!Number.isFinite(ret)) return -Infinity;
+  const loss = Math.abs(finiteNumber(metrics.max_loss, 0));
+  return ret - MAX_LOSS_PENALTY * loss;
+}
+
 function compareRuns(a: PaperTradingRun, b: PaperTradingRun): number {
   const am = a.metrics ?? {};
   const bm = b.metrics ?? {};
-  const sharpeDiff = finiteNumber(bm.sharpe, -Infinity) - finiteNumber(am.sharpe, -Infinity);
-  if (Math.abs(sharpeDiff) > 1e-9) return sharpeDiff;
+  const scoreDiff = balanceScore(bm) - balanceScore(am);
+  if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+  // Tiebreakers: higher total return, then smaller loss.
   const returnDiff = finiteNumber(bm.total_return, -Infinity) - finiteNumber(am.total_return, -Infinity);
   if (Math.abs(returnDiff) > 1e-9) return returnDiff;
   return finiteNumber(bm.max_loss, -Infinity) - finiteNumber(am.max_loss, -Infinity);
@@ -231,23 +244,23 @@ function buildOptimalSummary(runs: PaperTradingRun[], bestRunId: string | null):
   const second = sorted.find((run) => run.run_id !== bestRunId);
   const bestName = STRATEGY_LABELS[best.strategy.name as StrategyName] || best.strategy.name;
   const principle = STRATEGY_PRINCIPLES[best.strategy.name as StrategyName];
-  const bestSharpe = finiteNumber(best.metrics.sharpe);
   const bestReturn = finiteNumber(best.metrics.total_return);
   const bestDrawdown = finiteNumber(best.metrics.max_loss);
+  const bestScore = balanceScore(best.metrics);
   const bestTrades = finiteNumber(best.metrics.trade_count, best.trades?.length ?? 0);
 
   const reasons: string[] = [
     principle,
-    `${bestName} 在当前组合和日期区间里综合排名第一，主要因为它的夏普比率为 ${bestSharpe.toFixed(2)}，在“风险调整后收益”排序中最占优。`,
+    `${bestName} 在当前组合和日期区间里综合排名第一，平衡得分（总收益 ${fmtPctValue(bestReturn * 100)} − 2×最大亏损 ${fmtPctValue(Math.abs(bestDrawdown) * 100)}）为 ${fmtPctValue(bestScore * 100)}，在“收益与亏损平衡”排序中最高。`,
   ];
 
   if (second?.metrics) {
     const secondName = STRATEGY_LABELS[second.strategy.name as StrategyName] || second.strategy.name;
-    const secondSharpe = finiteNumber(second.metrics.sharpe);
+    const secondScore = balanceScore(second.metrics);
     const secondReturn = finiteNumber(second.metrics.total_return);
     const secondDrawdown = finiteNumber(second.metrics.max_loss);
     reasons.push(
-      `相比第二名 ${secondName}，它的夏普差距为 ${(bestSharpe - secondSharpe).toFixed(2)}，总收益差距为 ${fmtPctValue((bestReturn - secondReturn) * 100)}，最大亏损差距为 ${fmtPctValue((bestDrawdown - secondDrawdown) * 100)}。`,
+      `相比第二名 ${secondName}，它的平衡得分高 ${fmtPctValue((bestScore - secondScore) * 100)}，总收益差距为 ${fmtPctValue((bestReturn - secondReturn) * 100)}，最大亏损差距为 ${fmtPctValue((bestDrawdown - secondDrawdown) * 100)}。`,
     );
   }
 
@@ -957,7 +970,7 @@ export function PaperTrading() {
             <div>
               <h2 className="text-sm font-semibold">最优策略对比</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                排序规则：夏普比率优先，其次总收益，其次最大亏损更小
+                排序规则：平衡得分优先（总收益 − 2×最大亏损），打平再看总收益、最大亏损
               </p>
             </div>
           </div>
