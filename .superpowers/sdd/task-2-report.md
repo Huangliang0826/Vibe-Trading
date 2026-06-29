@@ -185,3 +185,37 @@ Final focused regression:
 - The concurrency regression uses separate SQLite connections in two threads and coordinates the old pre-update reads, so it deterministically reproduces stale lifecycle writes rather than relying on scheduler timing.
 - The conditional update still preserves omitted `completed`, `total`, and `market_dates` values and retains the existing behavior of clearing `error` when omitted.
 - Snapshot chronology relies on the existing ISO `YYYY-MM-DD` date representation, whose lexical order matches chronological order.
+
+## Terminal Immutability And Successor Rebasing
+
+### Fixes
+
+- Added an allowed-transition predicate to the atomic job update: queued jobs may remain queued or move to running/completed/failed; running jobs may remain running or move to completed/failed.
+- Completed and failed jobs now ignore all later status, progress, total, market-date, and error updates and return their persisted terminal state unchanged.
+- Concurrent terminal writers now converge on the first committed terminal outcome, preserving `get_active_job()` and `has_market_refresh()` semantics.
+- Snapshot upserts now find the immediate next chronological date and rebase every versioned row at that date inside the same SQLite transaction.
+- Inserting D2 between D1 and D3 recalculates D3 from D2, and rewriting D2 recalculates D3 again without changing snapshot uniqueness keys or stored detail data.
+
+### RED / GREEN Evidence
+
+RED after extending the terminal and chronology regressions:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k 'terminal_job_is_immutable or concurrent_job_updates or backfilled_snapshot'`
+- Result: `4 failed, 14 deselected in 0.53s`
+- Completed and failed jobs reopened, concurrent terminal writers returned different outcomes, and D3 retained its stale `20` score change after D2 was inserted.
+
+GREEN after implementing the invariants:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k 'terminal_job_is_immutable or concurrent_job_updates or backfilled_snapshot'`
+- Result: `4 passed, 14 deselected in 0.47s`
+
+Final focused regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
+- Result: `23 passed in 0.44s`
+
+### Self-Review And Concerns
+
+- Invalid nonterminal transitions such as `running -> queued` are also no-ops, matching the explicit allowed-transition list.
+- Successor rebasing updates only `payload_json` and `updated_at`; primary-key version dimensions, trigger, creation time, and detail payloads remain intact.
+- Chronological comparison continues to rely on the existing ISO `YYYY-MM-DD` snapshot-date contract.

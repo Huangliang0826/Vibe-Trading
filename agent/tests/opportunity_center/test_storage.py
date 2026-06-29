@@ -180,13 +180,29 @@ def test_backfilled_snapshot_score_change_uses_newest_strictly_earlier_date(tmp_
         sample_item(snapshot_date="2026-06-28", score=80),
         trigger="backfill",
     )
+    backfilled_history = {
+        item.snapshot_date: item.score_change for item in store.get_history("hk", "0700")
+    }
     updated = store.upsert_snapshot(
         sample_item(snapshot_date="2026-06-28", score=85),
         trigger="backfill",
     )
+    updated_history = {
+        item.snapshot_date: item.score_change for item in store.get_history("hk", "0700")
+    }
 
     assert backfilled.score_change == 10
+    assert backfilled_history == {
+        "2026-06-27": None,
+        "2026-06-28": 10,
+        "2026-06-29": 10,
+    }
     assert updated.score_change == 15
+    assert updated_history == {
+        "2026-06-27": None,
+        "2026-06-28": 15,
+        "2026-06-29": 5,
+    }
 
 
 def test_news_analysis_cache_key_includes_stock_date_and_prompt(tmp_path):
@@ -408,6 +424,48 @@ def test_queued_job_terminal_transition_sets_finished_at_without_started_at(
     assert finished.finished_at == "2026-06-29T09:05:00Z"
 
 
+@pytest.mark.parametrize(
+    ("terminal_status", "attempted_statuses", "has_market_refresh"),
+    [
+        ("completed", ["running", "failed", "completed"], True),
+        ("failed", ["running", "completed", "failed"], False),
+    ],
+)
+def test_terminal_job_is_immutable(
+    tmp_path,
+    terminal_status,
+    attempted_statuses,
+    has_market_refresh,
+):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.create_job(
+        job_id="job-1",
+        markets=["hk"],
+        market_dates={"hk": "2026-06-29"},
+        trigger="scheduled",
+        total=1,
+    )
+    terminal = store.update_job(
+        "job-1",
+        status=terminal_status,
+        completed=1,
+        error="original",
+    )
+
+    for attempted_status in attempted_statuses:
+        unchanged = store.update_job(
+            "job-1",
+            status=attempted_status,
+            completed=99,
+            total=99,
+            error="replacement",
+        )
+        assert unchanged == terminal
+
+    assert store.get_active_job() is None
+    assert store.has_market_refresh("hk", "2026-06-29") is has_market_refresh
+
+
 def test_concurrent_job_updates_write_timestamps_once_and_keep_progress(tmp_path, monkeypatch):
     store = OpportunityStore(tmp_path / "opportunities.db")
     store.create_job(
@@ -465,14 +523,12 @@ def test_concurrent_job_updates_write_timestamps_once_and_keep_progress(tmp_path
     finished_at = {result.finished_at for result in terminal_results}
     assert len(finished_at) == 1
     assert None not in finished_at
-    assert {result.status for result in terminal_results} == {"failed", "completed"}
-    assert {result.completed for result in terminal_results} == {3, 4}
+    assert len({result.status for result in terminal_results}) == 1
+    assert len({result.completed for result in terminal_results}) == 1
 
     clock.value = "2026-06-29T10:15:00Z"
     final = store.update_job("job-1", status="completed", completed=5, total=5)
-    assert final.status == "completed"
-    assert final.completed == 5
-    assert final.total == 5
+    assert final == terminal_results[0]
     assert final.started_at in started_at
     assert final.finished_at in finished_at
 

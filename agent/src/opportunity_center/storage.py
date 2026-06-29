@@ -429,7 +429,7 @@ class OpportunityStore:
         now = utc_now()
         market_dates_json = json.dumps(market_dates) if market_dates is not None else None
         with self._connect() as conn:
-            cursor = conn.execute(
+            conn.execute(
                 """
                 UPDATE refresh_jobs
                 SET status = ?,
@@ -449,6 +449,11 @@ class OpportunityStore:
                     updated_at = ?,
                     error = ?
                 WHERE job_id = ?
+                  AND status NOT IN ('completed', 'failed')
+                  AND (
+                      (status = 'queued' AND ? IN ('queued', 'running', 'completed', 'failed'))
+                      OR (status = 'running' AND ? IN ('running', 'completed', 'failed'))
+                  )
                 """,
                 (
                     status,
@@ -462,12 +467,13 @@ class OpportunityStore:
                     now,
                     error,
                     job_id,
+                    status,
+                    status,
                 ),
             )
-            if cursor.rowcount == 0:
-                raise ValueError("job not found")
             updated = conn.execute("SELECT * FROM refresh_jobs WHERE job_id = ?", (job_id,)).fetchone()
-        assert updated is not None
+            if updated is None:
+                raise ValueError("job not found")
         return self._job_from_row(updated)
 
     def get_active_job(self) -> RefreshJob | None:
@@ -567,6 +573,53 @@ class OpportunityStore:
                     now,
                 ),
             )
+
+            next_date_row = conn.execute(
+                """
+                SELECT MIN(snapshot_date) AS snapshot_date
+                FROM opportunity_snapshots
+                WHERE market = ? AND code = ? AND snapshot_date > ?
+                """,
+                (stored_item.market, stored_item.code, stored_item.snapshot_date),
+            ).fetchone()
+            next_date = next_date_row["snapshot_date"] if next_date_row is not None else None
+            if next_date is not None:
+                successor_rows = conn.execute(
+                    """
+                    SELECT score_version, strategy_version, payload_json
+                    FROM opportunity_snapshots
+                    WHERE market = ? AND code = ? AND snapshot_date = ?
+                    """,
+                    (stored_item.market, stored_item.code, next_date),
+                ).fetchall()
+                for successor_row in successor_rows:
+                    successor_payload = _json_loads(successor_row["payload_json"])
+                    successor_item = OpportunityItem.model_validate_json(
+                        successor_payload["item_json"]
+                    )
+                    successor_change = None
+                    if successor_item.score is not None and stored_item.score is not None:
+                        successor_change = successor_item.score - stored_item.score
+                    successor_payload["item_json"] = successor_item.model_copy(
+                        update={"score_change": successor_change}
+                    ).model_dump_json()
+                    conn.execute(
+                        """
+                        UPDATE opportunity_snapshots
+                        SET payload_json = ?, updated_at = ?
+                        WHERE market = ? AND code = ? AND snapshot_date = ?
+                          AND score_version = ? AND strategy_version = ?
+                        """,
+                        (
+                            json.dumps(successor_payload, ensure_ascii=False),
+                            now,
+                            stored_item.market,
+                            stored_item.code,
+                            next_date,
+                            successor_row["score_version"],
+                            successor_row["strategy_version"],
+                        ),
+                    )
         return stored_item
 
     def list_latest(
