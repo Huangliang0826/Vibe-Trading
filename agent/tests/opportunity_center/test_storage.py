@@ -205,6 +205,56 @@ def test_backfilled_snapshot_score_change_uses_newest_strictly_earlier_date(tmp_
     }
 
 
+def test_snapshot_chronology_uses_later_rowid_for_same_timestamp_versions(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.opportunity_center.storage.utc_now",
+        lambda: "2026-06-30T08:00:00Z",
+    )
+    store = OpportunityStore(tmp_path / "opportunities.db")
+
+    def versioned_item(snapshot_date, score, version):
+        return sample_item(snapshot_date=snapshot_date, score=score).model_copy(
+            update={
+                "score_version": f"score-{version}",
+                "strategy_version": f"strategy-{version}",
+            }
+        )
+
+    store.upsert_snapshot(versioned_item("2026-06-28", 60, "d1-v1"), trigger="scheduled")
+    store.upsert_snapshot(versioned_item("2026-06-28", 70, "d1-v2"), trigger="scheduled")
+    d2_v1 = store.upsert_snapshot(
+        versioned_item("2026-06-29", 80, "d2-v1"),
+        trigger="scheduled",
+        detail={"explanations": ["first D2 version"]},
+    )
+    d2_v2 = store.upsert_snapshot(
+        versioned_item("2026-06-29", 85, "d2-v2"),
+        trigger="manual",
+        detail={"explanations": ["later D2 version"]},
+    )
+
+    latest_detail = store.get_detail("hk", "0700")
+    d1_detail = store.get_detail("hk", "0700", snapshot_date="2026-06-28")
+    history = store.get_history("hk", "0700", limit=10)
+
+    assert d2_v1.score_change == 10
+    assert d2_v2.score_change == 15
+    assert latest_detail is not None
+    assert latest_detail.score_version == "score-d2-v2"
+    assert latest_detail.explanations == ["later D2 version"]
+    assert d1_detail is not None
+    assert d1_detail.score_version == "score-d1-v2"
+    assert [
+        (item.snapshot_date, item.score_version)
+        for item in history
+    ] == [
+        ("2026-06-29", "score-d2-v2"),
+        ("2026-06-29", "score-d2-v1"),
+        ("2026-06-28", "score-d1-v2"),
+        ("2026-06-28", "score-d1-v1"),
+    ]
+
+
 def test_news_analysis_cache_key_includes_stock_date_and_prompt(tmp_path):
     store = OpportunityStore(tmp_path / "opportunities.db")
 

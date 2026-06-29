@@ -246,3 +246,30 @@ Final focused regression:
 
 - Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
 - Result: `24 passed in 0.44s`
+
+## Deterministic Snapshot Chronology
+
+### Fix
+
+- Added `rowid DESC` as the final tie-breaker for strictly earlier predecessor selection, immediate-successor version scans, `get_detail()`, and `get_history()`.
+- Same-date versions sharing identical second-precision timestamps now consistently treat the later persisted row as newer.
+- `get_history()` retains every permanent version row while returning a stable date/timestamp/insertion chronology.
+
+### RED / GREEN Evidence
+
+RED after adding tied predecessor/detail/history coverage:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k snapshot_chronology_uses_later_rowid`
+- Result: `1 failed, 19 deselected in 0.85s`
+- Explicit D1 detail returned the earlier persisted version under the timestamp tie.
+
+GREEN after adding insertion-order tie-breakers:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k snapshot_chronology_uses_later_rowid`
+- Result: `1 passed, 19 deselected in 0.40s`
+- D2 score changes used the later D1 predecessor, detail selected the later same-day version, and history returned all versions in deterministic descending order.
+
+Final focused regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
+- Result: `25 passed in 0.46s`

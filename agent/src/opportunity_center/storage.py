@@ -498,7 +498,7 @@ class OpportunityStore:
                 SELECT payload_json
                 FROM opportunity_snapshots
                 WHERE market = ? AND code = ? AND snapshot_date < ?
-                ORDER BY snapshot_date DESC, updated_at DESC
+                ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC
                 LIMIT 1
                 """,
                 (
@@ -589,6 +589,7 @@ class OpportunityStore:
                     SELECT score_version, strategy_version, payload_json
                     FROM opportunity_snapshots
                     WHERE market = ? AND code = ? AND snapshot_date = ?
+                    ORDER BY updated_at DESC, rowid DESC
                     """,
                     (stored_item.market, stored_item.code, next_date),
                 ).fetchall()
@@ -670,7 +671,7 @@ class OpportunityStore:
         if snapshot_date is not None:
             sql += " AND snapshot_date = ?"
             params.append(snapshot_date)
-        sql += " ORDER BY snapshot_date DESC, updated_at DESC LIMIT 1"
+        sql += " ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC LIMIT 1"
         with self._connect() as conn:
             row = conn.execute(sql, params).fetchone()
         if row is None:
@@ -695,7 +696,7 @@ class OpportunityStore:
                 SELECT payload_json
                 FROM opportunity_snapshots
                 WHERE market = ? AND code = ?
-                ORDER BY snapshot_date DESC, updated_at DESC
+                ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC
                 LIMIT ?
                 """,
                 (market, code, max(1, min(limit, 500))),
