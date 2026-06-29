@@ -78,22 +78,19 @@ def run_paper_trading_backtest(run_id: str, store: PaperTradingStore) -> None:
             )
             valid_codes = [c for c in valid_codes if c in target_pos.columns]
 
-            us_codes = [c for c in valid_codes if c.endswith(".US")]
             hk_codes = [c for c in valid_codes if c.endswith(".HK")]
-            has_us = bool(us_codes)
-            has_hk = bool(hk_codes)
+            other_codes = [c for c in valid_codes if not c.endswith(".HK")]
 
-            if has_us and has_hk:
-                engine = _run_mixed(
-                    initial_cash, dates, data_map, close_df, target_pos,
-                    us_codes, hk_codes, valid_codes,
-                )
-            elif has_hk:
+            # Pure HK → HK engine (stamp tax + levies). Anything else — US,
+            # A-share (.SS/.SZ), or a cross-market mix — runs on the US-rule
+            # engine (fractional shares, negligible commission) over ALL codes,
+            # so A-share holdings are never dropped from a mixed portfolio.
+            if hk_codes and not other_codes:
                 engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="hk")
                 engine._execute_bars(dates, data_map, close_df, target_pos, hk_codes)
             else:
                 engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="us")
-                engine._execute_bars(dates, data_map, close_df, target_pos, us_codes or valid_codes)
+                engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
 
             equity_series = pd.Series(
                 [s.equity for s in engine.equity_snapshots],
@@ -273,28 +270,6 @@ def _last_close(code: str, data_map: Dict[str, pd.DataFrame], before: pd.Timesta
     if mask.any():
         return float(df.loc[mask, "close"].iloc[-1])
     return 0.0
-
-
-def _run_mixed(
-    initial_cash: float,
-    dates: pd.DatetimeIndex,
-    data_map: Dict[str, pd.DataFrame],
-    close_df: pd.DataFrame,
-    target_pos: pd.DataFrame,
-    us_codes: List[str],
-    hk_codes: List[str],
-    all_codes: List[str],
-) -> GlobalEquityEngine:
-    """Run a mixed US+HK backtest.
-
-    Uses US engine rules (zero commission, fractional shares) as the base,
-    but applies HK commission overrides per-symbol in the rebalance loop.
-    For MVP simplicity we use a single US engine — HK stamp tax is small
-    and this avoids splitting capital across two engines.
-    """
-    engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="us")
-    engine._execute_bars(dates, data_map, close_df, target_pos, all_codes)
-    return engine
 
 
 def _build_equity_curve(equity_series: pd.Series) -> List[Dict[str, Any]]:

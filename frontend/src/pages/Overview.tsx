@@ -487,6 +487,7 @@ export function Overview() {
   const [flash, setFlash] = useState(false);
 
   // Watchlist codes (lifted from the columns) drive one chart per stock.
+  const [cnCodes, setCnCodes] = useState<string[]>(() => loadList("watchlist-cn"));
   const [hkCodes, setHkCodes] = useState<string[]>(() => loadList("watchlist-hk"));
   const [usCodes, setUsCodes] = useState<string[]>(() => loadList("watchlist-us"));
 
@@ -596,7 +597,13 @@ export function Overview() {
       {/* Watchlists */}
       <section className="space-y-2">
         <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">自选</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <WatchlistColumn
+            market="cn"
+            label="A股自选"
+            placeholder="输入A股代码，如 600519"
+            onCodesChange={setCnCodes}
+          />
           <WatchlistColumn
             market="hk"
             label="港股自选"
@@ -615,8 +622,11 @@ export function Overview() {
       {/* Price history charts — one per watchlist stock */}
       <section className="space-y-2">
         <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">价格走势</h2>
-        {hkCodes.length + usCodes.length > 0 ? (
+        {cnCodes.length + hkCodes.length + usCodes.length > 0 ? (
           <div className="grid grid-cols-1 gap-4">
+            {cnCodes.map((code) => (
+              <StockChartCard key={`cn-${code}`} id={`chart-cn-${code.toUpperCase()}`} code={code.toUpperCase()} market="cn" />
+            ))}
             {hkCodes.map((code) => (
               <StockChartCard key={`hk-${code}`} id={`chart-hk-${code.toUpperCase()}`} code={code.toUpperCase()} market="hk" />
             ))}

@@ -17,7 +17,7 @@ class PaperTradingStatus(str, Enum):
 
 class PaperHolding(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=32)
-    market: Literal["us", "hk"] = "us"
+    market: Literal["us", "hk", "cn"] = "us"
     allocation_pct: float = Field(..., gt=0, le=100)
 
 

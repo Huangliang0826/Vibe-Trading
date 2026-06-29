@@ -56,7 +56,7 @@ function loadWatchlistCodes(market: WatchlistMarket): string[] {
   }
 }
 
-function holdingKey(symbol: string, market: "us" | "hk"): string {
+function holdingKey(symbol: string, market: "us" | "hk" | "cn"): string {
   return `${market}:${symbol.toUpperCase()}`;
 }
 
@@ -180,7 +180,7 @@ function compareRuns(a: PaperTradingRun, b: PaperTradingRun): number {
   if (Math.abs(sharpeDiff) > 1e-9) return sharpeDiff;
   const returnDiff = finiteNumber(bm.total_return, -Infinity) - finiteNumber(am.total_return, -Infinity);
   if (Math.abs(returnDiff) > 1e-9) return returnDiff;
-  return finiteNumber(bm.max_drawdown, -Infinity) - finiteNumber(am.max_drawdown, -Infinity);
+  return finiteNumber(bm.max_loss, -Infinity) - finiteNumber(am.max_loss, -Infinity);
 }
 
 function buildLatestTradeSummary(run: PaperTradingRun): string {
@@ -233,7 +233,7 @@ function buildOptimalSummary(runs: PaperTradingRun[], bestRunId: string | null):
   const principle = STRATEGY_PRINCIPLES[best.strategy.name as StrategyName];
   const bestSharpe = finiteNumber(best.metrics.sharpe);
   const bestReturn = finiteNumber(best.metrics.total_return);
-  const bestDrawdown = finiteNumber(best.metrics.max_drawdown);
+  const bestDrawdown = finiteNumber(best.metrics.max_loss);
   const bestTrades = finiteNumber(best.metrics.trade_count, best.trades?.length ?? 0);
 
   const reasons: string[] = [
@@ -245,13 +245,13 @@ function buildOptimalSummary(runs: PaperTradingRun[], bestRunId: string | null):
     const secondName = STRATEGY_LABELS[second.strategy.name as StrategyName] || second.strategy.name;
     const secondSharpe = finiteNumber(second.metrics.sharpe);
     const secondReturn = finiteNumber(second.metrics.total_return);
-    const secondDrawdown = finiteNumber(second.metrics.max_drawdown);
+    const secondDrawdown = finiteNumber(second.metrics.max_loss);
     reasons.push(
       `相比第二名 ${secondName}，它的夏普差距为 ${(bestSharpe - secondSharpe).toFixed(2)}，总收益差距为 ${fmtPctValue((bestReturn - secondReturn) * 100)}，最大亏损差距为 ${fmtPctValue((bestDrawdown - secondDrawdown) * 100)}。`,
     );
   }
 
-  const drawdownText = bestDrawdown < -0.2 ? "回撤仍然偏高，适合作为候选而不是直接实盘规则。" : "回撤相对可控，说明它没有单纯靠放大风险取胜。";
+  const drawdownText = bestDrawdown < -0.2 ? "相对本金的最大亏损仍然偏高，适合作为候选而不是直接实盘规则。" : "相对本金的最大亏损可控，说明它没有单纯靠放大风险取胜。";
   const tradeText = bestTrades <= 2 ? "交易次数很少，结果更接近中长期持有表现。" : `交易次数为 ${bestTrades.toFixed(0)} 次，说明它通过更主动的调仓改善了表现。`;
   reasons.push(`本次回测总收益为 ${fmtPctValue(bestReturn * 100)}，最大亏损为 ${fmtPctValue(bestDrawdown * 100)}；${drawdownText}${tradeText}`);
   reasons.push(buildLatestTradeSummary(best));
@@ -283,10 +283,10 @@ function WatchlistQuickAdd({
   onAdd,
 }: {
   title: string;
-  market: "hk" | "us";
+  market: "hk" | "us" | "cn";
   quotes: WatchlistQuote[];
   holdings: PaperHolding[];
-  onAdd: (quote: WatchlistQuote, market: "hk" | "us") => void;
+  onAdd: (quote: WatchlistQuote, market: "hk" | "us" | "cn") => void;
 }) {
   return (
     <div className="space-y-2">
@@ -338,8 +338,8 @@ export function PaperTrading() {
   const [holdings, setHoldings] = useState<PaperHolding[]>([]);
   const [holdingNames, setHoldingNames] = useState<Record<string, string>>({});
   const [newSymbol, setNewSymbol] = useState("");
-  const [newMarket, setNewMarket] = useState<"us" | "hk">("hk");
-  const [quickQuotes, setQuickQuotes] = useState<{ hk: WatchlistQuote[]; us: WatchlistQuote[] }>({ hk: [], us: [] });
+  const [newMarket, setNewMarket] = useState<"us" | "hk" | "cn">("hk");
+  const [quickQuotes, setQuickQuotes] = useState<{ hk: WatchlistQuote[]; us: WatchlistQuote[]; cn: WatchlistQuote[] }>({ hk: [], us: [], cn: [] });
   const [quickLoading, setQuickLoading] = useState(false);
 
   // ── Strategy state ──
@@ -392,17 +392,20 @@ export function PaperTrading() {
     const loadQuickQuotes = async () => {
       setQuickLoading(true);
       try {
-        const [hkCodesRes, usCodesRes] = await Promise.all([
+        const [hkCodesRes, usCodesRes, cnCodesRes] = await Promise.all([
           api.getWatchlistCodes("hk").catch(() => ({ codes: loadWatchlistCodes("hk") })),
           api.getWatchlistCodes("us").catch(() => ({ codes: loadWatchlistCodes("us") })),
+          api.getWatchlistCodes("cn").catch(() => ({ codes: loadWatchlistCodes("cn") })),
         ]);
         const hkCodes = hkCodesRes.codes.length ? hkCodesRes.codes : loadWatchlistCodes("hk");
         const usCodes = usCodesRes.codes.length ? usCodesRes.codes : loadWatchlistCodes("us");
-        const [hkQuotes, usQuotes] = await Promise.all([
+        const cnCodes = cnCodesRes.codes.length ? cnCodesRes.codes : loadWatchlistCodes("cn");
+        const [hkQuotes, usQuotes, cnQuotes] = await Promise.all([
           hkCodes.length ? api.getWatchlistQuote(hkCodes, "hk").catch(() => [] as WatchlistQuote[]) : Promise.resolve([]),
           usCodes.length ? api.getWatchlistQuote(usCodes, "us").catch(() => [] as WatchlistQuote[]) : Promise.resolve([]),
+          cnCodes.length ? api.getWatchlistQuote(cnCodes, "cn").catch(() => [] as WatchlistQuote[]) : Promise.resolve([]),
         ]);
-        if (!cancelled) setQuickQuotes({ hk: hkQuotes, us: usQuotes });
+        if (!cancelled) setQuickQuotes({ hk: hkQuotes, us: usQuotes, cn: cnQuotes });
       } finally {
         if (!cancelled) setQuickLoading(false);
       }
@@ -475,7 +478,7 @@ export function PaperTrading() {
   }, [hasSingleHolding, singleHolding?.market, singleHolding?.symbol, singlePricePeriod]);
 
   // ── Add holding ──
-  const addHoldingToPortfolio = (symbol: string, market: "us" | "hk", name?: string) => {
+  const addHoldingToPortfolio = (symbol: string, market: "us" | "hk" | "cn", name?: string) => {
     const sym = symbol.trim().toUpperCase();
     if (!sym) return;
     if (holdings.some((h) => h.symbol.toUpperCase() === sym && h.market === market)) return;
@@ -504,7 +507,7 @@ export function PaperTrading() {
     }
   };
 
-  const addQuickQuote = (quote: WatchlistQuote, market: "hk" | "us") => {
+  const addQuickQuote = (quote: WatchlistQuote, market: "hk" | "us" | "cn") => {
     addHoldingToPortfolio(quote.code, market, quote.name);
   };
 
@@ -710,6 +713,13 @@ export function PaperTrading() {
             holdings={holdings}
             onAdd={addQuickQuote}
           />
+          <WatchlistQuickAdd
+            title="A股自选"
+            market="cn"
+            quotes={quickQuotes.cn}
+            holdings={holdings}
+            onAdd={addQuickQuote}
+          />
         </div>
       </div>
 
@@ -721,11 +731,12 @@ export function PaperTrading() {
         <div className="flex items-center gap-2">
           <select
             value={newMarket}
-            onChange={(e) => setNewMarket(e.target.value as "us" | "hk")}
+            onChange={(e) => setNewMarket(e.target.value as "us" | "hk" | "cn")}
             className="rounded-lg border bg-background px-2 py-1.5 text-sm"
           >
             <option value="us">美股</option>
             <option value="hk">港股</option>
+            <option value="cn">A股</option>
           </select>
           <input
             value={newSymbol}
@@ -733,7 +744,7 @@ export function PaperTrading() {
             onKeyDown={(e) => {
               if (e.key === "Enter") void addHolding();
             }}
-            placeholder={newMarket === "us" ? "输入代码 如 AAPL" : "输入代码 如 0700"}
+            placeholder={newMarket === "us" ? "输入代码 如 AAPL" : newMarket === "cn" ? "输入代码 如 600519" : "输入代码 如 0700"}
             className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-sm"
           />
           <button
@@ -779,7 +790,7 @@ export function PaperTrading() {
                     <td className="px-3 py-2">
                       {h.symbol === "CASH" ? "现金" : holdingNames[holdingKey(h.symbol, h.market)] || "—"}
                     </td>
-                    <td className="px-3 py-2">{h.symbol === "CASH" ? "—" : h.market === "us" ? "美股" : "港股"}</td>
+                    <td className="px-3 py-2">{h.symbol === "CASH" ? "—" : h.market === "us" ? "美股" : h.market === "cn" ? "A股" : "港股"}</td>
                     <td className="px-3 py-2">
                       <input
                         type="number"
@@ -996,7 +1007,7 @@ export function PaperTrading() {
                         {run.status === "completed" ? finiteNumber(metrics.sharpe).toFixed(2) : "—"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-red-500">
-                        {run.status === "completed" ? pct(metrics.max_drawdown as number) : "—"}
+                        {run.status === "completed" ? pct(metrics.max_loss as number) : "—"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {run.status === "completed" ? String(metrics.trade_count ?? run.trades?.length ?? 0) : "—"}
@@ -1054,7 +1065,7 @@ export function PaperTrading() {
                 />
                 <Stat
                   label="最大亏损"
-                  value={pct(m.max_drawdown as number)}
+                  value={pct(m.max_loss as number)}
                   tone="bad"
                 />
                 <Stat

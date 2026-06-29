@@ -561,7 +561,7 @@ export interface ResearchAnalysisListParams {
 
 export interface PaperHolding {
   symbol: string;
-  market: "us" | "hk";
+  market: "us" | "hk" | "cn";
   allocation_pct: number;
 }
 

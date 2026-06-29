@@ -194,6 +194,12 @@ def calc_metrics(
     dd = (equity_curve - peak) / peak.replace(0, 1)
     max_dd = float(dd.min())
 
+    # Max loss relative to the initial capital: the worst the portfolio ever
+    # sank below the money actually put in. Unlike max drawdown (peak→trough,
+    # which can be large even when the account never went below principal),
+    # this is 0 if equity never dipped under the starting cash.
+    max_loss = float(min(0.0, equity_curve.min() / initial_cash - 1)) if initial_cash > 0 else 0.0
+
     calmar = ann_ret / abs(max_dd) if abs(max_dd) > 1e-10 else 0.0
 
     # Sortino
@@ -219,6 +225,7 @@ def calc_metrics(
         "total_return": total_ret,
         "annual_return": ann_ret,
         "max_drawdown": max_dd,
+        "max_loss": max_loss,
         "sharpe": sharpe,
         "calmar": round(calmar, 4),
         "sortino": round(sortino, 4),
@@ -238,7 +245,7 @@ def _empty_metrics(initial_cash: float) -> Dict[str, Any]:
     """Return zero-valued metrics when no data is available."""
     return {
         "final_value": initial_cash,
-        "total_return": 0, "annual_return": 0, "max_drawdown": 0,
+        "total_return": 0, "annual_return": 0, "max_drawdown": 0, "max_loss": 0,
         "sharpe": 0, "calmar": 0, "sortino": 0,
         "win_rate": 0, "profit_loss_ratio": 0, "profit_factor": 0,
         "max_consecutive_loss": 0, "avg_holding_days": 0, "trade_count": 0,

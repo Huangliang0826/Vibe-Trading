@@ -110,7 +110,16 @@ def normalize_best_strategy_symbol(code: str, market: str) -> tuple[str, str, st
         if not bare:
             raise ValueError(f"Invalid US symbol: {code}")
         return bare, f"{bare}.US", bare
-    raise ValueError("market must be 'hk' or 'us'")
+    if mk == "cn":
+        # paper_symbol is the bare digits; ``_to_code`` later derives the
+        # exchange suffix. yahoo_symbol must equal that derived code so the
+        # fetched data_map keys line up with the signal map.
+        digits = "".join(ch for ch in symbol if ch.isdigit())
+        if not digits:
+            raise ValueError(f"Invalid A-share symbol: {code}")
+        suffix = ".SS" if digits.startswith(("6", "9")) else ".BJ" if digits.startswith(("4", "8")) else ".SZ"
+        return digits, f"{digits}{suffix}", digits
+    raise ValueError("market must be 'cn', 'hk' or 'us'")
 
 
 def run_hstech_best_strategy(
@@ -230,7 +239,10 @@ def _run_strategy(
             if not valid_codes:
                 raise ValueError("No valid signals generated")
             dates, close_df, target_pos, _ret_df = _align(data_map, signal_map, valid_codes)
-            engine = GlobalEquityEngine({"initial_cash": initial_total_usd}, market=holding.market)
+            # The engine only models US/HK cost rules; A-shares use the US-rule
+            # base (fractional shares, negligible commission) like other markets.
+            engine_market = "hk" if holding.market == "hk" else "us"
+            engine = GlobalEquityEngine({"initial_cash": initial_total_usd}, market=engine_market)
             engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
             equity_series = pd.Series(
                 [s.equity for s in engine.equity_snapshots],

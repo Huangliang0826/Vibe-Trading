@@ -1873,7 +1873,7 @@ def _get_watchlist_store() -> WatchlistStore:
 
 
 @app.get("/watchlist/codes", dependencies=[Depends(require_local_or_auth)])
-async def get_watchlist_codes(market: str = Query(..., description="'hk' or 'us'")):
+async def get_watchlist_codes(market: str = Query(..., description="'cn', 'hk' or 'us'")):
     """Return saved watchlist codes for a market."""
     return {"market": market, "codes": _get_watchlist_store().get(market)}
 
@@ -2209,7 +2209,14 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         _, yf_code = _normalize_hk_code(code)
         if yf_code:
             code = yf_code
-    market = infer_market(code)
+        market = infer_market(code)
+    elif market_hint == "cn":
+        # ``infer_market`` misclassifies ChiNext (300xxx) and Beijing (4xxxxx)
+        # codes as HK because bare numeric tickers are ambiguous. Trust the
+        # explicit ``cn`` hint from the frontend instead.
+        market = "a_share"
+    else:
+        market = infer_market(code)
     name = _resolve_symbol_name(code, market)
     loader = resolve_loader(market)
 
@@ -2715,8 +2722,8 @@ async def get_forecast_best_paper_strategy(
 
     response.headers["Cache-Control"] = "no-store"
     mk = market.lower().strip()
-    if mk not in {"hk", "us"}:
-        raise HTTPException(status_code=400, detail="market must be 'hk' or 'us'")
+    if mk not in {"hk", "us", "cn"}:
+        raise HTTPException(status_code=400, detail="market must be 'cn', 'hk' or 'us'")
     try:
         _paper_symbol, _yahoo_symbol, display_code = normalize_best_strategy_symbol(code, mk)
     except ValueError as exc:
@@ -2732,7 +2739,8 @@ async def get_forecast_best_paper_strategy(
             _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), disk_cached)
             return {**disk_cached, "cached": True}
     try:
-        name = _resolve_symbol_name(display_code, "hk_equity" if mk == "hk" else "us_equity")
+        _name_market = {"hk": "hk_equity", "cn": "a_share"}.get(mk, "us_equity")
+        name = _resolve_symbol_name(display_code, _name_market)
         payload = await asyncio.to_thread(
             run_single_symbol_best_strategy,
             display_code,

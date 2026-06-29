@@ -335,6 +335,7 @@ const CONTEXT_OPTIONS: { label: string; value: number; displayHistory: number }[
 export function Forecast() {
   const [hk, setHk] = useState<string[]>([]);
   const [us, setUs] = useState<string[]>([]);
+  const [cnList, setCnList] = useState<string[]>([]);
   const [context, setContext] = useState(1260); // 默认 5 年：更适合观察中长期走势和策略信号
   const [bestByKey, setBestByKey] = useState<Record<string, BestStrategyState>>({});
   const selectedContext = CONTEXT_OPTIONS.find((option) => option.value === context) || CONTEXT_OPTIONS[2];
@@ -342,6 +343,7 @@ export function Forecast() {
   const sync = useCallback(() => {
     setHk(loadList("watchlist-hk"));
     setUs(loadList("watchlist-us"));
+    setCnList(loadList("watchlist-cn"));
   }, []);
 
   useEffect(() => {
@@ -351,11 +353,12 @@ export function Forecast() {
     return () => window.removeEventListener("focus", sync);
   }, [sync]);
 
-  const total = hk.length + us.length;
+  const total = hk.length + us.length + cnList.length;
   const watchlistItems = useMemo<WatchlistItem[]>(() => [
+    ...cnList.map((code) => ({ market: "cn" as const, code: code.toUpperCase() })),
     ...hk.map((code) => ({ market: "hk" as const, code: code.toUpperCase() })),
     ...us.map((code) => ({ market: "us" as const, code: code.toUpperCase() })),
-  ], [hk, us]);
+  ], [hk, us, cnList]);
   const loadBestStrategy = useCallback((market: WatchlistMarket, code: string, refresh = false) => {
     const key = stockKey(market, code);
     setBestByKey((prev) => ({
@@ -425,7 +428,7 @@ export function Forecast() {
       {total === 0 ? (
         <div className="rounded-2xl border border-dashed bg-card/50 py-12 flex flex-col items-center gap-2 text-center">
           <LineChart className="h-7 w-7 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">在「总览」页添加港股/美股自选后，此处显示走势预测</p>
+          <p className="text-sm text-muted-foreground">在「总览」页添加A股/港股/美股自选后，此处显示走势预测</p>
         </div>
       ) : (
         <div className="space-y-4">
