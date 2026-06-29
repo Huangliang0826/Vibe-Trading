@@ -131,3 +131,24 @@ Final focused regression:
 ### Concerns
 
 - Pre-migration jobs retain null `started_at` and `finished_at` because their true transition times cannot be reconstructed accurately. New transitions are persisted exactly.
+
+## Direct Terminal Transition Fix
+
+- Updated `update_job()` so the first transition from any non-terminal status to `completed` or `failed` records `finished_at`.
+- Direct `queued -> completed` and `queued -> failed` transitions leave `started_at` null because those jobs never ran.
+
+RED regression command:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k queued_job_terminal_transition`
+- Result: `2 failed, 12 deselected in 0.51s`
+- Both failures showed `finished_at=None` while `updated_at` contained the controlled terminal-transition time.
+
+GREEN regression command:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k queued_job_terminal_transition`
+- Result: `2 passed, 12 deselected in 0.40s`
+
+Final focused regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
+- Result: `19 passed in 0.43s`

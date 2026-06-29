@@ -340,6 +340,30 @@ def test_jobs_persist_exact_transition_timestamps_and_migrate_legacy_schema(
     assert store.has_market_refresh("hk", "2026-06-29") is (terminal_status == "completed")
 
 
+@pytest.mark.parametrize("terminal_status", ["failed", "completed"])
+def test_queued_job_terminal_transition_sets_finished_at_without_started_at(
+    tmp_path,
+    monkeypatch,
+    terminal_status,
+):
+    timestamps = iter(["2026-06-29T09:00:00Z", "2026-06-29T09:05:00Z"])
+    monkeypatch.setattr("src.opportunity_center.storage.utc_now", lambda: next(timestamps))
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.create_job(
+        job_id="job-1",
+        markets=["hk"],
+        market_dates={"hk": "2026-06-29"},
+        trigger="scheduled",
+        total=1,
+    )
+
+    finished = store.update_job("job-1", status=terminal_status)
+
+    assert finished.status == terminal_status
+    assert finished.started_at is None
+    assert finished.finished_at == "2026-06-29T09:05:00Z"
+
+
 def test_create_job_reuses_existing_active_job_transactionally(tmp_path):
     store = OpportunityStore(tmp_path / "opportunities.db")
     queued = store.create_job(

@@ -435,7 +435,11 @@ class OpportunityStore:
             if row["status"] == "queued" and status == "running" and started_at is None:
                 started_at = now
             finished_at = row["finished_at"]
-            if row["status"] == "running" and status in {"completed", "failed"} and finished_at is None:
+            if (
+                row["status"] not in {"completed", "failed"}
+                and status in {"completed", "failed"}
+                and finished_at is None
+            ):
                 finished_at = now
             conn.execute(
                 """
