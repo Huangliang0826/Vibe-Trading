@@ -633,22 +633,22 @@ class OpportunityStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT payload_json
-                FROM opportunity_snapshots AS current
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM opportunity_snapshots AS newer
-                    WHERE newer.market = current.market
-                      AND newer.code = current.code
-                      AND (
-                        newer.snapshot_date > current.snapshot_date
-                        OR (
-                            newer.snapshot_date = current.snapshot_date
-                            AND newer.updated_at > current.updated_at
-                        )
-                      )
+                WITH ranked AS (
+                    SELECT
+                        payload_json,
+                        snapshot_date,
+                        updated_at,
+                        rowid AS snapshot_rowid,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY market, code
+                            ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC
+                        ) AS snapshot_rank
+                    FROM opportunity_snapshots
                 )
-                ORDER BY snapshot_date DESC, updated_at DESC
+                SELECT payload_json
+                FROM ranked
+                WHERE snapshot_rank = 1
+                ORDER BY snapshot_date DESC, updated_at DESC, snapshot_rowid DESC
                 """,
             ).fetchall()
         items = [self._snapshot_item_from_payload(row["payload_json"]) for row in rows]

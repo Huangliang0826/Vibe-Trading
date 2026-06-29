@@ -219,3 +219,30 @@ Final focused regression:
 - Invalid nonterminal transitions such as `running -> queued` are also no-ops, matching the explicit allowed-transition list.
 - Successor rebasing updates only `payload_json` and `updated_at`; primary-key version dimensions, trigger, creation time, and detail payloads remain intact.
 - Chronological comparison continues to rely on the existing ISO `YYYY-MM-DD` snapshot-date contract.
+
+## Deterministic Latest-Version Selection
+
+### Fix
+
+- Replaced `list_latest()`'s timestamp-only anti-join with `ROW_NUMBER()` partitioned by `(market, code)`.
+- Rows rank by `snapshot_date DESC`, `updated_at DESC`, and `rowid DESC`, so same-day versions with identical second-precision timestamps deterministically select the later persisted row.
+- Pydantic reconstruction, market/signal/level filters, and the final limit remain after SQL ranking.
+
+### RED / GREEN Evidence
+
+RED after adding the tied-version regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k list_latest_deterministically`
+- Result: `1 failed, 18 deselected in 0.49s`
+- The unfiltered listing returned both same-day versions instead of one row.
+
+GREEN after implementing deterministic ranking:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py -v -k list_latest_deterministically`
+- Result: `1 passed, 18 deselected in 0.39s`
+- The later persisted version was selected; filters matching only the superseded version returned no rows, and `limit=1` remained correct.
+
+Final focused regression:
+
+- Command: `uv run pytest agent/tests/opportunity_center/test_storage.py agent/tests/opportunity_center/test_models.py -v`
+- Result: `24 passed in 0.44s`

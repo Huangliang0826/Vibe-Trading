@@ -341,6 +341,45 @@ def test_list_latest_filters_before_limit(tmp_path):
     assert listing[0].code == "0700"
 
 
+def test_list_latest_deterministically_selects_later_same_timestamp_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.opportunity_center.storage.utc_now",
+        lambda: "2026-06-29T12:00:00Z",
+    )
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_snapshot(
+        sample_item(
+            score=70,
+            latest_action="hold",
+            level="值得观察",
+        ).model_copy(
+            update={"score_version": "score-v1", "strategy_version": "strategy-v1"}
+        ),
+        trigger="scheduled",
+    )
+    store.upsert_snapshot(
+        sample_item(
+            score=83,
+            latest_action="entry",
+            level="优先关注",
+        ).model_copy(
+            update={"score_version": "score-v2", "strategy_version": "strategy-v2"}
+        ),
+        trigger="manual",
+    )
+
+    listing = store.list_latest(market=None, signal=None, level=None, limit=10)
+    matching = store.list_latest(market="hk", signal="entry", level="优先关注", limit=1)
+    superseded = store.list_latest(market="hk", signal="hold", level="值得观察", limit=1)
+
+    assert len(listing) == 1
+    assert listing[0].score_version == "score-v2"
+    assert listing[0].strategy_version == "strategy-v2"
+    assert listing[0].score == 83
+    assert matching == listing
+    assert superseded == []
+
+
 @pytest.mark.parametrize("terminal_status", ["completed", "failed"])
 def test_jobs_persist_exact_transition_timestamps_and_migrate_legacy_schema(
     tmp_path,
