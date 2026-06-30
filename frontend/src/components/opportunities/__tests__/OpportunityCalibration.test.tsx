@@ -10,6 +10,8 @@ import { OpportunityCalibration } from "../OpportunityCalibration";
 const summary = {
   scope: "top3" as const,
   calculated_at: "2026-06-30T12:00:00Z",
+  contains_fixed_universe_backfill: true,
+  methodology_note: "包含固定当前自选股历史回放，存在幸存者偏差。",
   periods: [5, 20, 60].map((horizon) => ({
     horizon_days: horizon as 5 | 20 | 60,
     completed_samples: 12,
@@ -42,6 +44,7 @@ describe("OpportunityCalibration", () => {
     expect(screen.getAllByText("62.5%")).toHaveLength(3);
     expect(screen.getAllByText("-12.0%")).toHaveLength(3);
     expect(screen.getByTestId("calibration-period-5")).toHaveClass("grid-cols-2");
+    expect(screen.getByText(/幸存者偏差/)).toBeInTheDocument();
   });
 
   it("reloads metrics when switching to all opportunities", async () => {

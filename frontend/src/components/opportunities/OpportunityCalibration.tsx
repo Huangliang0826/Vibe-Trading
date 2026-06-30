@@ -54,6 +54,7 @@ export function OpportunityCalibration() {
             {value === "top3" ? "前三名" : "全部机会"}
           </button>)}
         </div>
+        {data?.contains_fixed_universe_backfill && <p className="text-[11px] text-amber-600">{data.methodology_note}</p>}
         {loading ? <div className="flex h-24 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin" /></div>
           : error ? <div className="flex items-center gap-2 text-xs text-red-600"><AlertCircle className="h-4 w-4" />{error}</div>
           : data ? <div className="divide-y rounded-lg border px-3">

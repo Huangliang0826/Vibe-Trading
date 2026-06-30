@@ -517,6 +517,8 @@ export interface OpportunityCalibrationSummary {
   scope: "top3" | "all";
   periods: OpportunityCalibrationPeriod[];
   calculated_at: string | null;
+  contains_fixed_universe_backfill: boolean;
+  methodology_note: string;
 }
 
 export interface OpportunityFilters {
