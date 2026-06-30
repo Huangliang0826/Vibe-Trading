@@ -40,6 +40,60 @@ describe("TodayOpportunities", () => {
     expect(screen.getByText("部分数据降级")).toBeInTheDocument();
   });
 
+  it("shows only the top three until the remaining results are expanded", async () => {
+    const rankedItems = [
+      item,
+      { ...item, code: "9988", company_name: "阿里巴巴-W", score: 76 },
+      { ...item, market: "us" as const, code: "NVDA", company_name: "NVIDIA", score: 70 },
+      { ...item, market: "us" as const, code: "AAPL", company_name: "Apple", score: 65 },
+    ];
+    apiMock.getOpportunities.mockResolvedValue({
+      items: rankedItems, latest_success_at: "2026-06-29", active_job: null, last_refresh_error: null,
+    });
+
+    render(<MemoryRouter><TodayOpportunities /></MemoryRouter>);
+
+    expect(await screen.findByText("NVIDIA")).toBeInTheDocument();
+    expect(screen.queryByText("Apple")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "查看其余 1 只" }));
+    expect(screen.getByText("Apple")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "收起机会列表" }));
+    expect(screen.queryByText("Apple")).not.toBeInTheDocument();
+  });
+
+  it("does not show a list toggle when there are no hidden results", async () => {
+    apiMock.getOpportunities.mockResolvedValue({
+      items: [item, { ...item, code: "9988", company_name: "阿里巴巴-W" }],
+      latest_success_at: "2026-06-29", active_job: null, last_refresh_error: null,
+    });
+
+    render(<MemoryRouter><TodayOpportunities /></MemoryRouter>);
+
+    expect(await screen.findByText("阿里巴巴-W")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /查看其余/ })).not.toBeInTheDocument();
+  });
+
+  it("collapses back to the top three when filters change", async () => {
+    const rankedItems = [
+      item,
+      { ...item, code: "9988", company_name: "阿里巴巴-W", score: 76 },
+      { ...item, code: "3690", company_name: "美团-W", score: 70 },
+      { ...item, code: "1810", company_name: "小米集团-W", score: 65 },
+    ];
+    apiMock.getOpportunities.mockResolvedValue({
+      items: rankedItems, latest_success_at: "2026-06-29", active_job: null, last_refresh_error: null,
+    });
+    render(<MemoryRouter><TodayOpportunities /></MemoryRouter>);
+    await screen.findByText("美团-W");
+    await userEvent.click(screen.getByRole("button", { name: "查看其余 1 只" }));
+    expect(screen.getByText("小米集团-W")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "港股" }));
+
+    await waitFor(() => expect(apiMock.getOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ market: "hk" })));
+    expect(screen.queryByText("小米集团-W")).not.toBeInTheDocument();
+  });
+
   it("polls refresh and reloads after completion", async () => {
     render(<MemoryRouter><TodayOpportunities /></MemoryRouter>);
     await screen.findByText("腾讯控股");

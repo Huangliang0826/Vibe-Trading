@@ -29,6 +29,7 @@ export function TodayOpportunities() {
   const [data, setData] = useState<OpportunityList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, OpportunityDetail>>({});
   const [histories, setHistories] = useState<Record<string, OpportunityHistoryPoint[]>>({});
@@ -48,6 +49,7 @@ export function TodayOpportunities() {
   }, [filters]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setShowAll(false); }, [filters.market, filters.signal, filters.level]);
   useEffect(() => () => { if (pollTimer.current != null) window.clearTimeout(pollTimer.current); }, []);
 
   const pollJob = useCallback((jobId: string) => {
@@ -112,6 +114,8 @@ export function TodayOpportunities() {
 
   const refreshing = data?.active_job?.status === "queued" || data?.active_job?.status === "running";
   const items = useMemo(() => data?.items ?? [], [data]);
+  const visibleItems = showAll ? items : items.slice(0, 3);
+  const hiddenCount = Math.max(0, items.length - 3);
 
   return (
     <section className="space-y-3" aria-labelledby="today-opportunities-title">
@@ -164,7 +168,7 @@ export function TodayOpportunities() {
         <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">暂无机会快照，点击刷新开始计算</div>
       ) : (
         <div className="space-y-2">
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const key = rowKey(item);
             const open = expanded === key;
             const detail = details[key];
@@ -214,6 +218,17 @@ export function TodayOpportunities() {
               </article>
             );
           })}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll((value) => !value)}
+              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+              aria-label={showAll ? "收起机会列表" : `查看其余 ${hiddenCount} 只`}
+            >
+              {showAll ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {showAll ? "收起" : `查看其余 ${hiddenCount} 只`}
+            </button>
+          )}
         </div>
       )}
       <p className="text-[11px] text-muted-foreground">机会评分仅用于研究排序，不构成投资建议。</p>
