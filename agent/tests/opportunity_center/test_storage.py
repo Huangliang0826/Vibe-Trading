@@ -215,6 +215,16 @@ def test_calibration_summary_aggregates_top3_and_all(tmp_path):
     assert twenty_top3.pending_samples == 1
 
 
+def test_calibration_summary_discloses_fixed_universe_backfill(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_outcome(sample_outcome(sample_source="fixed_universe_backfill"))
+
+    summary = store.get_calibration_summary("top3")
+
+    assert summary.contains_fixed_universe_backfill is True
+    assert "幸存者偏差" in summary.methodology_note
+
+
 def test_backfilled_snapshot_score_change_uses_newest_strictly_earlier_date(tmp_path):
     store = OpportunityStore(tmp_path / "opportunities.db")
     store.upsert_snapshot(

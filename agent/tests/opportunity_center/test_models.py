@@ -151,5 +151,6 @@ def test_opportunity_outcome_uses_fixed_horizons_and_closed_status():
         calibration_version="forward-return-v1",
     )
     assert outcome.horizon_days == 5
+    assert outcome.sample_source == "live"
     with pytest.raises(ValidationError):
         OpportunityOutcome(**{**outcome.model_dump(), "horizon_days": 10})

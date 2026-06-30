@@ -1,10 +1,16 @@
 """SQLite-backed watchlist persistence."""
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 from src.config.paths import get_runtime_root
+
+
+def today_iso() -> str:
+    return date.today().isoformat()
 
 
 class WatchlistStore:
@@ -29,6 +35,23 @@ class WatchlistStore:
                     PRIMARY KEY (market, code)
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist_snapshots (
+                    market TEXT NOT NULL,
+                    effective_date TEXT NOT NULL,
+                    codes_json TEXT NOT NULL,
+                    PRIMARY KEY (market, effective_date)
+                )
+            """)
+            for market in ("cn", "hk", "us"):
+                has_history = conn.execute(
+                    "SELECT 1 FROM watchlist_snapshots WHERE market = ? LIMIT 1", (market,)
+                ).fetchone()
+                codes = [row["code"] for row in conn.execute(
+                    "SELECT code FROM watchlist WHERE market = ? ORDER BY sort_order", (market,)
+                ).fetchall()]
+                if codes and has_history is None:
+                    self._save_snapshot(conn, market, codes)
 
     def get(self, market: str) -> list[str]:
         with self._connect() as conn:
@@ -46,7 +69,9 @@ class WatchlistStore:
                     "INSERT OR REPLACE INTO watchlist (market, code, sort_order) VALUES (?, ?, ?)",
                     (market, code.upper(), i),
                 )
-        return codes
+            normalized = [code.upper() for code in codes]
+            self._save_snapshot(conn, market, normalized)
+        return normalized
 
     def add(self, market: str, code: str) -> list[str]:
         code = code.upper()
@@ -59,7 +84,11 @@ class WatchlistStore:
                 "INSERT OR IGNORE INTO watchlist (market, code, sort_order) VALUES (?, ?, ?)",
                 (market, code, max_order + 1),
             )
-        return self.get(market)
+            codes = [row["code"] for row in conn.execute(
+                "SELECT code FROM watchlist WHERE market = ? ORDER BY sort_order", (market,)
+            ).fetchall()]
+            self._save_snapshot(conn, market, codes)
+        return codes
 
     def remove(self, market: str, code: str) -> list[str]:
         with self._connect() as conn:
@@ -67,4 +96,27 @@ class WatchlistStore:
                 "DELETE FROM watchlist WHERE market = ? AND code = ?",
                 (market, code.upper()),
             )
-        return self.get(market)
+            codes = [row["code"] for row in conn.execute(
+                "SELECT code FROM watchlist WHERE market = ? ORDER BY sort_order", (market,)
+            ).fetchall()]
+            self._save_snapshot(conn, market, codes)
+        return codes
+
+    def get_as_of(self, market: str, as_of: str) -> list[str]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT codes_json FROM watchlist_snapshots
+                   WHERE market = ? AND effective_date <= ?
+                   ORDER BY effective_date DESC LIMIT 1""",
+                (market, as_of),
+            ).fetchone()
+        return list(json.loads(row["codes_json"])) if row is not None else []
+
+    @staticmethod
+    def _save_snapshot(conn: sqlite3.Connection, market: str, codes: list[str]) -> None:
+        conn.execute(
+            """INSERT INTO watchlist_snapshots (market, effective_date, codes_json)
+               VALUES (?, ?, ?)
+               ON CONFLICT(market, effective_date) DO UPDATE SET codes_json = excluded.codes_json""",
+            (market, today_iso(), json.dumps(codes)),
+        )

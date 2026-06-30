@@ -16,6 +16,7 @@ MatchLevel = Literal["direct", "industry", "macro"]
 ImpactDirection = Literal["positive", "neutral", "negative"]
 OutcomeStatus = Literal["pending", "completed", "missing"]
 CalibrationScope = Literal["top3", "all"]
+SampleSource = Literal["live", "fixed_universe_backfill"]
 
 
 class OpportunityContract(BaseModel):
@@ -158,6 +159,7 @@ class OpportunityOutcome(OpportunityContract):
     excess_return: float | None = None
     error: str | None = None
     calibration_version: str
+    sample_source: SampleSource = "live"
     updated_at: str | None = None
 
 
@@ -177,3 +179,5 @@ class OpportunityCalibrationSummary(OpportunityContract):
     scope: CalibrationScope
     periods: list[CalibrationPeriodSummary]
     calculated_at: str | None = None
+    contains_fixed_universe_backfill: bool = False
+    methodology_note: str = ""

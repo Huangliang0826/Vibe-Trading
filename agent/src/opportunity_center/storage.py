@@ -142,7 +142,7 @@ class OpportunityStore:
                   exit_date TEXT, exit_price REAL, stock_return REAL,
                   benchmark_return REAL, excess_return REAL, error TEXT,
                   calibration_version TEXT NOT NULL, created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL, sample_source TEXT NOT NULL DEFAULT 'live',
                   PRIMARY KEY (market, code, snapshot_date, horizon_days, calibration_version)
                 );
                 """
@@ -153,6 +153,11 @@ class OpportunityStore:
             for column in ("started_at", "finished_at"):
                 if column not in refresh_job_columns:
                     conn.execute(f"ALTER TABLE refresh_jobs ADD COLUMN {column} TEXT")
+            outcome_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(opportunity_outcomes)").fetchall()
+            }
+            if "sample_source" not in outcome_columns:
+                conn.execute("ALTER TABLE opportunity_outcomes ADD COLUMN sample_source TEXT NOT NULL DEFAULT 'live'")
 
     def upsert_articles(
         self,
@@ -769,8 +774,8 @@ class OpportunityStore:
                     (market, code, snapshot_date, horizon_days, rank, is_top3, status,
                      entry_date, entry_price, exit_date, exit_price, stock_return,
                      benchmark_return, excess_return, error, calibration_version,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, updated_at, sample_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(market, code, snapshot_date, horizon_days, calibration_version)
                 DO UPDATE SET
                     rank = excluded.rank,
@@ -784,6 +789,7 @@ class OpportunityStore:
                     benchmark_return = excluded.benchmark_return,
                     excess_return = excluded.excess_return,
                     error = excluded.error,
+                    sample_source = excluded.sample_source,
                     updated_at = excluded.updated_at
                 WHERE excluded.status = 'completed' OR opportunity_outcomes.status != 'completed'
                 """,
@@ -792,7 +798,7 @@ class OpportunityStore:
                     outcome.rank, int(outcome.is_top3), outcome.status, outcome.entry_date,
                     outcome.entry_price, outcome.exit_date, outcome.exit_price,
                     outcome.stock_return, outcome.benchmark_return, outcome.excess_return,
-                    outcome.error, outcome.calibration_version, now, now,
+                    outcome.error, outcome.calibration_version, now, now, outcome.sample_source,
                 ),
             )
             row = conn.execute(
@@ -838,7 +844,12 @@ class OpportunityStore:
                 max_loss=min(0.0, min(stock_returns)) if stock_returns else None,
             ))
         calculated_at = max((item.updated_at or "" for item in outcomes), default="") or None
-        return OpportunityCalibrationSummary(scope=scope, periods=periods, calculated_at=calculated_at)
+        has_backfill = any(item.sample_source == "fixed_universe_backfill" for item in outcomes)
+        note = "包含固定当前自选股历史回放，存在幸存者偏差。" if has_backfill else ""
+        return OpportunityCalibrationSummary(
+            scope=scope, periods=periods, calculated_at=calculated_at,
+            contains_fixed_universe_backfill=has_backfill, methodology_note=note,
+        )
 
     @staticmethod
     def _outcome_from_row(row: sqlite3.Row) -> OpportunityOutcome:
@@ -849,6 +860,7 @@ class OpportunityStore:
             exit_date=row["exit_date"], exit_price=row["exit_price"], stock_return=row["stock_return"],
             benchmark_return=row["benchmark_return"], excess_return=row["excess_return"],
             error=row["error"], calibration_version=row["calibration_version"],
+            sample_source=row["sample_source"],
             updated_at=row["updated_at"],
         )
 
