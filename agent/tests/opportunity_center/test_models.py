@@ -98,6 +98,7 @@ def test_opportunity_detail_and_related_contexts_accept_expected_shapes():
         oos_total_return=72,
         oos_max_drawdown=18,
         oos_sharpe=61,
+        data_as_of="2026-06-29",
     )
     market = MarketContext(
         market="hk",
@@ -111,6 +112,7 @@ def test_opportunity_detail_and_related_contexts_accept_expected_shapes():
     assert detail.news[0].match_level == "industry"
     assert stock.aliases == ["Tencent"]
     assert strategy.current_weight == 65
+    assert strategy.data_as_of == "2026-06-29"
     assert market.valuation_percentile == 58
 
 

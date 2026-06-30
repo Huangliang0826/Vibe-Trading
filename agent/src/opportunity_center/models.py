@@ -71,6 +71,7 @@ class StrategyContext(OpportunityContract):
     oos_max_drawdown: float | None = None
     oos_sharpe: float | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+    data_as_of: str | None = None
 
 
 class MarketContext(OpportunityContract):

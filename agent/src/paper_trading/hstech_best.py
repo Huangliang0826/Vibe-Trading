@@ -311,6 +311,11 @@ def _strategy_sort_key(run: dict[str, Any]) -> tuple[float, float, float]:
     return (-sharpe, -total_return, -max_drawdown)
 
 
+def strategy_sort_key(run: dict[str, Any]) -> tuple[float, float, float]:
+    """Public wrapper for the shared strategy ranking order."""
+    return _strategy_sort_key(run)
+
+
 def _candidate_row(run: dict[str, Any]) -> dict[str, Any]:
     metrics = run.get("metrics") or {}
     return {
