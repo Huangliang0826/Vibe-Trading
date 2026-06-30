@@ -465,6 +465,9 @@ export interface OpportunityNewsImpact {
   rationale: string;
   match_level: "direct" | "industry" | "macro";
   published_at: string | null;
+  title: string;
+  source: string;
+  url: string;
 }
 
 export interface OpportunityDetail extends OpportunityItem {
