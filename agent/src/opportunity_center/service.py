@@ -105,6 +105,9 @@ class OpportunityService:
             errors: list[str] = []
             completed = 0
             try:
+                if job.total == 0:
+                    self.store.update_job(job_id, status="completed", completed=0)
+                    return
                 now = datetime.now(timezone.utc)
                 await asyncio.to_thread(self.feed_ingestor.refresh, now)
                 since = (now - timedelta(days=7)).isoformat(timespec="seconds").replace("+00:00", "Z")

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.opportunity_routes import register_opportunity_routes
-from src.opportunity_center.models import OpportunityDetail, OpportunityList, RefreshJob
+from src.opportunity_center.models import OpportunityList, RefreshJob
 
 
 class FakeStore:

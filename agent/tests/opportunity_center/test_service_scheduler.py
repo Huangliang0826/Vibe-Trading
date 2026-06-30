@@ -17,6 +17,11 @@ class FakeWatchlist:
         return self.rows[market]
 
 
+class EmptyWatchlist:
+    def get(self, market):
+        return []
+
+
 class FakeFeed:
     def __init__(self):
         self.refresh_calls = 0
@@ -78,6 +83,24 @@ def test_job_refreshes_feed_once_and_isolates_stock_failure(tmp_path):
     assert {item.code for item in items} == {"0700", "9999", "NVDA"}
     assert next(item for item in items if item.code == "9999").level == "数据不足"
     assert svc.store.get_job(job.job_id).status == "completed"
+
+
+def test_empty_watchlist_completes_without_refreshing_news(tmp_path):
+    feed = FakeFeed()
+    svc = OpportunityService(
+        store=OpportunityStore(tmp_path / "opportunities.db"),
+        watchlist_store=EmptyWatchlist(),
+        feed_ingestor=feed,
+    )
+    job = svc.start_refresh(["hk", "us"], "scheduled")
+
+    asyncio.run(svc.run_job(job.job_id))
+
+    completed = svc.store.get_job(job.job_id)
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.completed == 0
+    assert feed.refresh_calls == 0
 
 
 def test_active_job_is_reused_but_later_manual_job_is_new(tmp_path):
