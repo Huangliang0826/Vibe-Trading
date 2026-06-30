@@ -90,6 +90,7 @@ AGENTS.md
 
 # Local isolated feature workspaces
 .worktrees/
+.superpowers/
 
 # Alpha Zoo wiki artifacts (generated, not source)
 wiki/alpha-library/manifest.json
