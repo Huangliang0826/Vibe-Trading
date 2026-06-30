@@ -483,6 +483,23 @@ class OpportunityStore:
             return None
         return self._job_from_row(row)
 
+    def get_job(self, job_id: str) -> RefreshJob | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM refresh_jobs WHERE job_id = ?", (job_id,)).fetchone()
+        return self._job_from_row(row) if row is not None else None
+
+    def get_last_refresh_error(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT error FROM refresh_jobs
+                WHERE error IS NOT NULL AND error != ''
+                ORDER BY updated_at DESC, rowid DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return str(row["error"]) if row is not None else None
+
     def upsert_snapshot(
         self,
         item: OpportunityItem | OpportunityDetail,
@@ -490,7 +507,9 @@ class OpportunityStore:
         trigger: str,
         detail: Mapping[str, Any] | None = None,
     ) -> OpportunityItem:
-        base_item = OpportunityItem.model_validate(item.model_dump())
+        base_item = OpportunityItem.model_validate(
+            item.model_dump(include=set(OpportunityItem.model_fields))
+        )
         now = utc_now()
         with self._connect() as conn:
             previous_row = conn.execute(
