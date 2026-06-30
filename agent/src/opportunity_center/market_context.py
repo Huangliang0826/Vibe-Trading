@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from datetime import date
 
+import numpy as np
 import pandas as pd
 
 from backtest.loaders.yfinance_loader import DataLoader as YFinanceLoader
@@ -139,7 +140,7 @@ def _valuation_percentile(history: pd.DataFrame | None) -> float | None:
         return _series_percentile(pe_values)
 
     pb_values = _positive_series(history.get("pb"))
-    if len(pb_values) >= 1:
+    if len(pb_values) >= 30:
         return _series_percentile(pb_values)
     return None
 
@@ -148,7 +149,7 @@ def _positive_series(series: pd.Series | None) -> pd.Series:
     if series is None:
         return pd.Series(dtype=float)
     numeric = pd.to_numeric(series, errors="coerce")
-    return numeric[numeric > 0].dropna()
+    return numeric[(numeric > 0) & np.isfinite(numeric)].dropna()
 
 
 def _series_percentile(series: pd.Series) -> float | None:

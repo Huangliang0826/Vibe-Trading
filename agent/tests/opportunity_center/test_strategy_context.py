@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.opportunity_center.strategy_context import _classify_action, evaluate_frame
+from backtest.metrics import calc_metrics
+from backtest.models import TradeRecord
+from src.opportunity_center.strategy_context import _classify_action, _oos_metrics, evaluate_frame
 from src.paper_trading.models import PaperHolding
 
 
@@ -133,3 +135,56 @@ def test_evaluate_frame_requires_two_years_of_history():
 
     with pytest.raises(ValueError, match="504"):
         evaluate_frame(frame, holding=holding, as_of=date(2026, 12, 7))
+
+
+def test_oos_metrics_include_pre_window_boundary_for_returns_and_drawdown():
+    index = pd.date_range("2026-01-02", periods=4, freq="B")
+    equity = pd.Series([120.0, 90.0, 108.0, 81.0], index=index)
+    oos_index = index[1:]
+
+    actual = _oos_metrics(equity, [], oos_index)
+    expected_curve = equity.loc[index]
+    expected = calc_metrics(expected_curve, [], 120.0, bars_per_year=None)
+    without_boundary = calc_metrics(equity.loc[oos_index], [], 120.0, bars_per_year=None)
+
+    assert actual["total_return"] == pytest.approx(81.0 / 120.0 - 1.0)
+    assert actual["sharpe"] == pytest.approx(expected["sharpe"])
+    assert actual["max_drawdown"] == pytest.approx(expected["max_drawdown"])
+    assert actual["sharpe"] != pytest.approx(without_boundary["sharpe"])
+    assert actual["max_drawdown"] == pytest.approx(-0.325)
+    assert without_boundary["max_drawdown"] == pytest.approx(-0.25)
+
+
+def test_oos_metrics_filter_trades_to_entries_and_exits_inside_window():
+    index = pd.date_range("2026-01-02", periods=5, freq="B")
+    equity = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0], index=index)
+    oos_index = index[1:4]
+
+    def trade(entry: pd.Timestamp, exit: pd.Timestamp) -> TradeRecord:
+        return TradeRecord(
+            symbol="0700.HK",
+            direction=1,
+            entry_price=100.0,
+            exit_price=101.0,
+            entry_time=entry,
+            exit_time=exit,
+            size=1.0,
+            leverage=1.0,
+            pnl=1.0,
+            pnl_pct=1.0,
+            exit_reason="signal",
+            holding_bars=1,
+            commission=0.0,
+        )
+
+    metrics = _oos_metrics(
+        equity,
+        [
+            trade(index[0], index[1]),
+            trade(index[1], index[2]),
+            trade(index[2], index[4]),
+        ],
+        oos_index,
+    )
+
+    assert metrics["trade_count"] == 1

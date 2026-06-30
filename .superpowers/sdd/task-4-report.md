@@ -86,3 +86,35 @@
 - [test_strategy_context.py](/Users/lianghuang/Vibe-Trading/.worktrees/watchlist-opportunity-center/agent/tests/opportunity_center/test_strategy_context.py)
 - [test_models.py](/Users/lianghuang/Vibe-Trading/.worktrees/watchlist-opportunity-center/agent/tests/opportunity_center/test_models.py)
 - [task-4-report.md](/Users/lianghuang/Vibe-Trading/.worktrees/watchlist-opportunity-center/.superpowers/sdd/task-4-report.md)
+
+## Review Findings Fix: 2026-06-30
+
+### Changes
+
+- OOS metrics now prepend the last equity observation before the first OOS bar. `pct_change`, Sharpe, and max drawdown therefore include the train/OOS boundary move and boundary peak, while total return remains boundary-to-final.
+- Strategy backtests now preserve their completed trade records. OOS metric calculation passes only trades whose entry and exit are both inside the OOS window.
+- HK PB fallback now requires at least 30 positive finite observations, matching PE. Non-finite values cannot satisfy the minimum, and PE/PB histories below the threshold return `None`.
+
+### RED Evidence
+
+1. Added deterministic seam, trade-window, and PB-threshold regressions, then ran:
+   - `uv run pytest agent/tests/opportunity_center/test_strategy_context.py agent/tests/opportunity_center/test_market_context.py -v`
+2. Result: `3 failed, 14 passed in 5.12s`.
+3. Expected failures:
+   - `_oos_metrics()` did not accept or filter trades and omitted the pre-OOS boundary point.
+   - PB fallback returned `100.0` for 28 finite positive values plus `inf`, instead of `None`.
+
+### GREEN Evidence
+
+1. Re-ran focused Task 4 tests after the fixes:
+   - `uv run pytest agent/tests/opportunity_center/test_strategy_context.py agent/tests/opportunity_center/test_market_context.py -v`
+   - Result: `17 passed in 5.03s`.
+2. The seam regression compares directly with `calc_metrics()` over `[boundary + OOS]`. Its fixed equity path includes the first OOS move from `120` to `90`, verifies boundary-to-final return, and verifies max drawdown is `-0.325` rather than the boundary-omitting `-0.25`.
+3. Ran the complete requested regression set:
+   - `uv run pytest agent/tests/opportunity_center/test_strategy_context.py agent/tests/opportunity_center/test_market_context.py agent/tests/test_paper_trading_lookahead.py agent/tests/opportunity_center/test_models.py agent/tests/test_hstech_best_strategy.py -v`
+   - Result: `34 passed in 5.05s`.
+
+### Review
+
+- Re-read the changed metric path and tests after GREEN. The boundary point is used only as the initial OOS equity observation; training remains all rows before the final 252 OOS bars, and selected-strategy evaluation remains restricted to data at or before `as_of`.
+- No unresolved Task 4 correctness concerns found.

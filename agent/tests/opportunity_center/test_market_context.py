@@ -114,10 +114,17 @@ def test_load_market_context_ignores_rows_after_as_of(monkeypatch: pytest.Monkey
     assert loaded.model_dump() == trimmed.model_dump()
 
 
-def test_valuation_percentile_uses_pe_then_pb_fallback():
-    pe_history = pd.DataFrame({"pe": [10.0, 20.0, 30.0, 40.0], "pb": [1.0, 2.0, 3.0, 4.0]})
+def test_valuation_percentile_prefers_pe_with_at_least_30_positive_values():
+    pe_history = pd.DataFrame(
+        {
+            "pe": list(range(1, 31)),
+            "pb": list(range(30, 0, -1)),
+        }
+    )
     assert _valuation_percentile(pe_history) == pytest.approx(100.0)
 
+
+def test_valuation_percentile_falls_back_to_pb_with_at_least_30_positive_values():
     pe_values = [None] * 28 + [-1.0, 0.0, 8.0, None]
     pb_history = pd.DataFrame(
         {
@@ -126,6 +133,17 @@ def test_valuation_percentile_uses_pe_then_pb_fallback():
         }
     )
     assert _valuation_percentile(pb_history) == pytest.approx(100.0)
+
+
+def test_valuation_percentile_returns_none_with_fewer_than_30_positive_pb_values():
+    history = pd.DataFrame(
+        {
+            "pe": [float("nan")] * 29,
+            "pb": list(range(1, 29)) + [float("inf")],
+        }
+    )
+
+    assert _valuation_percentile(history) is None
 
 
 def test_load_market_context_leaves_us_valuation_empty(monkeypatch: pytest.MonkeyPatch):

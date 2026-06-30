@@ -12,6 +12,7 @@ from backtest.engines.base import _align
 from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.loaders.yfinance_loader import DataLoader as YFinanceLoader
 from backtest.metrics import calc_metrics
+from backtest.models import TradeRecord
 from src.opportunity_center.models import StrategyAction, StrategyContext
 from src.paper_trading.executor import _run_dca, _smart_dca_multiplier
 from src.paper_trading.hstech_best import (
@@ -105,8 +106,8 @@ def evaluate_frame(
     selected_strategy = str(best["strategy"]["name"])
     params = dict(best["strategy"]["params"])
     full_signal = _strategy_signal_series(selected_strategy, trimmed, holding, params)
-    equity_curve = _equity_curve_for_strategy(trimmed, holding, selected_strategy, params)
-    oos_metrics = _oos_metrics(equity_curve, oos.index)
+    equity_curve, trades = _backtest_strategy(trimmed, holding, selected_strategy, params)
+    oos_metrics = _oos_metrics(equity_curve, trades, oos.index)
 
     previous_weight = float(full_signal.iloc[-2]) if len(full_signal) > 1 else 0.0
     current_weight = float(full_signal.iloc[-1]) if len(full_signal) else 0.0
@@ -194,8 +195,8 @@ def _metrics_for_strategy(
     strategy_name: str,
     params: dict[str, object],
 ) -> dict[str, float]:
-    equity_curve = _equity_curve_for_strategy(frame, holding, strategy_name, params)
-    metrics = calc_metrics(equity_curve, [], _INITIAL_CASH, bars_per_year=None)
+    equity_curve, trades = _backtest_strategy(frame, holding, strategy_name, params)
+    metrics = calc_metrics(equity_curve, trades, _INITIAL_CASH, bars_per_year=None)
     return {
         "total_return": float(metrics.get("total_return") or 0.0),
         "sharpe": float(metrics.get("sharpe") or 0.0),
@@ -203,32 +204,32 @@ def _metrics_for_strategy(
     }
 
 
-def _equity_curve_for_strategy(
+def _backtest_strategy(
     frame: pd.DataFrame,
     holding: PaperHolding,
     strategy_name: str,
     params: dict[str, object],
-) -> pd.Series:
+) -> tuple[pd.Series, list[TradeRecord]]:
     code = _to_code(holding)
     data_map = {code: frame}
     if strategy_name in {"dca", "smart_dca"}:
-        equity_curve, _trades = _run_dca(
+        equity_curve, trades = _run_dca(
             _INITIAL_CASH,
             [holding],
             data_map,
             params,
             smart=strategy_name == "smart_dca",
         )
-        return equity_curve.astype(float)
+        return equity_curve.astype(float), trades
     signal = _strategy_signal_series(strategy_name, frame, holding, params)
-    return _equity_curve_for_signal(frame, holding, signal)
+    return _backtest_signal(frame, holding, signal)
 
 
-def _equity_curve_for_signal(
+def _backtest_signal(
     frame: pd.DataFrame,
     holding: PaperHolding,
     signal: pd.Series,
-) -> pd.Series:
+) -> tuple[pd.Series, list[TradeRecord]]:
     code = _to_code(holding)
     data_map = {code: frame}
     signal_map = {code: signal.reindex(frame.index).ffill().fillna(0.0).astype(float)}
@@ -237,25 +238,41 @@ def _equity_curve_for_signal(
     engine._execute_bars(dates, data_map, close_df, target_pos, [code])
     if not engine.equity_snapshots:
         raise ValueError("Signal backtest produced no equity snapshots")
-    return pd.Series(
+    equity_curve = pd.Series(
         [snapshot.equity for snapshot in engine.equity_snapshots],
         index=[snapshot.timestamp for snapshot in engine.equity_snapshots],
         dtype=float,
     )
+    return equity_curve, engine.trades
 
 
-def _oos_metrics(equity_curve: pd.Series, oos_index: pd.DatetimeIndex) -> dict[str, float]:
+def _oos_metrics(
+    equity_curve: pd.Series,
+    trades: list[TradeRecord],
+    oos_index: pd.DatetimeIndex,
+) -> dict[str, object]:
     oos_equity = equity_curve.reindex(oos_index).dropna()
     if oos_equity.empty:
         raise ValueError("OOS evaluation produced no equity curve")
     prior = equity_curve.loc[equity_curve.index < oos_index[0]]
-    initial_cash = float(prior.iloc[-1]) if not prior.empty else _INITIAL_CASH
-    metrics = calc_metrics(oos_equity, [], initial_cash, bars_per_year=None)
-    return {
-        "total_return": float(metrics.get("total_return") or 0.0),
-        "sharpe": float(metrics.get("sharpe") or 0.0),
-        "max_drawdown": float(metrics.get("max_drawdown") or 0.0),
-    }
+    if prior.empty:
+        raise ValueError("OOS evaluation requires a pre-window equity boundary")
+
+    boundary = prior.iloc[[-1]]
+    metric_equity = pd.concat([boundary, oos_equity])
+    initial_cash = float(boundary.iloc[0])
+    oos_start, oos_end = oos_equity.index[0], oos_equity.index[-1]
+    oos_trades = [
+        trade
+        for trade in trades
+        if oos_start <= _naive_timestamp(trade.entry_time)
+        and _naive_timestamp(trade.exit_time) <= oos_end
+    ]
+    return calc_metrics(metric_equity, oos_trades, initial_cash, bars_per_year=None)
+
+
+def _naive_timestamp(value: pd.Timestamp) -> pd.Timestamp:
+    return pd.Timestamp(value).tz_localize(None)
 
 
 def _classify_action(previous_weight: float, current_weight: float) -> StrategyAction:
