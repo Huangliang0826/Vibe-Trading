@@ -354,6 +354,32 @@ export const api = {
       `/watchlist/valuation?code=${encodeURIComponent(code)}&market=${market}&metric=${metric}&period=${period}`
     ),
 
+  // 自选股机会中心
+  getOpportunities: (filters: OpportunityFilters = {}) => {
+    const q = new URLSearchParams();
+    if (filters.market && filters.market !== "all") q.set("market", filters.market);
+    if (filters.signal && filters.signal !== "all") q.set("signal", filters.signal);
+    if (filters.level && filters.level !== "all") q.set("level", filters.level);
+    const query = q.toString();
+    return request<OpportunityList>(`/opportunities${query ? `?${query}` : ""}`);
+  },
+  getOpportunityDetail: (market: "hk" | "us", code: string, snapshotDate?: string) =>
+    request<OpportunityDetail>(
+      `/opportunities/${market}/${encodeURIComponent(code)}` +
+        (snapshotDate ? `?date=${encodeURIComponent(snapshotDate)}` : "")
+    ),
+  getOpportunityHistory: (market: "hk" | "us", code: string, limit = 30) =>
+    request<OpportunityHistoryPoint[]>(
+      `/opportunities/${market}/${encodeURIComponent(code)}/history?limit=${limit}`
+    ),
+  refreshOpportunities: (markets: Array<"hk" | "us">, force = false) =>
+    request<OpportunityRefreshJob>("/opportunities/refresh", {
+      method: "POST",
+      body: JSON.stringify({ markets, force }),
+    }),
+  getOpportunityRefreshJob: (jobId: string) =>
+    request<OpportunityRefreshJob>(`/opportunities/refresh/${encodeURIComponent(jobId)}`),
+
 };
 
 // --- 行情看板 types ---
@@ -398,6 +424,82 @@ export interface WatchlistQuote {
   change_pct: number;
   prev_close: number;
   error?: string;
+}
+
+export type OpportunityLevel = "优先关注" | "值得观察" | "暂不参与" | "数据不足";
+export type OpportunityAction = "entry" | "add" | "hold" | "exit" | "risk_exit" | "wait" | "none";
+export type OpportunityDimension = "strategy" | "trend" | "risk" | "news" | "valuation";
+
+export interface OpportunityItem {
+  market: "hk" | "us";
+  code: string;
+  company_name: string;
+  snapshot_date: string;
+  score: number | null;
+  score_change: number | null;
+  level: OpportunityLevel;
+  latest_action: OpportunityAction;
+  signal_date: string | null;
+  strategy_name: string | null;
+  strategy_label: string | null;
+  primary_reason: string;
+  risk_reasons: string[];
+  dimensions: Record<OpportunityDimension, number | null>;
+  data_as_of: string;
+  stale: boolean;
+  degraded: boolean;
+  missing_dimensions: string[];
+  score_version: string;
+  strategy_version: string;
+}
+
+export interface OpportunityNewsImpact {
+  article_id: string;
+  market: "hk" | "us";
+  code: string;
+  direction: "positive" | "neutral" | "negative";
+  strength: number | null;
+  confidence: number | null;
+  horizon: string;
+  summary: string;
+  rationale: string;
+  match_level: "direct" | "industry" | "macro";
+  published_at: string | null;
+}
+
+export interface OpportunityDetail extends OpportunityItem {
+  news: OpportunityNewsImpact[];
+  explanations: string[];
+  history_available: boolean;
+}
+
+export type OpportunityHistoryPoint = OpportunityItem;
+
+export interface OpportunityRefreshJob {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  markets: Array<"hk" | "us">;
+  trigger: string;
+  completed: number;
+  total: number;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string | null;
+  error: string | null;
+}
+
+export interface OpportunityList {
+  items: OpportunityItem[];
+  latest_success_at: string | null;
+  active_job: OpportunityRefreshJob | null;
+  last_refresh_error: string | null;
+}
+
+export interface OpportunityFilters {
+  market?: "all" | "hk" | "us";
+  signal?: "all" | OpportunityAction;
+  level?: "all" | OpportunityLevel;
 }
 
 export interface FactorScreening {
