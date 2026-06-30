@@ -57,8 +57,8 @@ export function OpportunityCalibration() {
         {loading ? <div className="flex h-24 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin" /></div>
           : error ? <div className="flex items-center gap-2 text-xs text-red-600"><AlertCircle className="h-4 w-4" />{error}</div>
           : data ? <div className="divide-y rounded-lg border px-3">
-            {data.periods.map((period) => <div key={period.horizon_days} className="grid gap-2 py-3 sm:grid-cols-[70px_repeat(5,minmax(0,1fr))] sm:items-center">
-              <div><p className="text-sm font-semibold">{period.horizon_days} 日</p><p className="text-[11px] text-muted-foreground">{period.completed_samples > 0 ? `${period.completed_samples} 个样本` : "样本积累中"}</p></div>
+            {data.periods.map((period) => <div key={period.horizon_days} data-testid={`calibration-period-${period.horizon_days}`} className="grid grid-cols-2 gap-2 py-3 sm:grid-cols-[70px_repeat(5,minmax(0,1fr))] sm:items-center">
+              <div className="col-span-2 sm:col-span-1"><p className="text-sm font-semibold">{period.horizon_days} 日</p><p className="text-[11px] text-muted-foreground">{period.completed_samples > 0 ? `${period.completed_samples} 个样本` : "样本积累中"}</p></div>
               <Metric label="胜率" value={formatPercent(period.win_rate)} />
               <Metric label="跑赢率" value={formatPercent(period.outperformance_rate)} />
               <Metric label="平均收益" value={formatPercent(period.average_return)} />

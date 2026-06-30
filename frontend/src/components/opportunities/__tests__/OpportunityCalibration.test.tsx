@@ -41,6 +41,7 @@ describe("OpportunityCalibration", () => {
     expect(screen.getAllByText("12 个样本")).toHaveLength(3);
     expect(screen.getAllByText("62.5%")).toHaveLength(3);
     expect(screen.getAllByText("-12.0%")).toHaveLength(3);
+    expect(screen.getByTestId("calibration-period-5")).toHaveClass("grid-cols-2");
   });
 
   it("reloads metrics when switching to all opportunities", async () => {
