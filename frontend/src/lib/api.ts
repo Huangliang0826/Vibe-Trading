@@ -379,6 +379,8 @@ export const api = {
     }),
   getOpportunityRefreshJob: (jobId: string) =>
     request<OpportunityRefreshJob>(`/opportunities/refresh/${encodeURIComponent(jobId)}`),
+  getOpportunityCalibration: (scope: "top3" | "all" = "top3") =>
+    request<OpportunityCalibrationSummary>(`/opportunities/calibration?scope=${scope}`),
 
 };
 
@@ -497,6 +499,24 @@ export interface OpportunityList {
   latest_success_at: string | null;
   active_job: OpportunityRefreshJob | null;
   last_refresh_error: string | null;
+}
+
+export interface OpportunityCalibrationPeriod {
+  horizon_days: 5 | 20 | 60;
+  completed_samples: number;
+  pending_samples: number;
+  missing_samples: number;
+  win_rate: number | null;
+  outperformance_rate: number | null;
+  average_return: number | null;
+  average_excess_return: number | null;
+  max_loss: number | null;
+}
+
+export interface OpportunityCalibrationSummary {
+  scope: "top3" | "all";
+  periods: OpportunityCalibrationPeriod[];
+  calculated_at: string | null;
 }
 
 export interface OpportunityFilters {

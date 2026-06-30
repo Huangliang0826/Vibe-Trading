@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { OpportunityHistoryChart } from "./OpportunityHistoryChart";
+import { OpportunityCalibration } from "./OpportunityCalibration";
 
 const DIMENSIONS = [
   ["strategy", "策略"], ["trend", "趋势"], ["risk", "风险"], ["news", "新闻"], ["valuation", "估值"],
@@ -231,6 +232,7 @@ export function TodayOpportunities() {
           )}
         </div>
       )}
+      <OpportunityCalibration />
       <p className="text-[11px] text-muted-foreground">机会评分仅用于研究排序，不构成投资建议。</p>
     </section>
   );
