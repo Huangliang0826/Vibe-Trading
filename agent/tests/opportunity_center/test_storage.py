@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -163,6 +164,50 @@ def test_store_uses_runtime_root_db_by_default(tmp_path, monkeypatch):
     assert store.db_path.exists()
 
 
+def test_legacy_snapshot_schema_migrates_sources_and_repairs_score_change(tmp_path):
+    db_path = tmp_path / "opportunities.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE opportunity_snapshots (
+              market TEXT NOT NULL, code TEXT NOT NULL, snapshot_date TEXT NOT NULL,
+              score_version TEXT NOT NULL, strategy_version TEXT NOT NULL,
+              payload_json TEXT NOT NULL, trigger TEXT NOT NULL,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              PRIMARY KEY(market, code, snapshot_date, score_version, strategy_version)
+            )
+            """
+        )
+        for snapshot_date, score, score_change, trigger in (
+            ("2026-05-30", 70, None, "scheduled"),
+            ("2026-05-31", 10, None, "fixed-universe-backfill"),
+            ("2026-06-30", 80, 70, "scheduled"),
+        ):
+            item = sample_item(
+                snapshot_date=snapshot_date, score=score
+            ).model_copy(update={"score_change": score_change})
+            payload = json.dumps({"item_json": item.model_dump_json(), "detail": {}})
+            conn.execute(
+                "INSERT INTO opportunity_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    item.market, item.code, snapshot_date, item.score_version,
+                    item.strategy_version, payload, trigger, snapshot_date, snapshot_date,
+                ),
+            )
+
+    store = OpportunityStore(db_path)
+
+    assert [item.score_change for item in store.get_history("hk", "0700")] == [10, None]
+    with store._connect() as conn:
+        sources = conn.execute(
+            "SELECT sample_source, COUNT(*) AS count FROM opportunity_snapshots GROUP BY sample_source"
+        ).fetchall()
+    assert {row["sample_source"]: row["count"] for row in sources} == {
+        "live": 2,
+        "fixed_universe_backfill": 1,
+    }
+
+
 def test_snapshot_unique_key_is_idempotent(tmp_path):
     store = OpportunityStore(tmp_path / "opportunities.db")
     item = sample_item(score=78)
@@ -179,6 +224,41 @@ def test_snapshot_unique_key_is_idempotent(tmp_path):
     assert rows[0].score == 80
 
 
+def test_fixed_universe_snapshots_do_not_replace_or_rebase_live_history(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_snapshot(sample_item(snapshot_date="2026-05-30", score=70), trigger="scheduled")
+    live = store.upsert_snapshot(sample_item(snapshot_date="2026-06-30", score=80), trigger="scheduled")
+    store.upsert_snapshot(sample_item(snapshot_date="2026-05-31", score=10), trigger="fixed-universe-backfill")
+
+    latest = store.list_latest(market="hk", signal=None, level=None)
+    detail = store.get_detail("hk", "0700")
+    history = store.get_history("hk", "0700")
+
+    assert live.score_change == 10
+    assert latest[0].snapshot_date == "2026-06-30"
+    assert latest[0].score_change == 10
+    assert detail is not None and detail.snapshot_date == "2026-06-30"
+    assert [row.snapshot_date for row in history] == ["2026-06-30", "2026-05-30"]
+
+
+def test_live_and_fixed_universe_snapshots_can_share_the_same_date(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_snapshot(
+        sample_item(snapshot_date="2026-05-31", score=80), trigger="scheduled"
+    )
+    store.upsert_snapshot(
+        sample_item(snapshot_date="2026-05-31", score=10),
+        trigger="fixed-universe-backfill",
+    )
+
+    assert store.list_latest(market="hk", signal=None, level=None)[0].score == 80
+    with store._connect() as conn:
+        rows = conn.execute(
+            "SELECT sample_source FROM opportunity_snapshots ORDER BY sample_source"
+        ).fetchall()
+    assert [row["sample_source"] for row in rows] == ["fixed_universe_backfill", "live"]
+
+
 def test_outcome_upsert_is_idempotent_and_failure_cannot_replace_success(tmp_path):
     store = OpportunityStore(tmp_path / "opportunities.db")
     completed = sample_outcome()
@@ -190,6 +270,21 @@ def test_outcome_upsert_is_idempotent_and_failure_cannot_replace_success(tmp_pat
     assert len(rows) == 1
     assert rows[0].status == "completed"
     assert rows[0].stock_return == pytest.approx(0.12)
+
+
+def test_live_and_fixed_universe_outcomes_can_share_the_same_key(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_outcome(sample_outcome(sample_source="live", stock_return=0.10))
+    store.upsert_outcome(
+        sample_outcome(sample_source="fixed_universe_backfill", stock_return=0.20)
+    )
+
+    rows = store.list_outcomes()
+    assert len(rows) == 2
+    assert {row.sample_source: row.stock_return for row in rows} == {
+        "live": pytest.approx(0.10),
+        "fixed_universe_backfill": pytest.approx(0.20),
+    }
 
 
 def test_calibration_summary_aggregates_top3_and_all(tmp_path):

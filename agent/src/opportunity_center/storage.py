@@ -91,6 +91,7 @@ class OpportunityStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            migrated_snapshots = False
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS news_sources (
@@ -125,8 +126,9 @@ class OpportunityStore:
                   market TEXT NOT NULL, code TEXT NOT NULL, snapshot_date TEXT NOT NULL,
                   score_version TEXT NOT NULL, strategy_version TEXT NOT NULL,
                   payload_json TEXT NOT NULL, trigger TEXT NOT NULL,
+                  sample_source TEXT NOT NULL DEFAULT 'live',
                   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                  PRIMARY KEY(market, code, snapshot_date, score_version, strategy_version)
+                  PRIMARY KEY(market, code, snapshot_date, score_version, strategy_version, sample_source)
                 );
                 CREATE TABLE IF NOT EXISTS refresh_jobs (
                   job_id TEXT PRIMARY KEY, status TEXT NOT NULL, markets_json TEXT NOT NULL,
@@ -143,10 +145,46 @@ class OpportunityStore:
                   benchmark_return REAL, excess_return REAL, error TEXT,
                   calibration_version TEXT NOT NULL, created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL, sample_source TEXT NOT NULL DEFAULT 'live',
-                  PRIMARY KEY (market, code, snapshot_date, horizon_days, calibration_version)
+                  PRIMARY KEY (market, code, snapshot_date, horizon_days, calibration_version, sample_source)
                 );
                 """
             )
+            snapshot_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(opportunity_snapshots)").fetchall()
+            }
+            snapshot_pk = [
+                row["name"]
+                for row in sorted(
+                    conn.execute("PRAGMA table_info(opportunity_snapshots)").fetchall(),
+                    key=lambda row: row["pk"],
+                )
+                if row["pk"]
+            ]
+            if "sample_source" not in snapshot_columns or "sample_source" not in snapshot_pk:
+                conn.executescript(
+                    """
+                    ALTER TABLE opportunity_snapshots RENAME TO opportunity_snapshots_legacy;
+                    CREATE TABLE opportunity_snapshots (
+                      market TEXT NOT NULL, code TEXT NOT NULL, snapshot_date TEXT NOT NULL,
+                      score_version TEXT NOT NULL, strategy_version TEXT NOT NULL,
+                      payload_json TEXT NOT NULL, trigger TEXT NOT NULL,
+                      sample_source TEXT NOT NULL DEFAULT 'live',
+                      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                      PRIMARY KEY(market, code, snapshot_date, score_version, strategy_version, sample_source)
+                    );
+                    INSERT INTO opportunity_snapshots
+                      (market, code, snapshot_date, score_version, strategy_version, payload_json,
+                       trigger, sample_source, created_at, updated_at)
+                    SELECT market, code, snapshot_date, score_version, strategy_version, payload_json,
+                           trigger,
+                           CASE WHEN trigger = 'fixed-universe-backfill'
+                                THEN 'fixed_universe_backfill' ELSE 'live' END,
+                           created_at, updated_at
+                    FROM opportunity_snapshots_legacy;
+                    DROP TABLE opportunity_snapshots_legacy;
+                    """
+                )
+                migrated_snapshots = True
             refresh_job_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(refresh_jobs)").fetchall()
             }
@@ -158,6 +196,60 @@ class OpportunityStore:
             }
             if "sample_source" not in outcome_columns:
                 conn.execute("ALTER TABLE opportunity_outcomes ADD COLUMN sample_source TEXT NOT NULL DEFAULT 'live'")
+            outcome_pk = [
+                row["name"]
+                for row in sorted(
+                    conn.execute("PRAGMA table_info(opportunity_outcomes)").fetchall(),
+                    key=lambda row: row["pk"],
+                )
+                if row["pk"]
+            ]
+            if "sample_source" not in outcome_pk:
+                conn.executescript(
+                    """
+                    ALTER TABLE opportunity_outcomes RENAME TO opportunity_outcomes_legacy;
+                    CREATE TABLE opportunity_outcomes (
+                      market TEXT NOT NULL, code TEXT NOT NULL, snapshot_date TEXT NOT NULL,
+                      horizon_days INTEGER NOT NULL, rank INTEGER NOT NULL, is_top3 INTEGER NOT NULL,
+                      status TEXT NOT NULL, entry_date TEXT, entry_price REAL,
+                      exit_date TEXT, exit_price REAL, stock_return REAL,
+                      benchmark_return REAL, excess_return REAL, error TEXT,
+                      calibration_version TEXT NOT NULL, created_at TEXT NOT NULL,
+                      updated_at TEXT NOT NULL, sample_source TEXT NOT NULL DEFAULT 'live',
+                      PRIMARY KEY (market, code, snapshot_date, horizon_days, calibration_version, sample_source)
+                    );
+                    INSERT INTO opportunity_outcomes
+                    SELECT * FROM opportunity_outcomes_legacy;
+                    DROP TABLE opportunity_outcomes_legacy;
+                    """
+                )
+            if migrated_snapshots:
+                self._rebuild_snapshot_score_changes(conn)
+
+    @staticmethod
+    def _rebuild_snapshot_score_changes(conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT rowid, market, code, sample_source, snapshot_date, payload_json
+            FROM opportunity_snapshots
+            ORDER BY market, code, sample_source, snapshot_date, updated_at, rowid
+            """
+        ).fetchall()
+        previous_scores: dict[tuple[str, str, str], float | None] = {}
+        for row in rows:
+            payload = _json_loads(row["payload_json"])
+            item = OpportunityItem.model_validate_json(payload["item_json"])
+            key = (row["market"], row["code"], row["sample_source"])
+            previous_score = previous_scores.get(key)
+            score_change = None
+            if item.score is not None and previous_score is not None:
+                score_change = item.score - previous_score
+            payload["item_json"] = item.model_copy(update={"score_change": score_change}).model_dump_json()
+            conn.execute(
+                "UPDATE opportunity_snapshots SET payload_json = ? WHERE rowid = ?",
+                (json.dumps(payload, ensure_ascii=False), row["rowid"]),
+            )
+            previous_scores[key] = item.score
 
     def upsert_articles(
         self,
@@ -534,6 +626,8 @@ class OpportunityStore:
         base_item = OpportunityItem.model_validate(
             item.model_dump(include=set(OpportunityItem.model_fields))
         )
+        is_backfill = trigger == "fixed-universe-backfill"
+        sample_source = "fixed_universe_backfill" if is_backfill else "live"
         now = utc_now()
         with self._connect() as conn:
             previous_row = conn.execute(
@@ -541,6 +635,7 @@ class OpportunityStore:
                 SELECT payload_json
                 FROM opportunity_snapshots
                 WHERE market = ? AND code = ? AND snapshot_date < ?
+                  AND sample_source = ?
                 ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC
                 LIMIT 1
                 """,
@@ -548,6 +643,7 @@ class OpportunityStore:
                     base_item.market,
                     base_item.code,
                     base_item.snapshot_date,
+                    sample_source,
                 ),
             ).fetchone()
             previous_score = None
@@ -583,7 +679,8 @@ class OpportunityStore:
                 """
                 SELECT created_at
                 FROM opportunity_snapshots
-                WHERE market = ? AND code = ? AND snapshot_date = ? AND score_version = ? AND strategy_version = ?
+                WHERE market = ? AND code = ? AND snapshot_date = ? AND score_version = ?
+                  AND strategy_version = ? AND sample_source = ?
                 """,
                 (
                     stored_item.market,
@@ -591,15 +688,18 @@ class OpportunityStore:
                     stored_item.snapshot_date,
                     stored_item.score_version,
                     stored_item.strategy_version,
+                    sample_source,
                 ),
             ).fetchone()
             created_at = existing["created_at"] if existing is not None else now
             conn.execute(
                 """
                 INSERT INTO opportunity_snapshots
-                    (market, code, snapshot_date, score_version, strategy_version, payload_json, trigger, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(market, code, snapshot_date, score_version, strategy_version) DO UPDATE SET
+                    (market, code, snapshot_date, score_version, strategy_version, payload_json,
+                     trigger, sample_source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(market, code, snapshot_date, score_version, strategy_version, sample_source)
+                DO UPDATE SET
                     payload_json = excluded.payload_json,
                     trigger = excluded.trigger,
                     updated_at = excluded.updated_at
@@ -612,6 +712,7 @@ class OpportunityStore:
                     stored_item.strategy_version,
                     payload_json,
                     trigger,
+                    sample_source,
                     created_at,
                     now,
                 ),
@@ -622,8 +723,9 @@ class OpportunityStore:
                 SELECT MIN(snapshot_date) AS snapshot_date
                 FROM opportunity_snapshots
                 WHERE market = ? AND code = ? AND snapshot_date > ?
+                  AND sample_source = ?
                 """,
-                (stored_item.market, stored_item.code, stored_item.snapshot_date),
+                (stored_item.market, stored_item.code, stored_item.snapshot_date, sample_source),
             ).fetchone()
             next_date = next_date_row["snapshot_date"] if next_date_row is not None else None
             if next_date is not None:
@@ -632,9 +734,10 @@ class OpportunityStore:
                     SELECT score_version, strategy_version, payload_json
                     FROM opportunity_snapshots
                     WHERE market = ? AND code = ? AND snapshot_date = ?
+                      AND sample_source = ?
                     ORDER BY updated_at DESC, rowid DESC
                     """,
-                    (stored_item.market, stored_item.code, next_date),
+                    (stored_item.market, stored_item.code, next_date, sample_source),
                 ).fetchall()
                 for successor_row in successor_rows:
                     successor_payload = _json_loads(successor_row["payload_json"])
@@ -652,7 +755,7 @@ class OpportunityStore:
                         UPDATE opportunity_snapshots
                         SET payload_json = ?, updated_at = ?
                         WHERE market = ? AND code = ? AND snapshot_date = ?
-                          AND score_version = ? AND strategy_version = ?
+                          AND score_version = ? AND strategy_version = ? AND sample_source = ?
                         """,
                         (
                             json.dumps(successor_payload, ensure_ascii=False),
@@ -662,6 +765,7 @@ class OpportunityStore:
                             next_date,
                             successor_row["score_version"],
                             successor_row["strategy_version"],
+                            sample_source,
                         ),
                     )
         return stored_item
@@ -688,6 +792,7 @@ class OpportunityStore:
                             ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC
                         ) AS snapshot_rank
                     FROM opportunity_snapshots
+                    WHERE sample_source = 'live'
                 )
                 SELECT payload_json
                 FROM ranked
@@ -708,7 +813,7 @@ class OpportunityStore:
         sql = """
             SELECT payload_json
             FROM opportunity_snapshots
-            WHERE market = ? AND code = ?
+            WHERE market = ? AND code = ? AND sample_source = 'live'
         """
         params: list[Any] = [market, code]
         if snapshot_date is not None:
@@ -739,6 +844,7 @@ class OpportunityStore:
                 SELECT payload_json
                 FROM opportunity_snapshots
                 WHERE market = ? AND code = ?
+                  AND sample_source = 'live'
                 ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC
                 LIMIT ?
                 """,
@@ -776,7 +882,7 @@ class OpportunityStore:
                      benchmark_return, excess_return, error, calibration_version,
                      created_at, updated_at, sample_source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(market, code, snapshot_date, horizon_days, calibration_version)
+                ON CONFLICT(market, code, snapshot_date, horizon_days, calibration_version, sample_source)
                 DO UPDATE SET
                     rank = excluded.rank,
                     is_top3 = excluded.is_top3,
@@ -804,8 +910,11 @@ class OpportunityStore:
             row = conn.execute(
                 """SELECT * FROM opportunity_outcomes
                    WHERE market = ? AND code = ? AND snapshot_date = ?
-                     AND horizon_days = ? AND calibration_version = ?""",
-                (outcome.market, outcome.code, outcome.snapshot_date, outcome.horizon_days, outcome.calibration_version),
+                     AND horizon_days = ? AND calibration_version = ? AND sample_source = ?""",
+                (
+                    outcome.market, outcome.code, outcome.snapshot_date, outcome.horizon_days,
+                    outcome.calibration_version, outcome.sample_source,
+                ),
             ).fetchone()
         assert row is not None
         return self._outcome_from_row(row)
