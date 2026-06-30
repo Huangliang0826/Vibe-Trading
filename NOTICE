@@ -20,3 +20,7 @@ repository as factual mathematical content (formulas are not copyrightable):
 Prose, tables, and figures from the source papers and reports are NOT
 reproduced in this repository. Only the mathematical formulas — which are
 factual content and not subject to copyright — are reimplemented here.
+
+The opportunity-center RSS source catalog is adapted from investment-news,
+Copyright (c) 2026 simonlin1212, under the MIT License. See
+agent/src/opportunity_center/THIRD_PARTY_NOTICE.md.

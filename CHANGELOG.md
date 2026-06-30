@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **自选股机会中心。** 总览顶部新增港股/美股每日机会排序，综合无未来数据的
+  样本外策略信号、趋势、风险、新闻影响和可用估值，展示优先级、开平仓动作、
+  评分历史与可追溯新闻来源；支持市场、信号和等级筛选，并在港股和美股收盘后
+  自动刷新。新闻源目录改编自 `investment-news`，完整 MIT 归属见项目 `NOTICE`。
 - **HSTECH research workbench.** Added a dedicated 恒生科技 research surface with
   price/valuation charts, TimesFM forecast cone, news, reports, AI summaries,
   factor research panels, and benchmarked Q1/Q2 portfolio views.

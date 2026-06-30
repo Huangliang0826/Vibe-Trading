@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase } from "lucide-react";
+import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -29,7 +29,9 @@ export function Layout() {
   const sseStatus = useAgentStore(s => s.sseStatus);
   const sseRetryAttempt = useAgentStore(s => s.sseRetryAttempt);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("qa-sidebar") === "collapsed");
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [sessionsCollapsed, setSessionsCollapsed] = useState(() => localStorage.getItem("qa-sessions") !== "expanded");
+  const compactSidebar = collapsed && !mobileOpen;
 
   const activeSessionId = searchParams.get("session");
   const streamingSessionId = useAgentStore(s => s.streamingSessionId);
@@ -41,6 +43,10 @@ export function Layout() {
   useEffect(() => {
     localStorage.setItem("qa-sessions", sessionsCollapsed ? "collapsed" : "expanded");
   }, [sessionsCollapsed]);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const loadSessions = () => {
     api.listSessions()
@@ -76,46 +82,61 @@ export function Layout() {
   };
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="relative flex h-screen bg-background">
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="关闭导航遮罩"
+          className="fixed inset-0 z-40 bg-black/30 md:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
       {/* Sidebar */}
       <aside className={cn(
-        "border-r bg-card flex flex-col shrink-0 transition-all duration-200",
-        collapsed ? "w-12" : "w-64"
+        "fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r bg-card transition-all duration-200 md:static md:z-auto md:translate-x-0",
+        mobileOpen ? "translate-x-0" : "-translate-x-full",
+        compactSidebar ? "w-12" : "w-64"
       )}>
         {/* Brand */}
-        <div className={cn("border-b", collapsed ? "p-2 flex justify-center" : "p-4")}>
-          <Link to="/overview" className={cn("flex items-center font-bold text-base tracking-tight", collapsed ? "justify-center" : "gap-2")}>
+        <div className={cn("border-b", compactSidebar ? "p-2 flex justify-center" : "flex items-center gap-2 p-4")}>
+          <Link to="/overview" onClick={() => setMobileOpen(false)} className={cn("flex min-w-0 flex-1 items-center font-bold text-base tracking-tight", compactSidebar ? "justify-center" : "gap-2")}>
             <BarChart3 className="h-5 w-5 text-primary shrink-0" />
-            {!collapsed && "Alpha Mind 量化之心"}
+            {!compactSidebar && <span className="truncate">Alpha Mind 量化之心</span>}
           </Link>
+          {!compactSidebar && (
+            <button type="button" aria-label="关闭导航" className="p-1 text-muted-foreground md:hidden" onClick={() => setMobileOpen(false)}>
+              <X className="h-5 w-5" />
+            </button>
+          )}
         </div>
 
         {/* Nav */}
-        <nav className={cn("space-y-0.5", collapsed ? "p-1" : "p-2")}>
+        <nav className={cn("space-y-0.5", compactSidebar ? "p-1" : "p-2")}>
           {NAV.map(({ to, icon: Icon, label }) => {
             const text = label;
             return (
               <Link
                 key={to}
                 to={to}
+                onClick={() => setMobileOpen(false)}
                 className={cn(
                   "flex items-center rounded-md text-sm transition-colors",
-                  collapsed ? "justify-center p-2" : "gap-3 px-3 py-2",
+                  compactSidebar ? "justify-center p-2" : "gap-3 px-3 py-2",
                   (to === "/" ? pathname === "/" : pathname.startsWith(to))
                     ? "bg-primary/10 text-primary font-medium"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
-                title={collapsed ? text : undefined}
+                title={compactSidebar ? text : undefined}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {!collapsed && text}
+                {!compactSidebar && text}
               </Link>
             );
           })}
         </nav>
 
         {/* Sessions — hidden when collapsed */}
-        {!collapsed && (
+        {!compactSidebar && (
           <div className={cn("border-t mt-2 flex flex-col", sessionsCollapsed ? "shrink-0" : "flex-1 overflow-auto")}>
             <div className="flex items-center justify-between px-4 py-2">
               <button
@@ -215,11 +236,11 @@ export function Layout() {
         )}
 
         {/* Spacer when collapsed */}
-        {collapsed && <div className="flex-1" />}
+        {compactSidebar && <div className="flex-1" />}
 
         {/* Footer */}
-        <div className={cn("border-t", collapsed ? "p-1 flex flex-col items-center gap-1" : "p-3 space-y-2")}>
-          {collapsed ? (
+        <div className={cn("border-t", compactSidebar ? "p-1 flex flex-col items-center gap-1" : "p-3 space-y-2")}>
+          {compactSidebar ? (
             <>
               <button onClick={toggle} className="p-1.5 text-muted-foreground hover:text-foreground rounded transition-colors" title={dark ? "亮色" : "暗色"}>
                 {dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
@@ -255,7 +276,16 @@ export function Layout() {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-3 md:hidden">
+          <button type="button" aria-label="打开导航" className="p-1.5 text-muted-foreground" onClick={() => setMobileOpen(true)}>
+            <Menu className="h-5 w-5" />
+          </button>
+          <Link to="/overview" className="flex min-w-0 items-center gap-2 font-semibold">
+            <BarChart3 className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate">Alpha Mind 量化之心</span>
+          </Link>
+        </div>
         <ConnectionBanner status={sseStatus} retryAttempt={sseRetryAttempt} />
         <main className="flex-1 overflow-auto">
           <Outlet />

@@ -3,6 +3,7 @@ import { LayoutDashboard, RefreshCw, TrendingUp, TrendingDown, Plus, X, Loader2,
 import { api, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { ValuationChart } from "@/components/charts/ValuationChart";
+import { TodayOpportunities } from "@/components/opportunities/TodayOpportunities";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 30_000;
@@ -548,6 +549,8 @@ export function Overview() {
           {error}
         </div>
       )}
+
+      <TodayOpportunities />
 
       {/* Index cards — A-share */}
       <section className="space-y-2">

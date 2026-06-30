@@ -104,6 +104,7 @@ include = ["src*", "backtest*", "cli*"]
 ]
 "backtest" = ["*.py"]
 "src.factors" = ["zoo/**/*.yaml", "zoo/**/*.md", "zoo/**/NOTICE"]
+"src.opportunity_center" = ["*.json", "*.md"]
 
 [project.optional-dependencies]
 ibkr = [
