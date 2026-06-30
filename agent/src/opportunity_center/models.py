@@ -48,6 +48,7 @@ class NewsImpact(OpportunityContract):
     summary: str = ""
     rationale: str = ""
     match_level: MatchLevel = "direct"
+    published_at: str | None = None
 
 
 class StockContext(OpportunityContract):

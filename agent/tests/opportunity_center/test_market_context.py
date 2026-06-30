@@ -47,6 +47,7 @@ def test_compute_market_context_uses_exact_trend_and_risk_formulas():
     annual_vol = returns.tail(63).std() * math.sqrt(252)
     downside_vol = returns.tail(63).clip(upper=0).std() * math.sqrt(252)
     max_drawdown = (close / close.cummax() - 1).min()
+    return20 = close.iloc[-1] / close.iloc[-21] - 1
     volume_ratio = volume.tail(20).mean() / volume.tail(60).mean()
     volume_confirmation = 10 if momentum63 > 0 and volume_ratio >= 1.2 else 0
     expected_trend = max(
@@ -83,6 +84,7 @@ def test_compute_market_context_uses_exact_trend_and_risk_formulas():
         "annual_vol": pytest.approx(annual_vol),
         "downside_vol": pytest.approx(downside_vol),
         "max_drawdown": pytest.approx(max_drawdown),
+        "return20": pytest.approx(return20),
     }
     assert context.trend_score == pytest.approx(expected_trend)
     assert context.risk_score == pytest.approx(expected_risk)

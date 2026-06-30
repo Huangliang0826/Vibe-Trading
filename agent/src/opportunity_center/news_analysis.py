@@ -70,6 +70,7 @@ class NewsAnalyzer:
                             "summary": item.get("summary") or "",
                             "rationale": item.get("rationale") or "",
                             "match_level": match.match_level,
+                            "published_at": match.article.published_at,
                         }
                     )
                 except Exception as exc:

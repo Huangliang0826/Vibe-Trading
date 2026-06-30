@@ -40,6 +40,7 @@ def _compute_market_context(
     annual_vol = float(returns.tail(63).std() * math.sqrt(252))
     downside_vol = float(returns.tail(63).clip(upper=0).std() * math.sqrt(252))
     max_drawdown = float((close / close.cummax() - 1).min())
+    return20 = float(close.iloc[-1] / close.iloc[-21] - 1)
     volume_ratio = float(volume.tail(20).mean() / volume.tail(60).mean())
     volume_confirmation = 10.0 if momentum63 > 0 and volume_ratio >= 1.2 else -10.0 if momentum63 < 0 and volume_ratio >= 1.2 else 0.0
 
@@ -74,6 +75,7 @@ def _compute_market_context(
             "annual_vol": annual_vol,
             "downside_vol": downside_vol,
             "max_drawdown": max_drawdown,
+            "return20": return20,
         },
         valuation_percentile=valuation_percentile,
     )
