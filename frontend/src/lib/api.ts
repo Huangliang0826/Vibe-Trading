@@ -211,6 +211,11 @@ export const api = {
     request<{ status: string; run_id: string }>(`/paper-trading/runs/${encodeURIComponent(runId)}`, {
       method: "DELETE",
     }),
+  robustOptimizePaperTrading: (body: RobustOptimizeRequest) =>
+    request<RobustOptimizeResult>("/paper-trading/robust-optimize", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // Scanner API
   getScanLatest: () => request<any>("/scan/latest"),
@@ -732,6 +737,53 @@ export interface PaperTradingCreate {
   end_date: string;
   initial_usd?: number;
   initial_hkd?: number;
+}
+
+export interface RobustOptimizeRequest {
+  holdings: PaperHolding[];
+  strategies: { name: string; params: Record<string, unknown> }[];
+  start_date: string;
+  end_date: string;
+  initial_usd?: number;
+  initial_hkd?: number;
+  window_years?: number;
+  step_years?: number;
+}
+
+export interface RobustWindow {
+  label: string;
+  start: string;
+  end: string;
+  is_full: boolean;
+}
+
+export interface RobustCell {
+  status: "ok" | "failed";
+  rank?: number;
+  score?: number;
+  total_return?: number;
+  max_loss?: number;
+}
+
+export interface RobustStrategyRow {
+  name: string;
+  cells: RobustCell[];
+  mean_rank: number;
+  worst_rank: number;
+  rank_std: number;
+  ok_count: number;
+  mean_score: number | null;
+  mean_return: number;
+  mean_max_loss: number;
+}
+
+export interface RobustOptimizeResult {
+  windows: RobustWindow[];
+  strategies: RobustStrategyRow[];
+  best_strategy: string | null;
+  window_years: number;
+  data_start: string;
+  data_end: string;
 }
 
 export interface PaperTradingRun {

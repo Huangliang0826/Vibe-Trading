@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Briefcase, Plus, Trash2, Loader2, Play, ChevronDown, ChevronRight } from "lucide-react";
-import { ApiError, api, type PaperTradingRun, type PaperHolding, type PaperStrategyConfig, type PaperTrade, type PriceHistoryBar, type PriceHistoryPeriod, type WatchlistMarket, type WatchlistQuote } from "@/lib/api";
+import { ApiError, api, type PaperTradingRun, type PaperHolding, type PaperStrategyConfig, type PaperTrade, type PriceHistoryBar, type PriceHistoryPeriod, type WatchlistMarket, type WatchlistQuote, type RobustOptimizeResult } from "@/lib/api";
 import { PaperEquityChart } from "@/components/charts/PaperEquityChart";
 import { PaperHoldingPriceChart } from "@/components/charts/PaperHoldingPriceChart";
 import { cn } from "@/lib/utils";
@@ -377,6 +377,8 @@ export function PaperTrading() {
   const [optimalProgress, setOptimalProgress] = useState("");
   const [optimalRuns, setOptimalRuns] = useState<PaperTradingRun[]>([]);
   const [optimalBestRunId, setOptimalBestRunId] = useState<string | null>(null);
+  const [robustResult, setRobustResult] = useState<RobustOptimizeResult | null>(null);
+  const [robustLoading, setRobustLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [singlePricePeriod, setSinglePricePeriod] = useState<PriceHistoryPeriod>("ALL");
@@ -671,6 +673,41 @@ export function PaperTrading() {
     }
   };
 
+  // ── Multi-period (robust) strategy test ──
+  const handleRobustOptimize = async () => {
+    if (holdings.length === 0 || !allocValid) return;
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setRobustLoading(true);
+    setError(null);
+    setActiveRun(null);
+    setOptimalRuns([]);
+    setRobustResult(null);
+    try {
+      const result = await api.robustOptimizePaperTrading({
+        holdings,
+        strategies: STRATEGY_OPTIONS.map((option) => ({
+          name: option.value,
+          params: strategyParamsFor(option.value, dcaFrequency, gridCount),
+        })),
+        start_date: startDate,
+        end_date: endDate,
+        initial_usd: initialUsd,
+        initial_hkd: initialHkd,
+        window_years: 3,
+        step_years: 2,
+      });
+      setRobustResult(result);
+      if (result.best_strategy) setStrategy(result.best_strategy as StrategyName);
+    } catch (e: any) {
+      setError(e?.message || "多时间段测试失败");
+    } finally {
+      setRobustLoading(false);
+    }
+  };
+
   // ── Load a historical run ──
   const loadRun = async (runId: string) => {
     try {
@@ -936,16 +973,30 @@ export function PaperTrading() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleOptimizeStrategies}
-              disabled={submitting || optimizing || holdings.length === 0 || !allocValid}
+              disabled={submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
-                submitting || optimizing || holdings.length === 0 || !allocValid
+                submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
                   : "bg-background hover:bg-accent",
               )}
             >
               {optimizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               最优策略
+            </button>
+            <button
+              onClick={handleRobustOptimize}
+              disabled={submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid}
+              title="在多个滚动时间段上分别测试，取平均排名最稳健的策略"
+              className={cn(
+                "flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
+                submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-background hover:bg-accent",
+              )}
+            >
+              {robustLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              多时间段测试
             </button>
             <button
               onClick={handleSubmit}
@@ -964,6 +1015,7 @@ export function PaperTrading() {
         </div>
 
         {optimalProgress && <p className="text-xs text-muted-foreground">{optimalProgress}</p>}
+        {robustLoading && <p className="text-xs text-muted-foreground">多时间段测试运行中…（在多个窗口上回测全部策略，请稍候）</p>}
         {error && <p className="text-xs text-red-500">{error}</p>}
       </div>
 
@@ -1040,6 +1092,78 @@ export function PaperTrading() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {robustResult && (
+        <div className="rounded-xl border bg-card p-4">
+          <div className="mb-2">
+            <h2 className="text-sm font-semibold">多时间段稳健性测试</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              在 {robustResult.windows.filter((w) => !w.is_full).length} 个滚动 {robustResult.window_years} 年窗口 + 全历史上分别按平衡得分排名，取
+              <span className="font-medium text-foreground">平均排名</span>最优。数据区间 {robustResult.data_start} ~ {robustResult.data_end}。
+              这是稳健性筛选，降低对单一时段的过拟合，但仍基于历史、不代表未来。
+            </p>
+          </div>
+          {robustResult.best_strategy && (
+            <div className="mb-3 rounded-lg border bg-primary/10 px-3 py-2 text-sm">
+              最稳健策略：<span className="font-semibold">{STRATEGY_LABELS[robustResult.best_strategy as StrategyName] || robustResult.best_strategy}</span>
+              {(() => {
+                const b = robustResult.strategies.find((s) => s.name === robustResult.best_strategy);
+                return b ? <span className="ml-2 text-xs text-muted-foreground">平均排名 {b.mean_rank}（最差 {b.worst_rank} · 波动 {b.rank_std}）</span> : null;
+              })()}
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40 text-muted-foreground">
+                  <th className="px-3 py-2 text-left font-medium">策略</th>
+                  {robustResult.windows.map((w) => (
+                    <th key={w.label} className="px-2 py-2 text-center font-medium whitespace-nowrap" title={`${w.start} ~ ${w.end}`}>{w.label}</th>
+                  ))}
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">平均排名</th>
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">最差</th>
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">波动</th>
+                </tr>
+              </thead>
+              <tbody>
+                {robustResult.strategies.map((s) => {
+                  const isBest = s.name === robustResult.best_strategy;
+                  return (
+                    <tr key={s.name} className={cn("border-b last:border-0 hover:bg-muted/30", isBest && "bg-primary/10")}>
+                      <td className="px-3 py-2 font-medium whitespace-nowrap">
+                        {STRATEGY_LABELS[s.name as StrategyName] || s.name}
+                        {isBest && <span className="ml-2 text-primary">最稳健</span>}
+                      </td>
+                      {s.cells.map((c, i) => (
+                        <td key={i} className="px-2 py-2 text-center tabular-nums">
+                          {c.status === "ok" && c.rank != null ? (
+                            <span className={cn(
+                              "inline-block min-w-[1.5rem] rounded px-1.5 py-0.5",
+                              c.rank === 1 ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold"
+                                : c.rank <= 3 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                : "text-muted-foreground",
+                            )} title={c.total_return != null ? `收益 ${pct(c.total_return)} · 亏损 ${pct(c.max_loss)}` : undefined}>
+                              {c.rank}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-2 py-2 text-right font-semibold tabular-nums">{s.mean_rank}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.worst_rank}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.rank_std}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/80">
+            单元格为该策略在对应窗口内的排名（1=最佳，绿色越深越靠前；“—”=该窗口数据不足或回测失败）。平均排名越低越稳健；最差/波动反映一致性。
+          </p>
         </div>
       )}
 

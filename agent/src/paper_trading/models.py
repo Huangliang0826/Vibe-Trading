@@ -85,3 +85,19 @@ class PaperTradingRun(BaseModel):
 
 class PaperTradingList(BaseModel):
     items: list[PaperTradingRun]
+
+
+class RobustStrategySpec(BaseModel):
+    name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class RobustOptimizeCreate(BaseModel):
+    holdings: list[PaperHolding] = Field(..., min_length=1)
+    strategies: list[RobustStrategySpec] = Field(..., min_length=1)
+    start_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    initial_usd: float = Field(default=100_000.0, gt=0)
+    initial_hkd: float = Field(default=1_000_000.0, ge=0)
+    window_years: int = Field(default=3, ge=2, le=10)
+    step_years: int = Field(default=2, ge=1, le=5)

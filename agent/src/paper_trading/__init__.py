@@ -6,6 +6,7 @@ from src.paper_trading.models import (
     PaperTradingList,
     PaperTradingRun,
     PaperTradingStatus,
+    RobustOptimizeCreate,
     StrategyConfig,
 )
 from src.paper_trading.storage import PaperTradingStore
@@ -17,5 +18,6 @@ __all__ = [
     "PaperTradingRun",
     "PaperTradingStatus",
     "PaperTradingStore",
+    "RobustOptimizeCreate",
     "StrategyConfig",
 ]

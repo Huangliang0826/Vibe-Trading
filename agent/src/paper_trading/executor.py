@@ -60,47 +60,9 @@ def run_paper_trading_backtest(run_id: str, store: PaperTradingStore) -> None:
 
         initial_cash = run.initial_total_usd
 
-        if run.strategy.name in {"dca", "smart_dca", "dca_then_hold"}:
-            deploy_years = None
-            if run.strategy.name == "dca_then_hold":
-                deploy_years = float(run.strategy.params.get("deploy_years", 3))
-            equity_series, trades = _run_dca(
-                initial_cash, equity_holdings, data_map, run.strategy.params,
-                smart=run.strategy.name == "smart_dca",
-                deploy_years=deploy_years,
-            )
-        else:
-            signal_map = generate_signals(
-                equity_holdings, data_map, run.strategy.name, run.strategy.params,
-            )
-            valid_codes = sorted(c for c in signal_map if c in data_map)
-            if not valid_codes:
-                raise ValueError("No valid signals generated")
-
-            dates, close_df, target_pos, _ret_df = _align(
-                data_map, signal_map, valid_codes,
-            )
-            valid_codes = [c for c in valid_codes if c in target_pos.columns]
-
-            hk_codes = [c for c in valid_codes if c.endswith(".HK")]
-            other_codes = [c for c in valid_codes if not c.endswith(".HK")]
-
-            # Pure HK → HK engine (stamp tax + levies). Anything else — US,
-            # A-share (.SS/.SZ), or a cross-market mix — runs on the US-rule
-            # engine (fractional shares, negligible commission) over ALL codes,
-            # so A-share holdings are never dropped from a mixed portfolio.
-            if hk_codes and not other_codes:
-                engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="hk")
-                engine._execute_bars(dates, data_map, close_df, target_pos, hk_codes)
-            else:
-                engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="us")
-                engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
-
-            equity_series = pd.Series(
-                [s.equity for s in engine.equity_snapshots],
-                index=[s.timestamp for s in engine.equity_snapshots],
-            )
-            trades = engine.trades
+        equity_series, trades = evaluate_strategy(
+            equity_holdings, data_map, run.strategy.name, run.strategy.params, initial_cash,
+        )
 
         metrics = calc_metrics(equity_series, trades, initial_cash, bars_per_year=None)
         metrics["by_symbol"] = by_symbol_stats(trades)
@@ -116,6 +78,60 @@ def run_paper_trading_backtest(run_id: str, store: PaperTradingStore) -> None:
             store.fail_run(run_id, str(exc))
         except Exception:
             logger.exception("failed to persist failure for paper trading %s", run_id)
+
+
+# ── Strategy evaluation core ─────────────────────────────────────────────────
+
+def evaluate_strategy(
+    equity_holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    strategy_name: str,
+    params: Dict[str, Any],
+    initial_cash: float,
+) -> tuple:
+    """Run one strategy over a portfolio and return ``(equity_series, trades)``.
+
+    Pure core shared by the single-run backtest and the multi-window robust
+    optimiser — no persistence and no data fetching, so it can be called many
+    times over sliced ``data_map`` views.
+    """
+    if strategy_name in {"dca", "smart_dca", "dca_then_hold"}:
+        deploy_years = None
+        if strategy_name == "dca_then_hold":
+            deploy_years = float(params.get("deploy_years", 3))
+        return _run_dca(
+            initial_cash, equity_holdings, data_map, params,
+            smart=strategy_name == "smart_dca",
+            deploy_years=deploy_years,
+        )
+
+    signal_map = generate_signals(equity_holdings, data_map, strategy_name, params)
+    valid_codes = sorted(c for c in signal_map if c in data_map)
+    if not valid_codes:
+        raise ValueError("No valid signals generated")
+
+    dates, close_df, target_pos, _ret_df = _align(data_map, signal_map, valid_codes)
+    valid_codes = [c for c in valid_codes if c in target_pos.columns]
+
+    hk_codes = [c for c in valid_codes if c.endswith(".HK")]
+    other_codes = [c for c in valid_codes if not c.endswith(".HK")]
+
+    # Pure HK → HK engine (stamp tax + levies). Anything else — US, A-share
+    # (.SS/.SZ), or a cross-market mix — runs on the US-rule engine (fractional
+    # shares, negligible commission) over ALL codes, so A-share holdings are
+    # never dropped from a mixed portfolio.
+    if hk_codes and not other_codes:
+        engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="hk")
+        engine._execute_bars(dates, data_map, close_df, target_pos, hk_codes)
+    else:
+        engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="us")
+        engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
+
+    equity_series = pd.Series(
+        [s.equity for s in engine.equity_snapshots],
+        index=[s.timestamp for s in engine.equity_snapshots],
+    )
+    return equity_series, engine.trades
 
 
 # ── DCA simulator ───────────────────────────────────────────────────────────

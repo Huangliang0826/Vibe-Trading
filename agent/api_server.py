@@ -44,6 +44,7 @@ from src.paper_trading import (
     PaperTradingRun,
     PaperTradingStatus,
     PaperTradingStore,
+    RobustOptimizeCreate,
 )
 from src.ui_services import build_run_analysis, load_run_context
 
@@ -4556,6 +4557,39 @@ async def create_paper_trading_run(payload: PaperTradingCreate):
         else None
     )
     return run
+
+
+@app.post(
+    "/paper-trading/robust-optimize",
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def robust_optimize_paper_trading(payload: RobustOptimizeCreate):
+    """Evaluate strategies across rolling windows; rank by average rank.
+
+    One-shot, synchronous (computed in a worker thread): fetches each symbol's
+    history once and runs every (strategy × window) combination in memory, so it
+    returns a strategy × window matrix and the most-robust strategy directly.
+    """
+    total_alloc = sum(h.allocation_pct for h in payload.holdings)
+    if abs(total_alloc - 100.0) > 0.01:
+        raise HTTPException(status_code=400, detail=f"Allocation must sum to 100%, got {total_alloc:.2f}%")
+
+    from src.paper_trading.robust import run_robust_optimize
+    from src.paper_trading.storage import HKD_TO_USD
+
+    initial_cash = payload.initial_usd + payload.initial_hkd * HKD_TO_USD
+    specs = [{"name": s.name, "params": s.params} for s in payload.strategies]
+    try:
+        return await asyncio.to_thread(
+            run_robust_optimize,
+            payload.holdings, payload.start_date, payload.end_date,
+            initial_cash, specs, payload.window_years, payload.step_years,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("robust optimize failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"robust optimize failed: {exc}") from exc
 
 
 @app.get(
