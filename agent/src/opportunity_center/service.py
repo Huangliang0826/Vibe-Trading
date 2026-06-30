@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from src.opportunity_center.calibration import OpportunityCalibrationService
 from src.opportunity_center.feeds import FeedIngestor
 from src.opportunity_center.market_context import load_market_context
 from src.opportunity_center.matching import build_stock_context, match_articles
@@ -50,6 +51,7 @@ class OpportunityService:
         stock_context_loader: Callable[[Market, str], StockContext] | None = None,
         market_loader: Callable[[Market, str, date], Any] = load_market_context,
         strategy_loader: Callable[[Market, str, date], Any] = evaluate_strategy_context,
+        calibration_service: Any | None = None,
     ) -> None:
         self.store = store or OpportunityStore()
         self.watchlist_store = watchlist_store or WatchlistStore()
@@ -60,6 +62,7 @@ class OpportunityService:
         self.stock_context_loader = stock_context_loader or _load_stock_context
         self.market_loader = market_loader
         self.strategy_loader = strategy_loader
+        self.calibration_service = calibration_service or OpportunityCalibrationService(self.store)
         self._job_specs: dict[str, _JobSpec] = {}
 
     def start_refresh(
@@ -106,7 +109,8 @@ class OpportunityService:
             completed = 0
             try:
                 if job.total == 0:
-                    self.store.update_job(job_id, status="completed", completed=0)
+                    calibration_error = await self._refresh_calibration()
+                    self.store.update_job(job_id, status="completed", completed=0, error=calibration_error)
                     return
                 now = datetime.now(timezone.utc)
                 await asyncio.to_thread(self.feed_ingestor.refresh, now)
@@ -170,6 +174,9 @@ class OpportunityService:
                             errors.append(f"{market}:{code}: {error}")
                         completed += 1
                         self.store.update_job(job_id, status="running", completed=completed, error="; ".join(errors) or None)
+                calibration_error = await self._refresh_calibration()
+                if calibration_error:
+                    errors.append(calibration_error)
                 self.store.update_job(job_id, status="completed", completed=completed, error="; ".join(errors) or None)
             except Exception as exc:
                 self.store.update_job(job_id, status="failed", completed=completed, error=str(exc))
@@ -199,6 +206,16 @@ class OpportunityService:
 
     def get_history(self, market: str, code: str, limit: int = 30):
         return self.store.get_history(market, code, limit=limit)
+
+    def get_calibration(self, scope: str = "top3"):
+        return self.store.get_calibration_summary(scope)
+
+    async def _refresh_calibration(self) -> str | None:
+        try:
+            await asyncio.to_thread(self.calibration_service.refresh)
+        except Exception as exc:
+            return f"calibration: {exc}"
+        return None
 
 
 def _load_stock_context(market: Market, code: str) -> StockContext:

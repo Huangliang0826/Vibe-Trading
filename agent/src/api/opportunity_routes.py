@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from src.opportunity_center.models import (
     OpportunityDetail,
+    OpportunityCalibrationSummary,
     OpportunityItem,
     OpportunityLevel,
     OpportunityList,
@@ -94,6 +95,17 @@ def register_opportunity_routes(
         if job is None:
             raise HTTPException(status_code=404, detail="opportunity refresh job not found")
         return job
+
+    @router.get("/calibration", response_model=OpportunityCalibrationSummary)
+    async def get_calibration(
+        response: Response,
+        scope: Literal["top3", "all"] = "top3",
+    ) -> OpportunityCalibrationSummary:
+        _no_store(response)
+        try:
+            return service.get_calibration(scope)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"opportunity calibration failed: {exc}") from exc
 
     @router.get("/{market}/{code}/history", response_model=list[OpportunityItem])
     async def opportunity_history(

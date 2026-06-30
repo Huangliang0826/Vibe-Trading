@@ -31,6 +31,18 @@ class FakeFeed:
         return []
 
 
+class FakeCalibration:
+    def __init__(self, fail=False):
+        self.refresh_calls = 0
+        self.fail = fail
+
+    def refresh(self):
+        self.refresh_calls += 1
+        if self.fail:
+            raise RuntimeError("calibration offline")
+        return 0
+
+
 def stock_loader(market, code):
     return StockContext(market=market, code=code, company_name=f"Name {code}")
 
@@ -64,11 +76,13 @@ class NoopAnalyzer:
 
 def service(tmp_path):
     feed = FakeFeed()
+    calibration = FakeCalibration()
     instance = OpportunityService(
         store=OpportunityStore(tmp_path / "opportunities.db"),
         watchlist_store=FakeWatchlist(), feed_ingestor=feed,
         analyzer_factory=NoopAnalyzer, stock_context_loader=stock_loader,
         market_loader=market_loader, strategy_loader=strategy_loader,
+        calibration_service=calibration,
     )
     return instance, feed
 
@@ -83,6 +97,21 @@ def test_job_refreshes_feed_once_and_isolates_stock_failure(tmp_path):
     assert {item.code for item in items} == {"0700", "9999", "NVDA"}
     assert next(item for item in items if item.code == "9999").level == "数据不足"
     assert svc.store.get_job(job.job_id).status == "completed"
+    assert svc.calibration_service.refresh_calls == 1
+
+
+def test_calibration_failure_does_not_discard_completed_snapshots(tmp_path):
+    svc, _ = service(tmp_path)
+    svc.calibration_service = FakeCalibration(fail=True)
+    job = svc.start_refresh(["hk"], "manual", market_dates={"hk": "2026-06-29"})
+
+    asyncio.run(svc.run_job(job.job_id))
+
+    completed = svc.store.get_job(job.job_id)
+    assert completed is not None
+    assert completed.status == "completed"
+    assert "calibration offline" in (completed.error or "")
+    assert svc.get_list().items
 
 
 def test_empty_watchlist_completes_without_refreshing_news(tmp_path):

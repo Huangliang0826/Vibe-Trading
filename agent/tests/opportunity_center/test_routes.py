@@ -6,7 +6,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.opportunity_routes import register_opportunity_routes
-from src.opportunity_center.models import OpportunityList, RefreshJob
+from src.opportunity_center.models import (
+    CalibrationPeriodSummary,
+    OpportunityCalibrationSummary,
+    OpportunityList,
+    RefreshJob,
+)
 
 
 class FakeStore:
@@ -45,6 +50,15 @@ class FakeService:
     def get_history(self, market, code, limit):
         return []
 
+    def get_calibration(self, scope):
+        return OpportunityCalibrationSummary(
+            scope=scope,
+            periods=[CalibrationPeriodSummary(
+                horizon_days=horizon, completed_samples=0,
+                pending_samples=0, missing_samples=0,
+            ) for horizon in (5, 20, 60)],
+        )
+
 
 class FakeScheduler:
     def start(self):
@@ -78,6 +92,13 @@ def test_static_refresh_route_is_not_consumed_as_market():
     assert response.json() == {"detail": "opportunity refresh job not found"}
 
 
+def test_calibration_route_defaults_to_top3_and_accepts_all_scope():
+    client = TestClient(app(FakeService()))
+    assert client.get("/opportunities/calibration").json()["scope"] == "top3"
+    assert client.get("/opportunities/calibration?scope=all").json()["scope"] == "all"
+    assert client.get("/opportunities/calibration?scope=invalid").status_code == 422
+
+
 def test_invalid_market_and_code_are_structured_json():
     client = TestClient(app(FakeService()))
     assert client.get("/opportunities/cn/600000").status_code == 422
@@ -104,3 +125,4 @@ def test_openapi_contains_opportunity_routes():
     paths = app(FakeService()).openapi()["paths"]
     assert "/opportunities" in paths
     assert "/opportunities/refresh" in paths
+    assert "/opportunities/calibration" in paths
