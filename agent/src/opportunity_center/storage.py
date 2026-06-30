@@ -741,6 +741,25 @@ class OpportunityStore:
             ).fetchall()
         return [self._snapshot_item_from_payload(row["payload_json"]) for row in rows]
 
+    def list_snapshot_items(self) -> list[OpportunityItem]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT payload_json, market, code, snapshot_date,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY market, code, snapshot_date
+                               ORDER BY updated_at DESC, rowid DESC
+                           ) AS version_rank
+                    FROM opportunity_snapshots
+                )
+                SELECT payload_json FROM ranked
+                WHERE version_rank = 1
+                ORDER BY snapshot_date, market, code
+                """
+            ).fetchall()
+        return [self._snapshot_item_from_payload(row["payload_json"]) for row in rows]
+
     def upsert_outcome(self, outcome: OpportunityOutcome) -> OpportunityOutcome:
         now = utc_now()
         with self._connect() as conn:
