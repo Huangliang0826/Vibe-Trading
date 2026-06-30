@@ -484,6 +484,8 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+_opportunity_runtime = None
+
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
@@ -592,6 +594,14 @@ async def _run_startup_preflight() -> None:
     from src.preflight import run_preflight
 
     run_preflight(console)
+    if _opportunity_runtime is not None:
+        _opportunity_runtime.scheduler.start()
+
+
+@app.on_event("shutdown")
+async def _stop_opportunity_runtime() -> None:
+    if _opportunity_runtime is not None:
+        await _opportunity_runtime.stop()
 
 
 # ============================================================================
@@ -4560,6 +4570,13 @@ register_alpha_routes(app)
 
 from src.api.scan_routes import register_scan_routes  # noqa: E402
 register_scan_routes(app)
+
+from src.api.opportunity_routes import register_opportunity_routes  # noqa: E402
+_opportunity_runtime = register_opportunity_routes(
+    app,
+    require_auth=require_local_or_auth,
+    start_scheduler=False,
+)
 
 
 # ============================================================================
