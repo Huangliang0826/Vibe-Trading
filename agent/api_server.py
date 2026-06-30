@@ -2199,6 +2199,30 @@ def _trim_daily_history_to_period(df, period: str, today):
     return df.iloc[eligible[-1]:]
 
 
+def _cn_raw_daily(code: str, start_str: str, end_str: str):
+    """Raw (不复权) A-share daily bars via mootdx (通达信 TCP).
+
+    The default Baidu source returns forward-adjusted (前复权) prices, which go
+    negative for long-history, high-dividend names (e.g. 600519 back to 2001)
+    and break return / daily-DCA math on the chart. Raw prices stay positive and
+    the latest close matches the live quote, so we fall back to them when the
+    adjusted series contains non-positive closes. mootdx is used (not akshare)
+    because its TCP feed is not rate-limited like East Money's HTTP endpoint.
+    """
+    try:
+        from backtest.loaders.mootdx_loader import DataLoader as MootdxLoader
+    except Exception:
+        return None
+    try:
+        res = MootdxLoader().fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
+    except Exception:
+        return None
+    df = res.get(code) if res else None
+    if df is None or df.empty or "close" not in df.columns:
+        return None
+    return df.sort_index()
+
+
 def _fetch_price_history(code: str, period: str, market_hint: str | None = None) -> dict:
     """Fetch OHLCV close+volume + name for a symbol over the period.
 
@@ -2278,6 +2302,14 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
     df = result.get(code)
     if df is None or df.empty:
         return {"name": name, "bars": []}
+
+    # The Baidu A-share source is forward-adjusted (前复权) and goes negative for
+    # long-history, high-dividend names. Fall back to raw (不复权) prices when
+    # that happens so returns and the daily-DCA stat are valid.
+    if market == "a_share" and (df["close"] <= 0).any():
+        raw = _cn_raw_daily(code, start_str, end_str)
+        if raw is not None and not raw.empty:
+            df = raw
 
     df = df.sort_index()
     df = _trim_daily_history_to_period(df, period, today)
