@@ -118,3 +118,26 @@
 
 - Re-read the changed metric path and tests after GREEN. The boundary point is used only as the initial OOS equity observation; training remains all rows before the final 252 OOS bars, and selected-strategy evaluation remains restricted to data at or before `as_of`.
 - No unresolved Task 4 correctness concerns found.
+
+## Action Classification Fix: 2026-06-30
+
+### Change
+
+- Positive target-weight reductions now produce `risk_exit`; positive-to-zero remains `exit`.
+- Action comparisons use a shared `1e-9` tolerance, so tiny weight drift remains `hold` instead of becoming an add or reduction signal.
+
+### RED Evidence
+
+1. Added `1.0 -> 0.5 => risk_exit` and `1.0 -> 1.0 - 5e-10 => hold` cases, then ran:
+   - `uv run pytest agent/tests/opportunity_center/test_strategy_context.py -k classify_action -v`
+2. Result: `1 failed, 6 passed, 6 deselected in 0.54s`.
+3. Expected failure: the material reduction returned `hold` instead of `risk_exit`; the tolerance regression already passed.
+
+### GREEN Evidence
+
+1. Re-ran the focused classifier matrix:
+   - `uv run pytest agent/tests/opportunity_center/test_strategy_context.py -k classify_action -v`
+   - Result: `7 passed, 6 deselected in 0.39s`.
+2. Ran Task 4 and existing paper-trading lookahead regressions:
+   - `uv run pytest agent/tests/opportunity_center/test_strategy_context.py agent/tests/opportunity_center/test_market_context.py agent/tests/test_paper_trading_lookahead.py -v`
+   - Result: `25 passed in 5.23s`.

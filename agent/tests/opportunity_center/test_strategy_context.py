@@ -116,8 +116,10 @@ def test_evaluate_frame_uses_target_weights_not_forced_end_of_backtest_trade():
     [
         (0.0, 1.0, "entry"),
         (0.5, 1.0, "add"),
+        (1.0, 0.5, "risk_exit"),
         (1.0, 0.0, "exit"),
         (1.0, 1.0, "hold"),
+        (1.0, 1.0 - 5e-10, "hold"),
         (0.0, 0.0, "wait"),
     ],
 )

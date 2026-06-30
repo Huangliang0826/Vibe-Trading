@@ -31,6 +31,7 @@ _DCA_FREQ_MAP = {
     "monthly": "MS",
 }
 _INITIAL_CASH = 100_000.0
+_ACTION_TOLERANCE = 1e-9
 
 
 @dataclass(frozen=True)
@@ -278,12 +279,14 @@ def _naive_timestamp(value: pd.Timestamp) -> pd.Timestamp:
 def _classify_action(previous_weight: float, current_weight: float) -> StrategyAction:
     prev = max(previous_weight, 0.0)
     curr = max(current_weight, 0.0)
-    if prev <= 1e-9 and curr > 1e-9:
+    if prev <= _ACTION_TOLERANCE and curr > _ACTION_TOLERANCE:
         return "entry"
-    if prev > 1e-9 and curr <= 1e-9:
+    if prev > _ACTION_TOLERANCE and curr <= _ACTION_TOLERANCE:
         return "exit"
-    if curr > prev + 1e-9:
+    if curr > prev + _ACTION_TOLERANCE:
         return "add"
-    if curr > 1e-9:
+    if curr < prev - _ACTION_TOLERANCE:
+        return "risk_exit"
+    if curr > _ACTION_TOLERANCE:
         return "hold"
     return "wait"
