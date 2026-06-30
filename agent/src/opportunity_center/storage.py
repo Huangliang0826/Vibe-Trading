@@ -11,7 +11,16 @@ from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from src.config.paths import get_runtime_root
-from src.opportunity_center.models import NewsArticle, NewsImpact, OpportunityDetail, OpportunityItem, RefreshJob
+from src.opportunity_center.models import (
+    CalibrationPeriodSummary,
+    NewsArticle,
+    NewsImpact,
+    OpportunityCalibrationSummary,
+    OpportunityDetail,
+    OpportunityItem,
+    OpportunityOutcome,
+    RefreshJob,
+)
 
 
 def utc_now() -> str:
@@ -125,6 +134,16 @@ class OpportunityStore:
                   completed INTEGER NOT NULL, total INTEGER NOT NULL,
                   created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
                   updated_at TEXT NOT NULL, error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS opportunity_outcomes (
+                  market TEXT NOT NULL, code TEXT NOT NULL, snapshot_date TEXT NOT NULL,
+                  horizon_days INTEGER NOT NULL, rank INTEGER NOT NULL, is_top3 INTEGER NOT NULL,
+                  status TEXT NOT NULL, entry_date TEXT, entry_price REAL,
+                  exit_date TEXT, exit_price REAL, stock_return REAL,
+                  benchmark_return REAL, excess_return REAL, error TEXT,
+                  calibration_version TEXT NOT NULL, created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY (market, code, snapshot_date, horizon_days, calibration_version)
                 );
                 """
             )
@@ -721,6 +740,98 @@ class OpportunityStore:
                 (market, code, max(1, min(limit, 500))),
             ).fetchall()
         return [self._snapshot_item_from_payload(row["payload_json"]) for row in rows]
+
+    def upsert_outcome(self, outcome: OpportunityOutcome) -> OpportunityOutcome:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO opportunity_outcomes
+                    (market, code, snapshot_date, horizon_days, rank, is_top3, status,
+                     entry_date, entry_price, exit_date, exit_price, stock_return,
+                     benchmark_return, excess_return, error, calibration_version,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(market, code, snapshot_date, horizon_days, calibration_version)
+                DO UPDATE SET
+                    rank = excluded.rank,
+                    is_top3 = excluded.is_top3,
+                    status = excluded.status,
+                    entry_date = excluded.entry_date,
+                    entry_price = excluded.entry_price,
+                    exit_date = excluded.exit_date,
+                    exit_price = excluded.exit_price,
+                    stock_return = excluded.stock_return,
+                    benchmark_return = excluded.benchmark_return,
+                    excess_return = excluded.excess_return,
+                    error = excluded.error,
+                    updated_at = excluded.updated_at
+                WHERE excluded.status = 'completed' OR opportunity_outcomes.status != 'completed'
+                """,
+                (
+                    outcome.market, outcome.code, outcome.snapshot_date, outcome.horizon_days,
+                    outcome.rank, int(outcome.is_top3), outcome.status, outcome.entry_date,
+                    outcome.entry_price, outcome.exit_date, outcome.exit_price,
+                    outcome.stock_return, outcome.benchmark_return, outcome.excess_return,
+                    outcome.error, outcome.calibration_version, now, now,
+                ),
+            )
+            row = conn.execute(
+                """SELECT * FROM opportunity_outcomes
+                   WHERE market = ? AND code = ? AND snapshot_date = ?
+                     AND horizon_days = ? AND calibration_version = ?""",
+                (outcome.market, outcome.code, outcome.snapshot_date, outcome.horizon_days, outcome.calibration_version),
+            ).fetchone()
+        assert row is not None
+        return self._outcome_from_row(row)
+
+    def list_outcomes(self) -> list[OpportunityOutcome]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM opportunity_outcomes ORDER BY snapshot_date, market, code, horizon_days"
+            ).fetchall()
+        return [self._outcome_from_row(row) for row in rows]
+
+    def get_calibration_summary(self, scope: str = "top3") -> OpportunityCalibrationSummary:
+        if scope not in {"top3", "all"}:
+            raise ValueError("scope must be top3 or all")
+        where = "WHERE is_top3 = 1" if scope == "top3" else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM opportunity_outcomes {where} ORDER BY horizon_days"  # noqa: S608
+            ).fetchall()
+        outcomes = [self._outcome_from_row(row) for row in rows]
+        periods: list[CalibrationPeriodSummary] = []
+        for horizon in (5, 20, 60):
+            matching = [item for item in outcomes if item.horizon_days == horizon]
+            completed = [item for item in matching if item.status == "completed"]
+            stock_returns = [item.stock_return for item in completed if item.stock_return is not None]
+            excess_returns = [item.excess_return for item in completed if item.excess_return is not None]
+            periods.append(CalibrationPeriodSummary(
+                horizon_days=horizon,
+                completed_samples=len(completed),
+                pending_samples=sum(item.status == "pending" for item in matching),
+                missing_samples=sum(item.status == "missing" for item in matching),
+                win_rate=(sum(value > 0 for value in stock_returns) / len(stock_returns)) if stock_returns else None,
+                outperformance_rate=(sum(value > 0 for value in excess_returns) / len(excess_returns)) if excess_returns else None,
+                average_return=(sum(stock_returns) / len(stock_returns)) if stock_returns else None,
+                average_excess_return=(sum(excess_returns) / len(excess_returns)) if excess_returns else None,
+                max_loss=min(0.0, min(stock_returns)) if stock_returns else None,
+            ))
+        calculated_at = max((item.updated_at or "" for item in outcomes), default="") or None
+        return OpportunityCalibrationSummary(scope=scope, periods=periods, calculated_at=calculated_at)
+
+    @staticmethod
+    def _outcome_from_row(row: sqlite3.Row) -> OpportunityOutcome:
+        return OpportunityOutcome(
+            market=row["market"], code=row["code"], snapshot_date=row["snapshot_date"],
+            horizon_days=row["horizon_days"], rank=row["rank"], is_top3=bool(row["is_top3"]),
+            status=row["status"], entry_date=row["entry_date"], entry_price=row["entry_price"],
+            exit_date=row["exit_date"], exit_price=row["exit_price"], stock_return=row["stock_return"],
+            benchmark_return=row["benchmark_return"], excess_return=row["excess_return"],
+            error=row["error"], calibration_version=row["calibration_version"],
+            updated_at=row["updated_at"],
+        )
 
     def has_market_refresh(self, market: str, market_date: str) -> bool:
         with self._connect() as conn:

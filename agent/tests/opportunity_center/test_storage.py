@@ -13,6 +13,7 @@ from src.opportunity_center.models import (
     NewsArticle,
     NewsImpact,
     OpportunityItem,
+    OpportunityOutcome,
 )
 from src.opportunity_center.storage import OpportunityStore
 
@@ -126,6 +127,19 @@ def sample_source(
     }
 
 
+def sample_outcome(**updates) -> OpportunityOutcome:
+    values = {
+        "market": "hk", "code": "0700", "snapshot_date": "2026-06-01",
+        "horizon_days": 5, "rank": 1, "is_top3": True, "status": "completed",
+        "entry_date": "2026-06-02", "entry_price": 100.0,
+        "exit_date": "2026-06-08", "exit_price": 110.0,
+        "stock_return": 0.10, "benchmark_return": 0.04, "excess_return": 0.06,
+        "error": None, "calibration_version": "forward-return-v1",
+    }
+    values.update(updates)
+    return OpportunityOutcome(**values)
+
+
 def fetch_source_row(store: OpportunityStore, source_id: str) -> sqlite3.Row:
     with store._connect() as conn:
         row = conn.execute(
@@ -163,6 +177,42 @@ def test_snapshot_unique_key_is_idempotent(tmp_path):
     rows = store.get_history("hk", "0700", limit=20)
     assert len(rows) == 1
     assert rows[0].score == 80
+
+
+def test_outcome_upsert_is_idempotent_and_failure_cannot_replace_success(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    completed = sample_outcome()
+    store.upsert_outcome(completed)
+    store.upsert_outcome(completed.model_copy(update={"stock_return": 0.12}))
+    store.upsert_outcome(sample_outcome(status="missing", stock_return=None, benchmark_return=None, excess_return=None, error="timeout"))
+
+    rows = store.list_outcomes()
+    assert len(rows) == 1
+    assert rows[0].status == "completed"
+    assert rows[0].stock_return == pytest.approx(0.12)
+
+
+def test_calibration_summary_aggregates_top3_and_all(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    store.upsert_outcome(sample_outcome(code="0700", rank=1, is_top3=True, stock_return=0.10, excess_return=0.06))
+    store.upsert_outcome(sample_outcome(code="9988", rank=2, is_top3=True, stock_return=-0.20, excess_return=-0.10))
+    store.upsert_outcome(sample_outcome(code="1810", rank=4, is_top3=False, stock_return=0.30, excess_return=0.20))
+    store.upsert_outcome(sample_outcome(code="NVDA", market="us", rank=1, is_top3=True, horizon_days=20, status="pending", entry_date=None, entry_price=None, exit_date=None, exit_price=None, stock_return=None, benchmark_return=None, excess_return=None))
+
+    top3 = store.get_calibration_summary("top3")
+    all_rows = store.get_calibration_summary("all")
+    five_top3 = next(row for row in top3.periods if row.horizon_days == 5)
+    five_all = next(row for row in all_rows.periods if row.horizon_days == 5)
+    twenty_top3 = next(row for row in top3.periods if row.horizon_days == 20)
+
+    assert five_top3.completed_samples == 2
+    assert five_top3.win_rate == pytest.approx(0.5)
+    assert five_top3.outperformance_rate == pytest.approx(0.5)
+    assert five_top3.average_return == pytest.approx(-0.05)
+    assert five_top3.average_excess_return == pytest.approx(-0.02)
+    assert five_top3.max_loss == pytest.approx(-0.20)
+    assert five_all.completed_samples == 3
+    assert twenty_top3.pending_samples == 1
 
 
 def test_backfilled_snapshot_score_change_uses_newest_strictly_earlier_date(tmp_path):

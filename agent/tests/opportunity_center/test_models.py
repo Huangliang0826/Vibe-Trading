@@ -7,6 +7,7 @@ from src.opportunity_center.models import (
     MarketContext,
     NewsImpact,
     OpportunityDetail,
+    OpportunityOutcome,
     OpportunityItem,
     OpportunityList,
     RefreshJob,
@@ -138,3 +139,17 @@ def test_refresh_job_and_list_keep_required_fields():
 
     assert listing.active_job is not None
     assert listing.active_job.markets == ["hk", "us"]
+
+
+def test_opportunity_outcome_uses_fixed_horizons_and_closed_status():
+    outcome = OpportunityOutcome(
+        market="hk", code="0700", snapshot_date="2026-06-01",
+        horizon_days=5, rank=1, is_top3=True, status="completed",
+        entry_date="2026-06-02", entry_price=100,
+        exit_date="2026-06-08", exit_price=110,
+        stock_return=0.1, benchmark_return=0.04, excess_return=0.06,
+        calibration_version="forward-return-v1",
+    )
+    assert outcome.horizon_days == 5
+    with pytest.raises(ValidationError):
+        OpportunityOutcome(**{**outcome.model_dump(), "horizon_days": 10})

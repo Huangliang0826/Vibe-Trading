@@ -14,6 +14,8 @@ OpportunityLevel = Literal["优先关注", "值得观察", "暂不参与", "数�
 StrategyAction = Literal["entry", "add", "hold", "exit", "risk_exit", "wait", "none"]
 MatchLevel = Literal["direct", "industry", "macro"]
 ImpactDirection = Literal["positive", "neutral", "negative"]
+OutcomeStatus = Literal["pending", "completed", "missing"]
+CalibrationScope = Literal["top3", "all"]
 
 
 class OpportunityContract(BaseModel):
@@ -137,3 +139,41 @@ class OpportunityList(OpportunityContract):
     latest_success_at: str | None = None
     active_job: RefreshJob | None = None
     last_refresh_error: str | None = None
+
+
+class OpportunityOutcome(OpportunityContract):
+    market: Market
+    code: str
+    snapshot_date: str
+    horizon_days: Literal[5, 20, 60]
+    rank: int = Field(ge=1)
+    is_top3: bool
+    status: OutcomeStatus
+    entry_date: str | None = None
+    entry_price: float | None = Field(None, gt=0)
+    exit_date: str | None = None
+    exit_price: float | None = Field(None, gt=0)
+    stock_return: float | None = None
+    benchmark_return: float | None = None
+    excess_return: float | None = None
+    error: str | None = None
+    calibration_version: str
+    updated_at: str | None = None
+
+
+class CalibrationPeriodSummary(OpportunityContract):
+    horizon_days: Literal[5, 20, 60]
+    completed_samples: int = Field(ge=0)
+    pending_samples: int = Field(ge=0)
+    missing_samples: int = Field(ge=0)
+    win_rate: float | None = Field(None, ge=0, le=1)
+    outperformance_rate: float | None = Field(None, ge=0, le=1)
+    average_return: float | None = None
+    average_excess_return: float | None = None
+    max_loss: float | None = None
+
+
+class OpportunityCalibrationSummary(OpportunityContract):
+    scope: CalibrationScope
+    periods: list[CalibrationPeriodSummary]
+    calculated_at: str | None = None
