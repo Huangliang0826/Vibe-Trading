@@ -701,6 +701,7 @@ export interface PaperStrategyConfig {
     | "volatility_target"
     | "drawdown_rebalance"
     | "smart_dca"
+    | "dca_then_hold"
     | "trend_volatility_filter"
     | "donchian_breakout"
     | "bollinger_reversion"

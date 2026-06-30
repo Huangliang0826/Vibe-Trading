@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.paper_trading.executor import _smart_dca_multiplier
+from src.paper_trading.executor import _run_dca, _smart_dca_multiplier
 from src.paper_trading.models import PaperHolding, StrategyConfig
 from src.paper_trading.strategies import generate_dca, generate_grid, generate_signals
 
@@ -66,6 +66,23 @@ def test_dca_signal_ramp_does_not_size_steps_from_backtest_end():
     long_signal = generate_dca([holding], {"0700.HK": long}, params)["0700.HK"]
 
     pd.testing.assert_series_equal(short_signal, long_signal.reindex(short_signal.index))
+
+
+def test_dca_then_hold_uses_exactly_three_years_of_monthly_tranches():
+    holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
+    idx = pd.bdate_range("2020-01-02", "2025-01-02")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1_000},
+        index=idx,
+    )
+
+    _equity, trades = _run_dca(
+        36_000, [holding], {"AAPL.US": frame}, {"frequency": "monthly"}, deploy_years=3,
+    )
+
+    assert len(trades) == 36
+    assert sum(trade.size for trade in trades) == 360
+    StrategyConfig(name="dca_then_hold")
 
 
 def test_new_strategy_names_are_accepted_and_generate_bounded_signals():

@@ -70,6 +70,7 @@ type StrategyName =
   | "volatility_target"
   | "drawdown_rebalance"
   | "smart_dca"
+  | "dca_then_hold"
   | "trend_volatility_filter"
   | "donchian_breakout"
   | "bollinger_reversion"
@@ -98,6 +99,7 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "volatility_target", label: "波动率仓位", desc: "波动越高仓位越低，优先控制风险" },
   { value: "drawdown_rebalance", label: "回撤加仓", desc: "下跌分批提高仓位，接近前高降仓" },
   { value: "smart_dca", label: "智能定投增强", desc: "低估多投，过热少投，高波动降速" },
+  { value: "dca_then_hold", label: "三年定投后持有", desc: "把现金分三年逐月投入，投完长期持有" },
   { value: "trend_volatility_filter", label: "趋势波动过滤", desc: "只在趋势向上时持有，并按波动率降仓" },
   { value: "donchian_breakout", label: "唐奇安突破", desc: "突破长期高点买入，跌破近期低点退出" },
   { value: "bollinger_reversion", label: "布林带反转", desc: "跌破下轨买入，回归均线后卖出" },
@@ -147,6 +149,7 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   volatility_target: "策略原理：根据近期波动率动态调仓，波动越高仓位越低，优先控制风险暴露。",
   drawdown_rebalance: "策略原理：价格从高点回撤越多越提高仓位，接近前高时降低仓位锁定恢复收益。",
   smart_dca: "策略原理：在普通定投基础上根据均线偏离和波动率调整投入倍率，低估多投、过热少投。",
+  dca_then_hold: "策略原理：把全部资金平均分成三年、按所选频率（默认每月）逐步投入选定标的，三年内分批建仓摊低成本；投完后不再买卖，长期持有赚取标的长期涨幅。回测区间建议不少于三年，否则资金无法在区间内投完。",
   trend_volatility_filter: "策略原理：只有价格处于长期上升趋势时才持有，同时用波动率控制仓位大小。",
   donchian_breakout: "策略原理：突破长期高点时买入，跌破近期低点时退出，属于经典趋势跟随方法。",
   bollinger_reversion: "策略原理：价格跌破布林带下轨时认为短期偏离过大，买入等待回归均线后卖出。",
@@ -168,7 +171,7 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
   const params: Record<string, unknown> = {};
-  if (name === "dca" || name === "smart_dca" || name === "enhanced_dca_trend") params.frequency = dcaFrequency;
+  if (name === "dca" || name === "smart_dca" || name === "enhanced_dca_trend" || name === "dca_then_hold") params.frequency = dcaFrequency;
   if (name === "grid") params.grid_count = gridCount;
   return params;
 }
@@ -852,10 +855,10 @@ export function PaperTrading() {
           </div>
 
           {/* Strategy params */}
-          {(strategy === "dca" || strategy === "smart_dca") && (
+          {(strategy === "dca" || strategy === "smart_dca" || strategy === "dca_then_hold") && (
             <div className="flex items-center gap-3 pl-1">
               <label className="text-xs text-muted-foreground">
-                {strategy === "smart_dca" ? "智能定投频率" : "定投频率"}
+                {strategy === "smart_dca" ? "智能定投频率" : strategy === "dca_then_hold" ? "三年定投频率" : "定投频率"}
               </label>
               <select
                 value={dcaFrequency}

@@ -60,10 +60,14 @@ def run_paper_trading_backtest(run_id: str, store: PaperTradingStore) -> None:
 
         initial_cash = run.initial_total_usd
 
-        if run.strategy.name in {"dca", "smart_dca"}:
+        if run.strategy.name in {"dca", "smart_dca", "dca_then_hold"}:
+            deploy_years = None
+            if run.strategy.name == "dca_then_hold":
+                deploy_years = float(run.strategy.params.get("deploy_years", 3))
             equity_series, trades = _run_dca(
                 initial_cash, equity_holdings, data_map, run.strategy.params,
                 smart=run.strategy.name == "smart_dca",
+                deploy_years=deploy_years,
             )
         else:
             signal_map = generate_signals(
@@ -116,14 +120,24 @@ def run_paper_trading_backtest(run_id: str, store: PaperTradingStore) -> None:
 
 # ── DCA simulator ───────────────────────────────────────────────────────────
 
+_PERIODS_PER_YEAR = {"weekly": 52, "biweekly": 26, "monthly": 12}
+
+
 def _run_dca(
     initial_cash: float,
     holdings: List[PaperHolding],
     data_map: Dict[str, pd.DataFrame],
     params: Dict[str, Any],
     smart: bool = False,
+    deploy_years: float | None = None,
 ) -> tuple:
-    """Fixed-dollar DCA: buy a fixed amount each period, accumulate shares."""
+    """Fixed-dollar DCA: buy a fixed amount each period, accumulate shares.
+
+    ``deploy_years`` caps the deployment window: when set, all cash is split
+    into ``deploy_years × periods/year`` equal tranches and invested only over
+    the first ``deploy_years`` of the backtest, then simply held (no further
+    buys). When ``None`` the cash is spread evenly across the whole backtest.
+    """
     frequency = params.get("frequency", "monthly")
     freq = _FREQ_MAP.get(frequency, "MS")
 
@@ -136,8 +150,14 @@ def _run_dca(
     if not all_dates:
         raise ValueError("No trading dates")
 
-    calendar_dca = pd.date_range(start=all_dates[0], end=all_dates[-1], freq=freq)
     trading_idx = pd.DatetimeIndex(all_dates)
+    if deploy_years is not None:
+        periods_per_year = _PERIODS_PER_YEAR.get(frequency, 12)
+        n_window = max(int(round(deploy_years * periods_per_year)), 1)
+        calendar_dca = pd.date_range(start=all_dates[0], periods=n_window, freq=freq)
+    else:
+        n_window = None
+        calendar_dca = pd.date_range(start=all_dates[0], end=all_dates[-1], freq=freq)
     dca_dates: set = {trading_idx[0]}
     for d in calendar_dca:
         future = trading_idx[trading_idx >= d]
@@ -149,7 +169,9 @@ def _run_dca(
     entry_times: Dict[str, pd.Timestamp] = {}
     cash = initial_cash
 
-    n_periods = max(len(dca_dates), 1)
+    # Fixed-window mode sizes tranches by the full window so all cash is
+    # deployed by its end; open-ended mode spreads across the actual DCA dates.
+    n_periods = n_window if n_window is not None else max(len(dca_dates), 1)
     tranche_per_code = {
         c: initial_cash * (code_map[c].allocation_pct / 100.0) / n_periods
         for c in valid_codes
