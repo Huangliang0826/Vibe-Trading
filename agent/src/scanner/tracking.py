@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +48,11 @@ def _default_tracking_root() -> Path:
     return Path.home() / ".vibe-trading" / "tracking"
 
 
-def save_tracking(records: list[TrackingRecord], asof: str,
-                  root: Path | None = None) -> Path:
-    base = (root or _default_tracking_root()) / asof
+def save_tracking(
+    records: list[TrackingRecord], asof: str, root: Path | None = None,
+    universe: str = "sp500",
+) -> Path:
+    base = (root or _default_tracking_root()) / universe / asof
     base.mkdir(parents=True, exist_ok=True)
     path = base / "tracking.json"
     with path.open("w", encoding="utf-8") as f:
@@ -60,22 +62,36 @@ def save_tracking(records: list[TrackingRecord], asof: str,
     return path
 
 
-def load_tracking(asof: str, root: Path | None = None) -> list[TrackingRecord]:
-    path = ((root or _default_tracking_root()) / asof / "tracking.json")
+def load_tracking(
+    asof: str, root: Path | None = None, universe: str = "sp500",
+) -> list[TrackingRecord]:
+    base = root or _default_tracking_root()
+    path = base / universe / asof / "tracking.json"
+    if not path.is_file() and universe == "sp500":
+        path = base / asof / "tracking.json"
     if not path.is_file():
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
     return [TrackingRecord.from_dict(d) for d in data]
 
 
-def load_all_tracking(root: Path | None = None) -> list[TrackingRecord]:
+def load_all_tracking(
+    root: Path | None = None, universe: str = "sp500",
+) -> list[TrackingRecord]:
     base = root or _default_tracking_root()
     if not base.is_dir():
         return []
     records: list[TrackingRecord] = []
+    universe_root = base / universe
+    if universe_root.is_dir():
+        for day_dir in sorted(universe_root.iterdir()):
+            if day_dir.is_dir() and (day_dir / "tracking.json").is_file():
+                records.extend(load_tracking(day_dir.name, root, universe))
+    if universe != "sp500":
+        return records
     for day_dir in sorted(base.iterdir()):
         if day_dir.is_dir() and (day_dir / "tracking.json").is_file():
-            records.extend(load_tracking(day_dir.name, root))
+            records.extend(load_tracking(day_dir.name, root, universe))
     return records
 
 
@@ -104,6 +120,7 @@ def backfill_returns(
     candidates: list[dict[str, Any]],
     root: Path | None = None,
     price_fetcher: Any = None,
+    universe: str = "sp500",
 ) -> list[TrackingRecord]:
     """Create/update tracking records with forward returns for a scan date.
 
@@ -130,7 +147,7 @@ def backfill_returns(
 
     prices = fetch(symbols, start, end)
 
-    existing = {r.symbol: r for r in load_tracking(asof, root)}
+    existing = {r.symbol: r for r in load_tracking(asof, root, universe)}
     records: list[TrackingRecord] = []
 
     for c in candidates:
@@ -185,7 +202,7 @@ def backfill_returns(
 
         records.append(rec)
 
-    save_tracking(records, asof, root)
+    save_tracking(records, asof, root, universe)
     return records
 
 

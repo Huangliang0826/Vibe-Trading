@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from src.scanner.tracking import (
-    CalibrationAlert,
     TrackingRecord,
     backfill_returns,
     calibration_check,
@@ -64,6 +62,36 @@ class TestPersistence:
         assert len(all_recs) == 2
         assert {r.symbol for r in all_recs} == {"A", "B"}
 
+    def test_same_date_tracking_is_isolated_by_universe(self, tmp_path):
+        save_tracking(
+            [TrackingRecord(symbol="AAPL", score=80, asof="2025-06-01")],
+            "2025-06-01", root=tmp_path, universe="sp500",
+        )
+        save_tracking(
+            [TrackingRecord(symbol="0700.HK", score=90, asof="2025-06-01")],
+            "2025-06-01", root=tmp_path, universe="hstech",
+        )
+
+        assert [r.symbol for r in load_tracking(
+            "2025-06-01", root=tmp_path, universe="sp500"
+        )] == ["AAPL"]
+        assert [r.symbol for r in load_all_tracking(
+            root=tmp_path, universe="hstech"
+        )] == ["0700.HK"]
+
+    def test_sp500_reads_legacy_tracking_path(self, tmp_path):
+        legacy = tmp_path / "2025-06-01"
+        legacy.mkdir()
+        (legacy / "tracking.json").write_text(
+            '[{"symbol":"AAPL","score":80,"asof":"2025-06-01"}]',
+            encoding="utf-8",
+        )
+
+        assert [r.symbol for r in load_tracking(
+            "2025-06-01", root=tmp_path, universe="sp500"
+        )] == ["AAPL"]
+        assert load_tracking("2025-06-01", root=tmp_path, universe="hstech") == []
+
 
 class TestBackfillReturns:
     def _make_price_df(self, symbols, n_days=25):
@@ -83,7 +111,6 @@ class TestBackfillReturns:
                 for col in ["Open", "Close"]:
                     arrays[0].append(col)
                     arrays[1].append(sym)
-            idx = pd.MultiIndex.from_arrays(arrays)
             vals = {}
             for i, sym in enumerate(symbols):
                 base = 100.0 + i * 50
@@ -96,7 +123,8 @@ class TestBackfillReturns:
             {"symbol": "AAPL", "score": 90.0},
             {"symbol": "GOOG", "score": 80.0},
         ]
-        fetcher = lambda syms, s, e: self._make_price_df(syms)
+        def fetcher(syms, _start, _end):
+            return self._make_price_df(syms)
         records = backfill_returns("2025-06-01", candidates, root=tmp_path,
                                    price_fetcher=fetcher)
         assert len(records) == 2
@@ -111,7 +139,8 @@ class TestBackfillReturns:
 
     def test_backfill_persists(self, tmp_path):
         candidates = [{"symbol": "AAPL", "score": 90.0}]
-        fetcher = lambda syms, s, e: self._make_price_df(syms)
+        def fetcher(syms, _start, _end):
+            return self._make_price_df(syms)
         backfill_returns("2025-06-01", candidates, root=tmp_path,
                          price_fetcher=fetcher)
         loaded = load_tracking("2025-06-01", root=tmp_path)
