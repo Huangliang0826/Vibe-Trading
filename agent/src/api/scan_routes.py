@@ -13,13 +13,23 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from src.scanner.store import list_scan_dates, load_by_date, load_latest, save_scan
 from src.scanner.tracking import (
-    backfill_returns, calibration_check, load_all_tracking, load_tracking,
+    calibration_check, load_all_tracking, load_tracking,
 )
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
 
 _SCAN_RESULT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SCAN_RESULT_TTL = 24 * 3600
+_SCAN_UNIVERSES = frozenset({"sp500", "csi300", "hstech"})
+
+
+def _validate_scan_universe(universe: str) -> str:
+    if universe not in _SCAN_UNIVERSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"universe must be one of {sorted(_SCAN_UNIVERSES)}",
+        )
+    return universe
 
 
 def _cache_get(key: str) -> dict[str, Any] | None:
@@ -61,6 +71,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         """Trigger a new scan for today and return the result."""
         from src.scanner.cli_handlers import _build_scan
 
+        universe = _validate_scan_universe(universe)
         asof = dt.date.today().isoformat()
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _build_scan, universe, asof, top)
@@ -68,39 +79,42 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         return result.to_dict()
 
     @app.get("/scan/dates", dependencies=[Depends(require_auth)])
-    async def scan_dates() -> dict[str, Any]:
+    async def scan_dates(universe: str = "sp500") -> dict[str, Any]:
         """Return available scan dates, most recent first."""
-        dates = list_scan_dates()
+        dates = list_scan_dates(universe=_validate_scan_universe(universe))
         return {"dates": dates}
 
     @app.get("/scan/history/{asof}", dependencies=[Depends(require_auth)])
-    async def scan_by_date(asof: str) -> dict[str, Any]:
+    async def scan_by_date(asof: str, universe: str = "sp500") -> dict[str, Any]:
         """Return a scan for a specific date."""
-        result = load_by_date(asof)
+        universe = _validate_scan_universe(universe)
+        result = load_by_date(asof, universe=universe)
         if result is None:
             raise HTTPException(status_code=404, detail=f"no scan for {asof}")
         return result.to_dict()
 
     @app.get("/scan/latest", dependencies=[Depends(require_auth)])
-    async def scan_latest() -> dict[str, Any]:
+    async def scan_latest(universe: str = "sp500") -> dict[str, Any]:
         """Return the most recent scan, or 404 when none exist."""
-        result = load_latest()
+        universe = _validate_scan_universe(universe)
+        result = load_latest(universe=universe)
         if result is None:
             raise HTTPException(status_code=404, detail="no scans available")
         return result.to_dict()
 
     @app.get("/scan/tracking/{asof}", dependencies=[Depends(require_auth)])
-    async def scan_tracking(asof: str) -> dict[str, Any]:
+    async def scan_tracking(asof: str, universe: str = "sp500") -> dict[str, Any]:
         """Return tracking records for a specific scan date."""
-        records = load_tracking(asof)
+        universe = _validate_scan_universe(universe)
+        records = load_tracking(asof, universe=universe)
         if not records:
             raise HTTPException(status_code=404, detail=f"no tracking for {asof}")
         return {"asof": asof, "records": [r.to_dict() for r in records]}
 
     @app.get("/scan/tracking", dependencies=[Depends(require_auth)])
-    async def scan_tracking_all() -> dict[str, Any]:
+    async def scan_tracking_all(universe: str = "sp500") -> dict[str, Any]:
         """Return all tracking records across all scan dates."""
-        records = load_all_tracking()
+        records = load_all_tracking(universe=_validate_scan_universe(universe))
         return {"records": [r.to_dict() for r in records], "total": len(records)}
 
     @app.get("/scan/quintile", dependencies=[Depends(require_auth)])
@@ -204,6 +218,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
             _compute_composite, _screen_on_window,
         )
         from src.tools.alpha_bench_tool import _load_universe_panel
+        import pandas as pd
 
         cache_key = f"portfolio:{universe}:{period}"
         cached = _cache_get(cache_key)
@@ -243,7 +258,6 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
             if composite is None or len(composite) < N_QUANTILES:
                 raise ValueError("insufficient data for composite")
 
-            import pandas as pd
             labels = pd.qcut(composite, N_QUANTILES, labels=False, duplicates="drop")
             portfolio: dict[str, list[str]] = {}
             for q in range(N_QUANTILES):
@@ -268,7 +282,6 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
                 "q1_details": q1_details,
             }
 
-        import pandas as pd
         try:
             result = await loop.run_in_executor(None, _run)
             return _cache_set(cache_key, result)
@@ -276,9 +289,9 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
             raise HTTPException(status_code=400, detail=str(exc))
 
     @app.get("/scan/calibration", dependencies=[Depends(require_auth)])
-    async def scan_calibration() -> dict[str, Any]:
+    async def scan_calibration(universe: str = "sp500") -> dict[str, Any]:
         """Run calibration check and return alerts."""
-        records = load_all_tracking()
+        records = load_all_tracking(universe=_validate_scan_universe(universe))
         alerts = calibration_check(records)
         return {
             "total_tracked": len(records),

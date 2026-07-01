@@ -35,3 +35,40 @@ def test_get_scan_latest_404_when_empty(monkeypatch):
     client = TestClient(_app())
     resp = client.get("/scan/latest")
     assert resp.status_code == 404
+
+
+def test_scan_latest_passes_selected_universe(monkeypatch):
+    from src.api import scan_routes
+
+    seen = []
+    result = ScanResult("hstech", "2026-07-01", [], [], [])
+    monkeypatch.setattr(
+        scan_routes, "load_latest", lambda universe: seen.append(universe) or result
+    )
+
+    resp = TestClient(_app()).get("/scan/latest?universe=hstech")
+
+    assert resp.status_code == 200
+    assert seen == ["hstech"]
+    assert resp.json()["universe"] == "hstech"
+
+
+def test_scan_dates_passes_selected_universe(monkeypatch):
+    from src.api import scan_routes
+
+    seen = []
+    monkeypatch.setattr(
+        scan_routes, "list_scan_dates", lambda universe: seen.append(universe) or ["2026-07-01"]
+    )
+
+    resp = TestClient(_app()).get("/scan/dates?universe=csi300")
+
+    assert resp.status_code == 200
+    assert seen == ["csi300"]
+
+
+def test_scan_routes_reject_unknown_universe():
+    resp = TestClient(_app()).get("/scan/latest?universe=unknown")
+
+    assert resp.status_code == 400
+    assert "universe" in resp.json()["detail"]
