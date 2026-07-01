@@ -13,7 +13,7 @@ from src.scanner.core import ScanResult, run_scan
 from src.scanner.manifest import build_factor_manifest, load_factor_manifest
 from src.scanner.store import load_latest, save_scan
 from src.scanner.tracking import (
-    backfill_returns, calibration_check, load_all_tracking, load_tracking,
+    backfill_returns, calibration_check, load_all_tracking,
 )
 
 _DEFAULT_ZOOS = ["gtja191", "alpha101", "qlib158", "academic"]
@@ -53,13 +53,21 @@ def _build_scan(universe: str, asof: str, top: int) -> ScanResult:
     from src.scanner.providers.event import EventProvider
     from src.scanner.providers.factor_rank import FactorRankProvider
 
-    manifest = load_factor_manifest(universe=universe)
+    manifest_warning = None
+    try:
+        manifest = load_factor_manifest(universe=universe)
+    except FileNotFoundError:
+        manifest = {"factors": []}
+        manifest_warning = "当前股票池尚无因子白名单，暂时仅使用异常与事件扫描"
     providers = [
         FactorRankProvider(manifest=manifest, registry=Registry(), top_n=top),
         AnomalyProvider(top_n=top),
         EventProvider(top_n=top),
     ]
-    return run_scan(universe=universe, asof=asof, providers=providers)
+    result = run_scan(universe=universe, asof=asof, providers=providers)
+    if manifest_warning:
+        result.warnings.insert(0, manifest_warning)
+    return result
 
 
 def _print_result(result: ScanResult, as_json: bool) -> None:

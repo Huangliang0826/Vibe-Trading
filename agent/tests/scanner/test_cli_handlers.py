@@ -46,3 +46,17 @@ def test_show_dispatch_no_scans_returns_nonzero(monkeypatch, capsys):
     monkeypatch.setattr(h, "load_latest", lambda **kw: None)
     rc = h.dispatch(_make_args(scan_cmd="show"))
     assert rc == 1
+
+
+def test_build_scan_degrades_when_universe_manifest_is_missing(monkeypatch):
+    monkeypatch.setattr(
+        h, "load_factor_manifest", lambda **_kwargs: (_ for _ in ()).throw(FileNotFoundError("missing"))
+    )
+    monkeypatch.setattr(
+        h, "run_scan",
+        lambda universe, asof, providers: ScanResult(universe, asof, [], [], []),
+    )
+
+    result = h._build_scan("csi300", "2026-07-01", 20)
+
+    assert "因子白名单" in result.warnings[0]
