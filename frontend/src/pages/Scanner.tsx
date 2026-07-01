@@ -69,6 +69,7 @@ export function Scanner() {
   const [tracking, setTracking] = useState<Map<string, TrackingRecord>>(new Map());
   const [calibration, setCalibration] = useState<CalibrationData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
   const [dates, setDates] = useState<string[]>([]);
@@ -125,6 +126,33 @@ export function Scanner() {
     }
   };
 
+  const refreshScan = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const previous = data;
+      const scan = await api.runScan(data?.universe ?? "sp500", 20);
+      setData(scan);
+      if (previous) setPrevData(previous.asof === scan.asof ? prevData : previous);
+      setDateIdx(0);
+      const [dateResult, trackingResult, calibrationResult] = await Promise.all([
+        api.getScanDates(),
+        api.getScanTracking(scan.asof).catch(() => ({ records: [] })),
+        api.getScanCalibration().catch(() => null),
+      ]);
+      setDates(dateResult.dates);
+      const nextTracking = new Map<string, TrackingRecord>();
+      for (const record of trackingResult.records || []) nextTracking.set(record.symbol, record);
+      setTracking(nextTracking);
+      if (calibrationResult) setCalibration(calibrationResult);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "更新机会失败");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
@@ -139,11 +167,15 @@ export function Scanner() {
       <div className="flex h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
         <AlertTriangle className="h-8 w-8" />
         <p className="text-sm">{error || "暂无扫描结果"}</p>
-        <p className="text-xs">
-          运行 <code className="bg-muted px-1.5 py-0.5 rounded text-xs">scan run</code> 生成首次扫描
-        </p>
-        <button onClick={() => loadScan()} className="mt-2 text-xs text-primary hover:underline">
-          重试
+        <p className="text-xs">点击更新生成最新扫描结果</p>
+        <button
+          onClick={() => void refreshScan()}
+          disabled={refreshing}
+          aria-label="更新机会"
+          className="mt-2 inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs text-primary disabled:opacity-50"
+        >
+          {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {refreshing ? "更新中" : "更新机会"}
         </button>
       </div>
     );
@@ -203,11 +235,13 @@ export function Scanner() {
             </span>
           )}
           <button
-            onClick={() => { setDateIdx(0); loadScan(); }}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded border border-border hover:border-foreground/20"
+            onClick={() => void refreshScan()}
+            disabled={refreshing}
+            aria-label="更新机会"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded border border-border hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
-            最新
+            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {refreshing ? "更新中" : "更新"}
           </button>
         </div>
       </div>

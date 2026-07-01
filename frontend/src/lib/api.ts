@@ -218,6 +218,10 @@ export const api = {
     }),
 
   // Scanner API
+  runScan: (universe = "sp500", top = 20) =>
+    request<any>(`/scan/run?universe=${encodeURIComponent(universe)}&top=${top}`, {
+      method: "POST",
+    }),
   getScanLatest: () => request<any>("/scan/latest"),
   getScanDates: () => request<{ dates: string[] }>("/scan/dates"),
   getScanByDate: (asof: string) => request<any>(`/scan/history/${asof}`),
