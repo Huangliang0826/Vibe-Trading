@@ -411,11 +411,72 @@ export const api = {
   getOpportunityCalibration: (scope: "top3" | "all" = "top3") =>
     request<OpportunityCalibrationSummary>(`/opportunities/calibration?scope=${scope}`),
 
+  startHistoricalEventRun: (market: "hk" | "us", code: string, companyName: string, period: HistoricalEventPeriod, force = false) =>
+    request<HistoricalEventRun>("/historical-events/runs", {
+      method: "POST",
+      body: JSON.stringify({ market, code, company_name: companyName, period, force }),
+    }),
+  getHistoricalEventRun: (runId: string) =>
+    request<HistoricalEventRun>(`/historical-events/runs/${encodeURIComponent(runId)}`),
+  getHistoricalEvents: (market: "hk" | "us", code: string, period: HistoricalEventPeriod) =>
+    request<HistoricalEvent[]>(`/historical-events/${market}/${encodeURIComponent(code)}?period=${period}`),
+
 };
 
 // --- 行情看板 types ---
 
 export type WatchlistMarket = "cn" | "hk" | "us";
+export type HistoricalEventPeriod = "1Y" | "3Y" | "5Y" | "ALL";
+
+export interface HistoricalEventEvidence {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+  published_at: string | null;
+  evidence_type: string;
+}
+
+export interface HistoricalEvent {
+  event_id: string;
+  market: "hk" | "us";
+  symbol: string;
+  company_name: string;
+  start_date: string;
+  end_date: string;
+  direction: "up" | "down";
+  return_pct: number;
+  trigger_windows: number[];
+  volatility_filter_available: boolean;
+  benchmark_symbol: string;
+  benchmark_return_pct: number | null;
+  relative_return_pct: number | null;
+  market_context: string;
+  driver_type: string;
+  primary_driver: string;
+  narrative: string;
+  confidence: "高" | "中" | "低";
+  evidence: HistoricalEventEvidence[];
+  alternative_factors: string[];
+  causality_note: string;
+  detector_version: string;
+  analysis_version: string;
+  analyzed_at: string;
+}
+
+export interface HistoricalEventRun {
+  run_id: string;
+  market: "hk" | "us";
+  symbol: string;
+  company_name: string;
+  period: HistoricalEventPeriod;
+  status: "pending" | "running" | "completed" | "failed";
+  progress: number;
+  stage: string;
+  cached: boolean;
+  event_count: number;
+  error: string | null;
+}
 
 export interface NewsCenterMatch {
   market: string; code: string; match_level: string; confidence: number;

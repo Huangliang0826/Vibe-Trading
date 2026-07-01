@@ -4655,6 +4655,9 @@ _opportunity_runtime = register_opportunity_routes(
 from src.api.news_center_routes import register_news_center_routes  # noqa: E402
 register_news_center_routes(app, require_auth=require_local_or_auth)
 
+from src.api.historical_event_routes import register_historical_event_routes  # noqa: E402
+register_historical_event_routes(app, require_auth=require_local_or_auth)
+
 
 # ============================================================================
 # Main Entry Point

@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { LayoutDashboard, RefreshCw, TrendingUp, TrendingDown, Plus, X, Loader2, AlertCircle } from "lucide-react";
-import { api, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
+import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
+import { HistoricalEventsView } from "@/components/charts/HistoricalEventsView";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { TodayOpportunities } from "@/components/opportunities/TodayOpportunities";
 import { cn } from "@/lib/utils";
@@ -359,7 +360,7 @@ function WatchlistColumn({
 // between the price chart and valuation series (PE / PB / market cap); each
 // view owns its own timeframe selector and data fetch.
 
-type CardView = "price" | ValuationMetric;
+type CardView = "price" | "historical_events" | ValuationMetric;
 
 const VIEW_TABS: { key: CardView; label: string }[] = [
   { key: "price", label: "价格" },
@@ -368,12 +369,17 @@ const VIEW_TABS: { key: CardView; label: string }[] = [
   { key: "mktcap", label: "市值" },
 ];
 
+export function stockChartViewTabs(market: WatchlistMarket): { key: CardView; label: string }[] {
+  return market === "cn" ? VIEW_TABS : [...VIEW_TABS, { key: "historical_events", label: "重大历史事件" }];
+}
+
 function StockChartCard({ code, market, id }: { code: string; market: WatchlistMarket; id?: string }) {
   const [view, setView] = useState<CardView>("price");
   const [name, setName] = useState(code);
 
   // Price view state
   const [period, setPeriod] = useState<PriceHistoryPeriod>("1Y");
+  const [historicalPeriod, setHistoricalPeriod] = useState<HistoricalEventPeriod>("1Y");
   const [bars, setBars] = useState<PriceHistoryBar[]>([]);
   const [quote, setQuote] = useState<WatchlistQuote | null>(null);
   const [loading, setLoading] = useState(false);
@@ -384,14 +390,15 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   const [valPoints, setValPoints] = useState<ValuationPoint[]>([]);
   const [valLoading, setValLoading] = useState(false);
 
-  // Fetch price history (only while the price view is active)
+  // Price data is shared by the regular and historical-event charts.
   useEffect(() => {
-    if (view !== "price") return;
+    if (view !== "price" && view !== "historical_events") return;
+    const activePeriod = view === "historical_events" ? historicalPeriod : period;
     let cancelled = false;
     setLoading(true);
     setError(null);
     Promise.all([
-      api.getWatchlistHistory(code, period, market),
+      api.getWatchlistHistory(code, activePeriod, market),
       api.getWatchlistQuote([code], market).catch(() => [] as WatchlistQuote[]),
     ])
       .then(([res, quoteList]) => {
@@ -408,13 +415,13 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [code, period, market, view]);
+  }, [code, period, historicalPeriod, market, view]);
 
   // Fetch valuation series (only while a valuation view is active).
   // Clearing stale points + toggling loading happens here (not in onClick) so
   // loading can never get stuck: the same effect that sets it always clears it.
   useEffect(() => {
-    if (view === "price") return;
+    if (view === "price" || view === "historical_events") return;
     let cancelled = false;
     setValLoading(true);
     setValPoints([]);
@@ -433,10 +440,15 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
           <span className="font-mono text-xs text-muted-foreground ml-1">{code}</span>
         </span>
         <div className="flex gap-1">
-          {VIEW_TABS.map(({ key, label }) => (
+          {stockChartViewTabs(market).map(({ key, label }) => (
             <button
               key={key}
-              onClick={() => setView(key)}
+              onClick={() => {
+                if (key === "historical_events" && ["1Y", "3Y", "5Y", "ALL"].includes(period)) {
+                  setHistoricalPeriod(period as HistoricalEventPeriod);
+                }
+                setView(key);
+              }}
               className={cn(
                 "px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors",
                 key === view
@@ -463,10 +475,19 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>
+      ) : view === "historical_events" && market !== "cn" ? (
+        <HistoricalEventsView
+          market={market}
+          code={code}
+          companyName={name}
+          period={historicalPeriod}
+          bars={bars}
+          onPeriodChange={setHistoricalPeriod}
+        />
       ) : (
         <ValuationChart
           points={valPoints}
-          metric={view}
+          metric={view as ValuationMetric}
           period={valPeriod}
           onPeriodChange={setValPeriod}
           loading={valLoading}
