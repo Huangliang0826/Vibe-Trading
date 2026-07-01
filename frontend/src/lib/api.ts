@@ -479,6 +479,7 @@ export interface WatchlistQuote {
 export type OpportunityLevel = "优先关注" | "值得观察" | "暂不参与" | "数据不足";
 export type OpportunityAction = "entry" | "add" | "hold" | "exit" | "risk_exit" | "wait" | "none";
 export type OpportunityDimension = "strategy" | "trend" | "risk" | "news" | "valuation";
+export type OpportunityDriver = "strategy" | "news" | "mixed";
 
 export interface OpportunityItem {
   market: "hk" | "us";
@@ -501,6 +502,10 @@ export interface OpportunityItem {
   missing_dimensions: string[];
   score_version: string;
   strategy_version: string;
+  driver_type?: OpportunityDriver;
+  driver_summary?: string;
+  strategy_contribution?: number | null;
+  news_contribution?: number | null;
 }
 
 export interface OpportunityNewsImpact {

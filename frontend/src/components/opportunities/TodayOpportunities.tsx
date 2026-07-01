@@ -5,6 +5,7 @@ import {
   api,
   type OpportunityAction,
   type OpportunityDetail,
+  type OpportunityDriver,
   type OpportunityFilters,
   type OpportunityHistoryPoint,
   type OpportunityItem,
@@ -184,6 +185,7 @@ export function TodayOpportunities() {
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
                       <LevelBadge level={item.level} />
                       <ActionBadge action={item.latest_action} />
+                      <DriverBadge driver={item.driver_type} />
                       {item.strategy_label && <span className="text-muted-foreground">{item.strategy_label}</span>}
                       {item.signal_date && <span className="text-muted-foreground">{item.signal_date}</span>}
                       {(item.stale || item.degraded) && <span className="text-amber-600">{item.stale ? "数据已过期" : "部分数据降级"}</span>}
@@ -206,6 +208,7 @@ export function TodayOpportunities() {
                     {detailLoading === key ? <div className="flex h-20 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin" /></div> : detail ? (
                       <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
                         <div className="space-y-4">
+                          <DriverEvidence item={detail} />
                           <DimensionBars item={detail} />
                           {detail.risk_reasons.length > 0 && <div><h3 className="text-xs font-medium">风险提示</h3><ul className="mt-1 space-y-1 text-xs text-muted-foreground">{detail.risk_reasons.map((reason) => <li key={reason}>• {reason}</li>)}</ul></div>}
                           {detail.missing_dimensions.length > 0 && <p className="text-xs text-amber-600">缺失维度：{detail.missing_dimensions.join("、")}</p>}
@@ -244,6 +247,35 @@ function LevelBadge({ level }: { level: OpportunityLevel }) {
 
 function ActionBadge({ action }: { action: OpportunityAction }) {
   return <span className={cn("font-medium", action === "entry" || action === "add" ? "text-red-500" : action === "exit" || action === "risk_exit" ? "text-emerald-600" : "text-muted-foreground")}>{ACTION_LABEL[action]}</span>;
+}
+
+const DRIVER_LABEL: Record<OpportunityDriver, string> = {
+  strategy: "策略信号驱动",
+  news: "新闻事件驱动",
+  mixed: "策略 + 新闻共振",
+};
+
+function DriverBadge({ driver = "strategy" }: { driver?: OpportunityDriver }) {
+  return <span className={cn("rounded-md px-1.5 py-0.5 font-medium", driver === "news" ? "bg-amber-500/10 text-amber-700" : driver === "mixed" ? "bg-sky-500/10 text-sky-700" : "bg-muted text-muted-foreground")}>{DRIVER_LABEL[driver]}</span>;
+}
+
+function DriverEvidence({ item }: { item: OpportunityDetail }) {
+  const summary = item.driver_summary || "当前快照生成于归因功能启用前，刷新机会后可查看策略与新闻贡献。";
+  return (
+    <div className="border-l-2 border-foreground/20 pl-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-xs font-medium">入榜归因</h3>
+        <DriverBadge driver={item.driver_type} />
+      </div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{summary}</p>
+      {(item.strategy_contribution != null || item.news_contribution != null) && (
+        <div className="mt-1 flex flex-wrap gap-3 text-[11px] tabular-nums text-muted-foreground">
+          {item.strategy_contribution != null && <span>策略贡献 {item.strategy_contribution.toFixed(2)}</span>}
+          {item.news_contribution != null && <span>新闻贡献 {item.news_contribution.toFixed(2)}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function DimensionBars({ item }: { item: OpportunityDetail }) {

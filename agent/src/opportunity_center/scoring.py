@@ -13,6 +13,7 @@ from src.opportunity_center.models import (
     MarketContext,
     NewsImpact,
     OpportunityDetail,
+    OpportunityDriver,
     OpportunityLevel,
     StrategyContext,
 )
@@ -160,6 +161,9 @@ def score_opportunity(
         return20=_optional_float(risk_inputs.get("return20")),
     )
     primary_reason = _primary_reason(dimensions)
+    driver_type, driver_summary, strategy_contribution, news_contribution = _driver_attribution(
+        dimensions, strategy, news_impacts,
+    )
     explanations = _dimension_explanations(dimensions) + gate_reasons
     score = round(raw_score, 4) if raw_score is not None else None
     return OpportunityDetail(
@@ -175,6 +179,10 @@ def score_opportunity(
         strategy_name=strategy.strategy_name if strategy else None,
         strategy_label=strategy.strategy_label if strategy else None,
         primary_reason=primary_reason,
+        driver_type=driver_type,
+        driver_summary=driver_summary,
+        strategy_contribution=strategy_contribution,
+        news_contribution=news_contribution,
         risk_reasons=gate_reasons,
         dimensions=dimensions,
         data_as_of=market_context.latest_price_date,
@@ -213,6 +221,56 @@ def _dimension_explanations(values: DimensionScores) -> list[str]:
         for name in WEIGHTS
         if getattr(values, name) is not None
     ]
+
+
+def _driver_attribution(
+    values: DimensionScores,
+    strategy: StrategyContext | None,
+    impacts: list[NewsImpact],
+) -> tuple[OpportunityDriver, str, float | None, float | None]:
+    strategy_contribution = (
+        round(abs((values.strategy - 50) * WEIGHTS["strategy"]), 2)
+        if values.strategy is not None else None
+    )
+    has_reliable_news = any(
+        impact.strength is not None and impact.confidence is not None
+        for impact in impacts
+    )
+    news_contribution = (
+        round(abs((values.news - 50) * WEIGHTS["news"]), 2)
+        if has_reliable_news and values.news is not None else None
+    )
+    strategy_value = strategy_contribution or 0.0
+    news_value = news_contribution or 0.0
+    strategy_label = strategy.strategy_label if strategy and strategy.strategy_label else "量化策略"
+
+    if not has_reliable_news:
+        return (
+            "strategy",
+            f"未发现可靠新闻影响，主要由{strategy_label}信号与量化评分驱动。",
+            strategy_contribution,
+            None,
+        )
+    if news_value >= max(strategy_value * 1.25, 0.01):
+        return (
+            "news",
+            f"新闻贡献 {news_value:.2f}，超过策略贡献 {strategy_value:.2f}，本次机会主要由新闻事件驱动。",
+            strategy_contribution,
+            news_contribution,
+        )
+    if news_value >= max(strategy_value * 0.60, 0.01):
+        return (
+            "mixed",
+            f"策略贡献 {strategy_value:.2f}、新闻贡献 {news_value:.2f}，两类信号形成共振。",
+            strategy_contribution,
+            news_contribution,
+        )
+    return (
+        "strategy",
+        f"策略贡献 {strategy_value:.2f} 高于新闻贡献 {news_value:.2f}，本次机会仍以{strategy_label}信号为主。",
+        strategy_contribution,
+        news_contribution,
+    )
 
 
 def _optional_float(value: object) -> float | None:

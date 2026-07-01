@@ -18,6 +18,8 @@ const item = {
   score: 82, score_change: 4, level: "优先关注" as const, latest_action: "entry" as const,
   signal_date: "2026-06-29", strategy_name: "donchian_breakout", strategy_label: "唐奇安突破",
   primary_reason: "策略信号提供主要正贡献", risk_reasons: [],
+  driver_type: "strategy" as const, driver_summary: "未发现可靠新闻影响，主要由唐奇安突破信号与量化评分驱动。",
+  strategy_contribution: 14.4, news_contribution: null,
   dimensions: { strategy: 88, trend: 80, risk: 72, news: 60, valuation: null },
   data_as_of: "2026-06-29", stale: false, degraded: true, missing_dimensions: ["valuation"],
   score_version: "opportunity-v1", strategy_version: "oos-holdout-v1",
@@ -38,6 +40,7 @@ describe("TodayOpportunities", () => {
     expect(await screen.findByText("腾讯控股")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /腾讯控股/ })).toHaveAttribute("href", "/forecast#forecast-card-hk-0700");
     expect(screen.getByText("部分数据降级")).toBeInTheDocument();
+    expect(screen.getByText("策略信号驱动")).toBeInTheDocument();
   });
 
   it("shows only the top three until the remaining results are expanded", async () => {
@@ -110,6 +113,8 @@ describe("TodayOpportunities", () => {
     await userEvent.click(screen.getByRole("button", { name: "展开腾讯控股机会详情" }));
     await waitFor(() => expect(apiMock.getOpportunityHistory).toHaveBeenCalledWith("hk", "0700", 30));
     expect(await screen.findByText("缺失维度：valuation")).toBeInTheDocument();
+    expect(screen.getByText(item.driver_summary)).toBeInTheDocument();
+    expect(screen.getByText("策略贡献 14.40")).toBeInTheDocument();
   });
 
   it("shows readable API failure", async () => {

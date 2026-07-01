@@ -85,3 +85,41 @@ def test_primary_reason_is_deterministic_not_ai_text():
         market_context=market(), news_impacts=[impact], matched_news_count=1,
     )
     assert "立刻满仓" not in detail.primary_reason
+
+
+def test_driver_defaults_to_strategy_without_analyzed_news():
+    detail = score_opportunity(
+        company_name="腾讯控股", snapshot_date="2026-06-29", strategy=strategy(),
+        market_context=market(), news_impacts=[],
+    )
+
+    assert detail.driver_type == "strategy"
+    assert detail.news_contribution is None
+    assert "未发现可靠新闻影响" in detail.driver_summary
+
+
+def test_strong_news_can_be_the_primary_driver():
+    impact = NewsImpact(
+        article_id="n1", market="hk", code="0700", direction="positive",
+        strength=100, confidence=100, horizon="short", match_level="direct",
+    )
+    detail = score_opportunity(
+        company_name="腾讯控股", snapshot_date="2026-06-29", strategy=strategy("wait"),
+        market_context=market(), news_impacts=[impact], matched_news_count=1,
+    )
+
+    assert detail.driver_type == "news"
+    assert detail.news_contribution > detail.strategy_contribution
+
+
+def test_material_news_and_strategy_are_classified_as_resonance():
+    impact = NewsImpact(
+        article_id="n1", market="hk", code="0700", direction="positive",
+        strength=100, confidence=100, horizon="short", match_level="direct",
+    )
+    detail = score_opportunity(
+        company_name="腾讯控股", snapshot_date="2026-06-29", strategy=strategy("hold"),
+        market_context=market(), news_impacts=[impact], matched_news_count=1,
+    )
+
+    assert detail.driver_type == "mixed"

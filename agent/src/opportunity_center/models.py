@@ -17,6 +17,7 @@ ImpactDirection = Literal["positive", "neutral", "negative"]
 OutcomeStatus = Literal["pending", "completed", "missing"]
 CalibrationScope = Literal["top3", "all"]
 SampleSource = Literal["live", "fixed_universe_backfill"]
+OpportunityDriver = Literal["strategy", "news", "mixed"]
 
 
 class OpportunityContract(BaseModel):
@@ -105,6 +106,10 @@ class OpportunityItem(OpportunityContract):
     strategy_name: str | None = None
     strategy_label: str | None = None
     primary_reason: str = ""
+    driver_type: OpportunityDriver = "strategy"
+    driver_summary: str = ""
+    strategy_contribution: float | None = None
+    news_contribution: float | None = None
     risk_reasons: list[str] = Field(default_factory=list)
     dimensions: DimensionScores = Field(default_factory=DimensionScores)
     data_as_of: str
