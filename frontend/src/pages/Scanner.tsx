@@ -43,6 +43,13 @@ interface CalibrationData {
 }
 
 type RankChange = { delta: number; isNew: boolean };
+type ScanUniverse = "sp500" | "csi300" | "hstech";
+
+const MARKET_OPTIONS: { universe: ScanUniverse; label: string; description: string }[] = [
+  { universe: "sp500", label: "美股", description: "标普 500" },
+  { universe: "csi300", label: "A股", description: "沪深 300" },
+  { universe: "hstech", label: "港股", description: "恒生科技" },
+];
 
 function computeRankChanges(
   current: ScanCandidate[],
@@ -63,7 +70,39 @@ function computeRankChanges(
   return map;
 }
 
+function MarketSelector({
+  value, onChange, disabled,
+}: {
+  value: ScanUniverse;
+  onChange: (universe: ScanUniverse) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="inline-flex rounded-md border bg-muted/30 p-0.5" aria-label="扫描市场">
+      {MARKET_OPTIONS.map((option) => (
+        <button
+          key={option.universe}
+          type="button"
+          aria-pressed={value === option.universe}
+          title={option.description}
+          disabled={disabled}
+          onClick={() => onChange(option.universe)}
+          className={cn(
+            "h-8 px-4 text-xs font-medium transition-colors disabled:opacity-50",
+            value === option.universe
+              ? "rounded bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Scanner() {
+  const [universe, setUniverse] = useState<ScanUniverse>("sp500");
   const [data, setData] = useState<ScanData | null>(null);
   const [prevData, setPrevData] = useState<ScanData | null>(null);
   const [tracking, setTracking] = useState<Map<string, TrackingRecord>>(new Map());
@@ -75,52 +114,62 @@ export function Scanner() {
   const [dates, setDates] = useState<string[]>([]);
   const [dateIdx, setDateIdx] = useState(0);
 
-  const loadScan = useCallback((asof?: string) => {
+  const loadScan = useCallback((targetUniverse: ScanUniverse, asof?: string) => {
     setLoading(true);
     setError(null);
-    const fetchScan = asof ? api.getScanByDate(asof) : api.getScanLatest();
+    const fetchScan = asof
+      ? api.getScanByDate(asof, targetUniverse)
+      : api.getScanLatest(targetUniverse);
     fetchScan
       .then((scan) => {
         setData(scan);
-        api.getScanTracking(scan.asof)
+        api.getScanTracking(scan.asof, targetUniverse)
           .then((t) => {
             const map = new Map<string, TrackingRecord>();
             for (const r of t.records || []) map.set(r.symbol, r);
             setTracking(map);
           })
           .catch(() => setTracking(new Map()));
-        api.getScanCalibration().then(setCalibration).catch(() => {});
+        api.getScanCalibration(targetUniverse).then(setCalibration).catch(() => {});
       })
       .catch((e) => setError(e?.message || "Failed to load scan"))
       .finally(() => setLoading(false));
   }, []);
 
-  const loadPrevious = useCallback((prevAsof: string) => {
-    api.getScanByDate(prevAsof).then(setPrevData).catch(() => setPrevData(null));
+  const loadPrevious = useCallback((targetUniverse: ScanUniverse, prevAsof: string) => {
+    api.getScanByDate(prevAsof, targetUniverse).then(setPrevData).catch(() => setPrevData(null));
   }, []);
 
   useEffect(() => {
-    api.getScanDates().then((r) => {
+    setLoading(true);
+    setData(null);
+    setPrevData(null);
+    setTracking(new Map());
+    setCalibration(null);
+    setDateIdx(0);
+    setFilter(null);
+    setError(null);
+    api.getScanDates(universe).then((r) => {
       setDates(r.dates);
       if (r.dates.length > 0) {
-        loadScan(r.dates[0]);
-        if (r.dates.length > 1) loadPrevious(r.dates[1]);
+        loadScan(universe, r.dates[0]);
+        if (r.dates.length > 1) loadPrevious(universe, r.dates[1]);
       } else {
         setLoading(false);
       }
     }).catch(() => {
-      loadScan();
+      loadScan(universe);
     });
-  }, [loadScan, loadPrevious]);
+  }, [universe, loadScan, loadPrevious]);
 
   const navigateDate = (dir: -1 | 1) => {
     const newIdx = dateIdx + dir;
     if (newIdx < 0 || newIdx >= dates.length) return;
     setDateIdx(newIdx);
-    loadScan(dates[newIdx]);
+    loadScan(universe, dates[newIdx]);
     const prevIdx = newIdx + 1;
     if (prevIdx < dates.length) {
-      loadPrevious(dates[prevIdx]);
+      loadPrevious(universe, dates[prevIdx]);
     } else {
       setPrevData(null);
     }
@@ -132,14 +181,14 @@ export function Scanner() {
     setError(null);
     try {
       const previous = data;
-      const scan = await api.runScan(data?.universe ?? "sp500", 20);
+      const scan = await api.runScan(universe, 20);
       setData(scan);
       if (previous) setPrevData(previous.asof === scan.asof ? prevData : previous);
       setDateIdx(0);
       const [dateResult, trackingResult, calibrationResult] = await Promise.all([
-        api.getScanDates(),
-        api.getScanTracking(scan.asof).catch(() => ({ records: [] })),
-        api.getScanCalibration().catch(() => null),
+        api.getScanDates(universe),
+        api.getScanTracking(scan.asof, universe).catch(() => ({ records: [] })),
+        api.getScanCalibration(universe).catch(() => null),
       ]);
       setDates(dateResult.dates);
       const nextTracking = new Map<string, TrackingRecord>();
@@ -155,28 +204,34 @@ export function Scanner() {
 
   if (loading) {
     return (
-      <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" />
-        加载扫描结果…
+      <div className="mx-auto max-w-4xl px-6 py-8">
+        <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
+        <div className="flex h-[55vh] items-center justify-center text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin mr-2" />
+          加载扫描结果…
+        </div>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="flex h-[60vh] flex-col items-center justify-center gap-3 text-muted-foreground">
-        <AlertTriangle className="h-8 w-8" />
-        <p className="text-sm">{error || "暂无扫描结果"}</p>
-        <p className="text-xs">点击更新生成最新扫描结果</p>
-        <button
-          onClick={() => void refreshScan()}
-          disabled={refreshing}
-          aria-label="更新机会"
-          className="mt-2 inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs text-primary disabled:opacity-50"
-        >
-          {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          {refreshing ? "更新中" : "更新机会"}
-        </button>
+      <div className="mx-auto max-w-4xl px-6 py-8">
+        <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
+        <div className="flex h-[55vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+          <AlertTriangle className="h-8 w-8" />
+          <p className="text-sm">{error || "暂无扫描结果"}</p>
+          <p className="text-xs">点击更新生成最新扫描结果</p>
+          <button
+            onClick={() => void refreshScan()}
+            disabled={refreshing}
+            aria-label="更新机会"
+            className="mt-2 inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs text-primary disabled:opacity-50"
+          >
+            {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {refreshing ? "更新中" : "更新机会"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -193,6 +248,9 @@ export function Scanner() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="mb-5">
+        <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
+      </div>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -253,7 +311,7 @@ export function Scanner() {
             正在查看历史扫描 ({data.asof})，共 {dates.length} 期
           </p>
           <button
-            onClick={() => { setDateIdx(0); loadScan(dates[0]); if (dates.length > 1) loadPrevious(dates[1]); }}
+            onClick={() => { setDateIdx(0); loadScan(universe, dates[0]); if (dates.length > 1) loadPrevious(universe, dates[1]); }}
             className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
           >
             回到最新 →

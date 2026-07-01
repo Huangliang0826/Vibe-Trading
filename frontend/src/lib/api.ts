@@ -222,11 +222,16 @@ export const api = {
     request<any>(`/scan/run?universe=${encodeURIComponent(universe)}&top=${top}`, {
       method: "POST",
     }),
-  getScanLatest: () => request<any>("/scan/latest"),
-  getScanDates: () => request<{ dates: string[] }>("/scan/dates"),
-  getScanByDate: (asof: string) => request<any>(`/scan/history/${asof}`),
-  getScanTracking: (asof: string) => request<any>(`/scan/tracking/${asof}`),
-  getScanCalibration: () => request<any>("/scan/calibration"),
+  getScanLatest: (universe = "sp500") =>
+    request<any>(`/scan/latest?universe=${encodeURIComponent(universe)}`),
+  getScanDates: (universe = "sp500") =>
+    request<{ dates: string[] }>(`/scan/dates?universe=${encodeURIComponent(universe)}`),
+  getScanByDate: (asof: string, universe = "sp500") =>
+    request<any>(`/scan/history/${asof}?universe=${encodeURIComponent(universe)}`),
+  getScanTracking: (asof: string, universe = "sp500") =>
+    request<any>(`/scan/tracking/${asof}?universe=${encodeURIComponent(universe)}`),
+  getScanCalibration: (universe = "sp500") =>
+    request<any>(`/scan/calibration?universe=${encodeURIComponent(universe)}`),
   getScanQuintile: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30, refined = false) =>
     request<QuintileResponse>(`/scan/quintile?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}&refined=${refined}`),
   getScanWalkforward: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30) =>

@@ -36,11 +36,21 @@ const newScan = {
   ],
 };
 
+const cnScan = {
+  ...oldScan,
+  universe: "csi300",
+  candidates: [
+    { symbol: "600519.SH", score: 88, provider_id: "factor_rank", attribution: "cn", detail: {} },
+  ],
+};
+
 describe("Scanner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.getScanDates.mockResolvedValue({ dates: [oldScan.asof] });
-    apiMock.getScanByDate.mockResolvedValue(oldScan);
+    apiMock.getScanByDate.mockImplementation((_date, universe) =>
+      Promise.resolve(universe === "csi300" ? cnScan : oldScan)
+    );
     apiMock.getScanLatest.mockResolvedValue(oldScan);
     apiMock.getScanTracking.mockResolvedValue({ records: [] });
     apiMock.getScanCalibration.mockResolvedValue({ total_tracked: 0, filled: 0, alerts: [], ok: true });
@@ -68,5 +78,20 @@ describe("Scanner", () => {
 
     expect(apiMock.runScan).toHaveBeenCalledWith("sp500", 20);
     expect(await screen.findByText("NVDA")).toBeInTheDocument();
+  });
+
+  it("loads and refreshes the selected A-share universe", async () => {
+    render(<Scanner />);
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "A股" }));
+
+    await waitFor(() => expect(apiMock.getScanDates).toHaveBeenLastCalledWith("csi300"));
+    expect(apiMock.getScanByDate).toHaveBeenLastCalledWith(oldScan.asof, "csi300");
+    expect(await screen.findByText("600519.SH")).toBeInTheDocument();
+
+    apiMock.runScan.mockResolvedValue(cnScan);
+    await userEvent.click(screen.getByRole("button", { name: "更新机会" }));
+    expect(apiMock.runScan).toHaveBeenLastCalledWith("csi300", 20);
   });
 });
