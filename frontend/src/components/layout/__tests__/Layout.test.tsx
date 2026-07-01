@@ -23,6 +23,12 @@ function renderLayout() {
 }
 
 describe("Layout mobile navigation", () => {
+  it("temporarily hides the HSTECH navigation entry", () => {
+    renderLayout();
+
+    expect(screen.queryByRole("link", { name: "恒生科技" })).not.toBeInTheDocument();
+  });
+
   it("keeps the sidebar off canvas until the mobile menu opens", async () => {
     renderLayout();
 

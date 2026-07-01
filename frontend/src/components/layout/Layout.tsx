@@ -9,12 +9,13 @@ import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
 
 // Bump on each release; one place keeps the footer in sync with package.json.
 const APP_VERSION = "v0.1.9";
+const SHOW_HSTECH_NAV = false;
 
 const NAV = [
   { to: "/overview", icon: LayoutDashboard, label: "总览" },
   { to: "/paper-trading", icon: Briefcase, label: "模拟盘" },
   { to: "/forecast", icon: LineChart, label: "走势预测" },
-  { to: "/hstech", icon: Cpu, label: "恒生科技" },
+  { to: "/hstech", icon: Cpu, label: "恒生科技", hidden: !SHOW_HSTECH_NAV },
   { to: "/scanner", icon: Radar, label: "机会扫描" },
   { to: "/news-center", icon: Newspaper, label: "新闻中心" },
   { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
@@ -113,7 +114,7 @@ export function Layout() {
 
         {/* Nav */}
         <nav className={cn("space-y-0.5", compactSidebar ? "p-1" : "p-2")}>
-          {NAV.map(({ to, icon: Icon, label }) => {
+          {NAV.filter((item) => !("hidden" in item && item.hidden)).map(({ to, icon: Icon, label }) => {
             const text = label;
             return (
               <Link
