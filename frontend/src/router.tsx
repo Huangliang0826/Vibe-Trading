@@ -21,6 +21,9 @@ const AlphaZoo = lazy(() =>
 const Scanner = lazy(() =>
   import("@/pages/Scanner").then((m) => ({ default: m.Scanner })),
 );
+const NewsCenter = lazy(() =>
+  import("@/pages/NewsCenter").then((m) => ({ default: m.NewsCenter })),
+);
 const Overview = lazy(() =>
   import("@/pages/Overview").then((m) => ({ default: m.Overview })),
 );
@@ -66,6 +69,7 @@ export const router = createBrowserRouter([
       { path: "/compare", element: wrap(Compare) },
       { path: "/correlation", element: wrap(Correlation) },
       { path: "/scanner", element: wrap(Scanner) },
+      { path: "/news-center", element: wrap(NewsCenter) },
       { path: "/research-analysis", element: wrap(ResearchAnalysis) },
       { path: "/forecast", element: wrap(Forecast) },
       { path: "/hstech", element: wrap(HSTech) },

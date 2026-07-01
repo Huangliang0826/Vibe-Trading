@@ -239,6 +239,21 @@ export const api = {
   getScanPortfolio: (universe = "hkconnect", period = "2024-2026") =>
     request<ScanPortfolioResponse>(`/scan/quintile/portfolio?universe=${universe}&period=${period}`),
 
+  getNewsCenterDates: () => request<string[]>("/news-center/dates"),
+  getNewsCenterArticles: (filters: NewsCenterFilters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.date) params.set("date", filters.date);
+    if (filters.sector) params.set("sector", filters.sector);
+    if (filters.direction) params.set("direction", filters.direction);
+    if (filters.query) params.set("query", filters.query);
+    if (filters.symbol) params.set("symbol", filters.symbol);
+    if (filters.watchlistOnly) params.set("watchlist_only", "true");
+    return request<NewsCenterList>(`/news-center/articles?${params}`);
+  },
+  getNewsCenterDigest: (date: string) =>
+    request<NewsCenterDigest>(`/news-center/digest?date=${encodeURIComponent(date)}`),
+  refreshNewsCenter: () => request<NewsCenterRefreshResult>("/news-center/refresh", { method: "POST" }),
+
   // 行业研报库
   getIndustryReports: () =>
     request<IndustryReportsResponse>("/research/industry-reports"),
@@ -401,6 +416,25 @@ export const api = {
 // --- 行情看板 types ---
 
 export type WatchlistMarket = "cn" | "hk" | "us";
+
+export interface NewsCenterMatch {
+  market: string; code: string; match_level: string; confidence: number;
+  direction?: "positive" | "neutral" | "negative" | null; strength?: number | null;
+}
+export interface NewsCenterArticle {
+  article_id: string; source: string; title: string; url: string; published_at: string;
+  summary: string; sector: string; matches: NewsCenterMatch[]; importance: number; major: boolean;
+}
+export interface NewsCenterList { items: NewsCenterArticle[]; total: number; sectors: string[]; }
+export interface NewsCenterDigest {
+  date: string; article_count: number; watchlist_count: number; positive_count: number;
+  negative_count: number; summary: string; major_items: NewsCenterArticle[];
+}
+export interface NewsCenterRefreshResult { fetched: number; total: number; latest_date?: string | null; }
+export interface NewsCenterFilters {
+  date?: string; sector?: string; direction?: string; query?: string;
+  symbol?: string; watchlistOnly?: boolean;
+}
 
 export type PriceHistoryPeriod = "1D" | "1M" | "YTD" | "1Y" | "3Y" | "5Y" | "ALL";
 

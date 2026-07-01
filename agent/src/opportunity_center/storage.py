@@ -421,6 +421,49 @@ class OpportunityStore:
             rows = conn.execute(sql, params).fetchall()
         return [NewsArticle.model_validate(dict(row)) for row in rows]
 
+    def list_news_center_articles(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            articles = conn.execute(
+                """
+                SELECT a.article_id, s.name AS source, a.title,
+                       a.canonical_url AS url, a.published_at, a.summary, a.sector
+                FROM news_articles a
+                JOIN news_sources s ON s.source_id = a.source_id
+                ORDER BY a.published_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+            result: list[dict[str, Any]] = []
+            for article in articles:
+                matches = conn.execute(
+                    """
+                    SELECT m.market, m.code, m.match_level, m.confidence,
+                           na.payload_json
+                    FROM news_matches m
+                    LEFT JOIN news_analyses na ON na.rowid = (
+                        SELECT latest.rowid FROM news_analyses latest
+                        WHERE latest.article_id = m.article_id
+                          AND latest.market = m.market AND latest.code = m.code
+                        ORDER BY latest.analysis_date DESC, latest.created_at DESC
+                        LIMIT 1
+                    )
+                    WHERE m.article_id = ?
+                    ORDER BY m.confidence DESC
+                    """,
+                    (article["article_id"],),
+                ).fetchall()
+                match_rows = []
+                for match in matches:
+                    analysis = _json_loads(match["payload_json"]) if match["payload_json"] else {}
+                    match_rows.append({
+                        "market": match["market"], "code": match["code"],
+                        "match_level": match["match_level"], "confidence": match["confidence"],
+                        "direction": analysis.get("direction"), "strength": analysis.get("strength"),
+                    })
+                result.append({**dict(article), "matches": match_rows})
+        return result
+
     def save_matches(self, article_id: str, matches: list[Mapping[str, Any]]) -> None:
         with self._connect() as conn:
             for match in matches:
