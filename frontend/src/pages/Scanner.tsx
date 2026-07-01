@@ -10,6 +10,7 @@ const PROVIDER_META: Record<string, { label: string; color: string }> = {
 
 interface ScanCandidate {
   symbol: string;
+  company_name?: string;
   score: number;
   provider_id: string;
   attribution: string;
@@ -43,11 +44,10 @@ interface CalibrationData {
 }
 
 type RankChange = { delta: number; isNew: boolean };
-type ScanUniverse = "sp500" | "csi300" | "hstech";
+type ScanUniverse = "sp500" | "hstech";
 
 const MARKET_OPTIONS: { universe: ScanUniverse; label: string; description: string }[] = [
   { universe: "sp500", label: "美股", description: "标普 500" },
-  { universe: "csi300", label: "A股", description: "沪深 300" },
   { universe: "hstech", label: "港股", description: "恒生科技" },
 ];
 
@@ -408,8 +408,11 @@ export function Scanner() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-semibold">{c.symbol}</span>
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0">
+                        {c.company_name && <div className="truncate font-medium">{c.company_name}</div>}
+                        <div className={cn("font-mono", c.company_name ? "text-xs text-muted-foreground" : "font-semibold")}>{c.symbol}</div>
+                      </div>
                       <ProviderBadge providerId={c.provider_id} />
                     </div>
                   </td>

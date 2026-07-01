@@ -36,11 +36,11 @@ const newScan = {
   ],
 };
 
-const cnScan = {
+const hkScan = {
   ...oldScan,
-  universe: "csi300",
+  universe: "hstech",
   candidates: [
-    { symbol: "600519.SH", score: 88, provider_id: "factor_rank", attribution: "cn", detail: {} },
+    { symbol: "700.HK", company_name: "腾讯控股", score: 88, provider_id: "factor_rank", attribution: "hk", detail: {} },
   ],
 };
 
@@ -49,7 +49,7 @@ describe("Scanner", () => {
     vi.clearAllMocks();
     apiMock.getScanDates.mockResolvedValue({ dates: [oldScan.asof] });
     apiMock.getScanByDate.mockImplementation((_date, universe) =>
-      Promise.resolve(universe === "csi300" ? cnScan : oldScan)
+      Promise.resolve(universe === "hstech" ? hkScan : oldScan)
     );
     apiMock.getScanLatest.mockResolvedValue(oldScan);
     apiMock.getScanTracking.mockResolvedValue({ records: [] });
@@ -80,18 +80,20 @@ describe("Scanner", () => {
     expect(await screen.findByText("NVDA")).toBeInTheDocument();
   });
 
-  it("loads and refreshes the selected A-share universe", async () => {
+  it("only offers US and HK markets and displays HK company names", async () => {
     render(<Scanner />);
     expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "A股" })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "A股" }));
+    await userEvent.click(screen.getByRole("button", { name: "港股" }));
 
-    await waitFor(() => expect(apiMock.getScanDates).toHaveBeenLastCalledWith("csi300"));
-    expect(apiMock.getScanByDate).toHaveBeenLastCalledWith(oldScan.asof, "csi300");
-    expect(await screen.findByText("600519.SH")).toBeInTheDocument();
+    await waitFor(() => expect(apiMock.getScanDates).toHaveBeenLastCalledWith("hstech"));
+    expect(apiMock.getScanByDate).toHaveBeenLastCalledWith(oldScan.asof, "hstech");
+    expect(await screen.findByText("腾讯控股")).toBeInTheDocument();
+    expect(screen.getByText("700.HK")).toBeInTheDocument();
 
-    apiMock.runScan.mockResolvedValue(cnScan);
+    apiMock.runScan.mockResolvedValue(hkScan);
     await userEvent.click(screen.getByRole("button", { name: "更新机会" }));
-    expect(apiMock.runScan).toHaveBeenLastCalledWith("csi300", 20);
+    expect(apiMock.runScan).toHaveBeenLastCalledWith("hstech", 20);
   });
 });

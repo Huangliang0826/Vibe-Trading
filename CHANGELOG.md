@@ -5,6 +5,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **机会扫描市场与名称。** 移除 A 股扫描入口，保留港股和美股；港股当前结果及历史快照均显示公司名称与股票代码。
+
 ### Added
 - **重大历史事件。** 港股和美股自选股价格卡片新增按需加载的历史异动分析，
   使用 1/3/5 日固定阈值与过去波动过滤识别大涨大跌，在图上标记事件区间，

@@ -15,12 +15,13 @@ from src.scanner.store import list_scan_dates, load_by_date, load_latest, save_s
 from src.scanner.tracking import (
     calibration_check, load_all_tracking, load_tracking,
 )
+from src.scanner.universe_metadata import attach_company_names
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
 
 _SCAN_RESULT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SCAN_RESULT_TTL = 24 * 3600
-_SCAN_UNIVERSES = frozenset({"sp500", "csi300", "hstech"})
+_SCAN_UNIVERSES = frozenset({"sp500", "hstech"})
 
 
 def _validate_scan_universe(universe: str) -> str:
@@ -76,7 +77,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _build_scan, universe, asof, top)
         save_scan(result)
-        return result.to_dict()
+        return attach_company_names(result).to_dict()
 
     @app.get("/scan/dates", dependencies=[Depends(require_auth)])
     async def scan_dates(universe: str = "sp500") -> dict[str, Any]:
@@ -91,7 +92,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         result = load_by_date(asof, universe=universe)
         if result is None:
             raise HTTPException(status_code=404, detail=f"no scan for {asof}")
-        return result.to_dict()
+        return attach_company_names(result).to_dict()
 
     @app.get("/scan/latest", dependencies=[Depends(require_auth)])
     async def scan_latest(universe: str = "sp500") -> dict[str, Any]:
@@ -100,7 +101,7 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         result = load_latest(universe=universe)
         if result is None:
             raise HTTPException(status_code=404, detail="no scans available")
-        return result.to_dict()
+        return attach_company_names(result).to_dict()
 
     @app.get("/scan/tracking/{asof}", dependencies=[Depends(require_auth)])
     async def scan_tracking(asof: str, universe: str = "sp500") -> dict[str, Any]:

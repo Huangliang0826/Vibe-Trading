@@ -61,10 +61,16 @@ def test_scan_dates_passes_selected_universe(monkeypatch):
         scan_routes, "list_scan_dates", lambda universe: seen.append(universe) or ["2026-07-01"]
     )
 
-    resp = TestClient(_app()).get("/scan/dates?universe=csi300")
+    resp = TestClient(_app()).get("/scan/dates?universe=hstech")
 
     assert resp.status_code == 200
-    assert seen == ["csi300"]
+    assert seen == ["hstech"]
+
+
+def test_scan_routes_reject_a_share_universe():
+    resp = TestClient(_app()).get("/scan/latest?universe=csi300")
+
+    assert resp.status_code == 400
 
 
 def test_scan_routes_reject_unknown_universe():

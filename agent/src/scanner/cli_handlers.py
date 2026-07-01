@@ -65,6 +65,10 @@ def _build_scan(universe: str, asof: str, top: int) -> ScanResult:
         EventProvider(top_n=top),
     ]
     result = run_scan(universe=universe, asof=asof, providers=providers)
+    if universe == "hstech":
+        from src.scanner.universe_metadata import attach_company_names
+
+        result = attach_company_names(result)
     if manifest_warning:
         result.warnings.insert(0, manifest_warning)
     return result

@@ -20,6 +20,7 @@ class Candidate:
     provider_id: str
     attribution: str
     detail: dict[str, Any] = field(default_factory=dict)
+    company_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -28,6 +29,7 @@ class Candidate:
             "provider_id": self.provider_id,
             "attribution": self.attribution,
             "detail": dict(self.detail),
+            "company_name": self.company_name,
         }
 
     @classmethod
@@ -38,6 +40,7 @@ class Candidate:
             provider_id=str(d["provider_id"]),
             attribution=str(d["attribution"]),
             detail=dict(d.get("detail") or {}),
+            company_name=str(d["company_name"]) if d.get("company_name") else None,
         )
 
 
@@ -120,6 +123,7 @@ def _normalize_scores(candidates: list[Candidate]) -> list[Candidate]:
                 normalized.append(Candidate(
                     symbol=c.symbol, score=100.0, provider_id=c.provider_id,
                     attribution=c.attribution, detail=c.detail,
+                    company_name=c.company_name,
                 ))
             continue
         lo, hi = scores[0], scores[-1]
@@ -129,6 +133,7 @@ def _normalize_scores(candidates: list[Candidate]) -> list[Candidate]:
             normalized.append(Candidate(
                 symbol=c.symbol, score=round(pct, 2), provider_id=c.provider_id,
                 attribution=c.attribution, detail=c.detail,
+                company_name=c.company_name,
             ))
     return normalized
 
@@ -160,6 +165,7 @@ def _merge_candidates(candidates: list[Candidate]) -> list[Candidate]:
             provider_id=providers_used,
             attribution=attribution,
             detail=combined_detail,
+            company_name=next((c.company_name for c in group if c.company_name), None),
         ))
     return merged
 
