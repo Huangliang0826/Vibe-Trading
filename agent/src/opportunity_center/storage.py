@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -44,7 +45,10 @@ def title_fingerprint(title: str) -> str:
 
 def source_id_from_name(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return slug or "source"
+    if name.isascii():
+        return slug or "source"
+    digest = hashlib.sha256(name.strip().casefold().encode("utf-8")).hexdigest()[:10]
+    return f"{slug or 'source'}-{digest}"
 
 
 def _source_payload(source: Mapping[str, Any] | None, article: NewsArticle | None = None) -> dict[str, str]:
@@ -264,6 +268,27 @@ class OpportunityStore:
         with self._connect() as conn:
             if source is not None:
                 source_row = _source_payload(source)
+                existing = conn.execute(
+                    "SELECT source_id FROM news_sources WHERE url = ?",
+                    (source_row["url"],),
+                ).fetchone()
+                if existing is not None and existing["source_id"] != source_row["source_id"]:
+                    old_source_id = existing["source_id"]
+                    conn.execute(
+                        "UPDATE news_articles SET source_id = ? WHERE source_id = ?",
+                        (source_row["source_id"], old_source_id),
+                    )
+                    target_exists = conn.execute(
+                        "SELECT 1 FROM news_sources WHERE source_id = ?",
+                        (source_row["source_id"],),
+                    ).fetchone()
+                    if target_exists:
+                        conn.execute("DELETE FROM news_sources WHERE source_id = ?", (old_source_id,))
+                    else:
+                        conn.execute(
+                            "UPDATE news_sources SET source_id = ? WHERE source_id = ?",
+                            (source_row["source_id"], old_source_id),
+                        )
                 if error is None:
                     conn.execute(
                         """

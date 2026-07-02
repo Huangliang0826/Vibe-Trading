@@ -27,6 +27,12 @@ class FakeStore:
                 "summary": "旧闻", "sector": "ai", "matches": [],
             },
             {
+                "article_id": "en1", "source": "Reuters", "title": "Nvidia unveils new AI chips",
+                "url": "https://example.com/en1", "published_at": "2026-07-01T10:00:00Z",
+                "summary": "The company announced its next generation platform.", "sector": "ai",
+                "matches": [],
+            },
+            {
                 "article_id": "future", "source": "Bad clock", "title": "未来新闻",
                 "url": "https://example.com/future", "published_at": "2099-01-01T09:00:00Z",
                 "summary": "错误日期", "sector": "macro", "matches": [],
@@ -60,3 +66,15 @@ def test_future_dated_feed_items_are_not_exposed():
 
     assert "2099-01-01" not in service.get_dates()
     assert all(item.article_id != "future" for item in service.list_articles().items)
+
+
+def test_filters_articles_and_digest_by_detected_language():
+    service = NewsCenterService(store=FakeStore(), feed_ingestor=object())
+
+    chinese = service.list_articles(date_key="2026-07-01", language="zh")
+    english = service.list_articles(date_key="2026-07-01", language="en")
+
+    assert {item.article_id for item in chinese.items} == {"a1", "a2"}
+    assert [item.article_id for item in english.items] == ["en1"]
+    assert service.get_digest("2026-07-01", language="en").article_count == 1
+    assert "Nvidia unveils new AI chips" in service.get_digest("2026-07-01", language="en").summary

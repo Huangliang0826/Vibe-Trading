@@ -692,7 +692,6 @@ export function PaperTrading() {
           name: option.value,
           params: strategyParamsFor(option.value, dcaFrequency, gridCount),
         })),
-        start_date: startDate,
         end_date: endDate,
         initial_usd: initialUsd,
         initial_hkd: initialHkd,
@@ -1101,7 +1100,9 @@ export function PaperTrading() {
             <h2 className="text-sm font-semibold">多时间段稳健性测试</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
               在 {robustResult.windows.filter((w) => !w.is_full).length} 个滚动 {robustResult.window_years} 年窗口 + 全历史上分别按平衡得分排名，取
-              <span className="font-medium text-foreground">平均排名</span>最优。数据区间 {robustResult.data_start} ~ {robustResult.data_end}。
+              <span className="font-medium text-foreground">平均排名</span>最优。共同数据区间 {robustResult.data_start} ~ {robustResult.data_end}
+              （最多 {robustResult.history_cap_years} 年）
+              {robustResult.limiting_symbols.length > 0 && `，受 ${robustResult.limiting_symbols.join("、")} 的历史长度限制`}。
               这是稳健性筛选，降低对单一时段的过拟合，但仍基于历史、不代表未来。
             </p>
           </div>

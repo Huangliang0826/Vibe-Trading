@@ -29,12 +29,14 @@ def register_news_center_routes(
         query: str | None = Query(None, max_length=100),
         symbol: str | None = Query(None, max_length=30),
         watchlist_only: bool = False,
+        language: Literal["zh", "en"] = "zh",
         limit: int = Query(200, ge=1, le=500),
     ) -> NewsCenterList:
         response.headers["Cache-Control"] = "no-store"
         return service.list_articles(
             date_key=date_key, sector=sector, direction=direction, query=query,
             symbol=symbol, watchlist_only=watchlist_only, limit=limit,
+            language=language,
         )
 
     @router.get("/dates", response_model=list[str])
@@ -46,9 +48,10 @@ def register_news_center_routes(
     async def digest(
         response: Response,
         date_key: str = Query(..., alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+        language: Literal["zh", "en"] = "zh",
     ) -> NewsCenterDigest:
         response.headers["Cache-Control"] = "no-store"
-        return service.get_digest(date_key)
+        return service.get_digest(date_key, language=language)
 
     @router.post("/refresh", response_model=NewsCenterRefreshResult)
     async def refresh(response: Response) -> NewsCenterRefreshResult:

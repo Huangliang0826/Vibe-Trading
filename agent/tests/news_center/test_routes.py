@@ -13,7 +13,7 @@ class FakeService:
     def get_dates(self):
         return ["2026-07-01"]
 
-    def get_digest(self, date_key):
+    def get_digest(self, date_key, language="zh"):
         return NewsCenterDigest(
             date=date_key, article_count=0, watchlist_count=0,
             positive_count=0, negative_count=0, summary="暂无", major_items=[],
@@ -29,12 +29,13 @@ def test_articles_pass_filters_to_service():
     register_news_center_routes(app, require_auth=lambda: None, service=service)
 
     response = TestClient(app).get(
-        "/news-center/articles?date=2026-07-01&sector=ai&direction=positive&watchlist_only=true"
+        "/news-center/articles?date=2026-07-01&sector=ai&direction=positive&watchlist_only=true&language=zh"
     )
 
     assert response.status_code == 200
     assert service.filters["date_key"] == "2026-07-01"
     assert service.filters["watchlist_only"] is True
+    assert service.filters["language"] == "zh"
 
 
 def test_digest_and_refresh_contracts():

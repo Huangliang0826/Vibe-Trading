@@ -16,7 +16,7 @@ from src.opportunity_center.models import (
     OpportunityItem,
     OpportunityOutcome,
 )
-from src.opportunity_center.storage import OpportunityStore
+from src.opportunity_center.storage import OpportunityStore, source_id_from_name
 
 
 class CoordinatedJobConnection(sqlite3.Connection):
@@ -35,6 +35,39 @@ class CoordinatedJobConnection(sqlite3.Connection):
         ):
             self.read_barrier.wait(timeout=5)
         return cursor
+
+
+def test_source_id_from_name_keeps_chinese_publishers_distinct_and_stable():
+    qbit = source_id_from_name("量子位")
+    eastmoney = source_id_from_name("东方财富资讯")
+
+    assert qbit.startswith("source-")
+    assert qbit != eastmoney
+    assert source_id_from_name("量子位") == qbit
+    assert source_id_from_name("OpenAI") == "openai"
+
+
+def test_upsert_source_migrates_legacy_id_that_owns_the_same_url(tmp_path):
+    store = OpportunityStore(tmp_path / "opportunities.db")
+    url = "https://example.com/chinese-feed.xml"
+    legacy = sample_source(source_id="source", name="中文媒体", url=url)
+    store.upsert_articles(
+        [sample_article(article_id="legacy-article", source="中文媒体")],
+        source=legacy,
+    )
+    new_id = source_id_from_name("中文媒体")
+
+    store.upsert_articles([], source={**legacy, "source_id": new_id})
+
+    with store._connect() as conn:
+        sources = conn.execute(
+            "SELECT source_id FROM news_sources WHERE url = ?", (url,),
+        ).fetchall()
+        article = conn.execute(
+            "SELECT source_id FROM news_articles WHERE article_id = 'legacy-article'",
+        ).fetchone()
+    assert [row["source_id"] for row in sources] == [new_id]
+    assert article["source_id"] == new_id
 
 
 def sample_item(

@@ -23,6 +23,7 @@ class NewsCenterArticle(BaseModel):
     matches: list[NewsCenterMatch] = Field(default_factory=list)
     importance: float = 0
     major: bool = False
+    language: str = "zh"
 
 
 class NewsCenterList(BaseModel):

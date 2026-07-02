@@ -10,6 +10,7 @@ const SECTOR_LABELS: Record<string, string> = {
 };
 
 export function NewsCenter() {
+  const [language, setLanguage] = useState<"zh" | "en">("zh");
   const [dates, setDates] = useState<string[]>([]);
   const [date, setDate] = useState("");
   const [sector, setSector] = useState("");
@@ -31,8 +32,9 @@ export function NewsCenter() {
         api.getNewsCenterArticles({
           date: selectedDate, sector: sector || undefined, direction: direction || undefined,
           query: query || undefined, watchlistOnly,
+          language,
         }),
-        api.getNewsCenterDigest(selectedDate),
+        api.getNewsCenterDigest(selectedDate, language),
       ]);
       setData(articles);
       setDigest(daily);
@@ -41,7 +43,7 @@ export function NewsCenter() {
     } finally {
       setLoading(false);
     }
-  }, [sector, direction, query, watchlistOnly]);
+  }, [sector, direction, query, watchlistOnly, language]);
 
   useEffect(() => {
     api.getNewsCenterDates().then((items) => {
@@ -87,6 +89,24 @@ export function NewsCenter() {
       </header>
 
       {error && <p className="mt-4 rounded border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-600">{error}</p>}
+
+      <div role="tablist" aria-label="新闻语言" className="mt-5 inline-flex border-b">
+        {([['zh', '中文新闻'], ['en', '英文新闻']] as const).map(([value, label]) => (
+          <button
+            key={value}
+            role="tab"
+            type="button"
+            aria-selected={language === value}
+            onClick={() => setLanguage(value)}
+            className={cn(
+              "h-9 border-b-2 px-4 text-sm font-medium",
+              language === value ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       <section className="border-b py-6">
         <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">今日投资简报</h2><span className="text-xs text-muted-foreground">{digest?.article_count ?? 0} 条新闻</span></div>

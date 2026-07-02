@@ -18,7 +18,7 @@ import signal
 import time
 import csv
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -2430,6 +2430,8 @@ _SMART_T_CACHE: dict[str, tuple[float, dict]] = {}
 _SMART_T_TTL = 24 * 3600
 _HSTECH_BEST_STRATEGY_CACHE: dict[str, tuple[float, dict]] = {}
 _HSTECH_BEST_STRATEGY_TTL = 24 * 3600
+_ROBUST_SELECTION_CACHE: dict[str, tuple[float, dict]] = {}
+_ROBUST_SELECTION_TTL = 365 * 24 * 3600
 _BEST_STRATEGY_DISK_CACHE_DIR = Path.home() / ".vibe-trading" / "cache" / "best_strategy"
 
 
@@ -2478,11 +2480,11 @@ def _best_strategy_disk_cache_path(key: str) -> Path:
     return _BEST_STRATEGY_DISK_CACHE_DIR / f"{digest}.json"
 
 
-def _read_best_strategy_disk_cache(key: str) -> dict | None:
+def _read_best_strategy_disk_cache(key: str, ttl: float = _HSTECH_BEST_STRATEGY_TTL) -> dict | None:
     path = _best_strategy_disk_cache_path(key)
     try:
         stat = path.stat()
-        if time.time() - stat.st_mtime > _HSTECH_BEST_STRATEGY_TTL:
+        if time.time() - stat.st_mtime > ttl:
             return None
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -2756,11 +2758,13 @@ async def get_forecast_best_paper_strategy(
     end_date: str = Query("", pattern=r"^$|^\d{4}-\d{2}-\d{2}$"),
     refresh: bool = Query(False),
 ):
-    """Run the paper-trading strategy pool for one forecast/watchlist symbol."""
+    """Use annual robust selection and refresh only its current signal daily."""
     from src.paper_trading.hstech_best import (
+        ROBUST_SELECTION_VERSION,
         default_end_date,
         normalize_best_strategy_symbol,
-        run_single_symbol_best_strategy,
+        run_selected_single_symbol_strategy,
+        select_single_symbol_robust_strategy,
     )
 
     response.headers["Cache-Control"] = "no-store"
@@ -2772,26 +2776,61 @@ async def get_forecast_best_paper_strategy(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     effective_end = end_date or default_end_date()
-    key = f"forecast-best-paper:{mk}:{display_code}:{start_date}:{effective_end}:v2"
+    selection_key = f"forecast-robust-selection:{mk}:{display_code}:{ROBUST_SELECTION_VERSION}"
+    selection = None
+    selection_cached = False
+    if not refresh:
+        cached_selection = _ROBUST_SELECTION_CACHE.get(selection_key)
+        if cached_selection and (time.time() - cached_selection[0]) < _ROBUST_SELECTION_TTL:
+            selection = cached_selection[1]
+            selection_cached = True
+        if selection is None:
+            selection = _read_best_strategy_disk_cache(selection_key, _ROBUST_SELECTION_TTL)
+            if selection is not None:
+                _ROBUST_SELECTION_CACHE[selection_key] = (time.time(), selection)
+                selection_cached = True
+    try:
+        _name_market = {"hk": "hk_equity", "cn": "a_share"}.get(mk, "us_equity")
+        name = _resolve_symbol_name(display_code, _name_market)
+        if selection is None:
+            selection = await asyncio.to_thread(
+                select_single_symbol_robust_strategy,
+                display_code,
+                mk,
+                end_date=effective_end,
+            )
+            selected_at_ts = time.time()
+            selection = {
+                **selection,
+                "selected_at": datetime.fromtimestamp(selected_at_ts, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "valid_until": datetime.fromtimestamp(selected_at_ts + _ROBUST_SELECTION_TTL, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            }
+            _ROBUST_SELECTION_CACHE[selection_key] = (selected_at_ts, selection)
+            _write_best_strategy_disk_cache(selection_key, selection)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"robust strategy selection failed: {exc}") from exc
+
+    strategy_name = str(selection["selected_strategy"])
+    key = f"forecast-robust-signal:{mk}:{display_code}:{effective_end}:{strategy_name}:{ROBUST_SELECTION_VERSION}"
     cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
     if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
-        return {**cached[1], "cached": True}
+        return {**cached[1], "cached": True, "selection_cached": True, "signal_cached": True}
     if not refresh:
         disk_cached = _read_best_strategy_disk_cache(key)
         if disk_cached is not None:
             _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), disk_cached)
-            return {**disk_cached, "cached": True}
+            return {**disk_cached, "cached": True, "selection_cached": selection_cached, "signal_cached": True}
     try:
-        _name_market = {"hk": "hk_equity", "cn": "a_share"}.get(mk, "us_equity")
-        name = _resolve_symbol_name(display_code, _name_market)
         payload = await asyncio.to_thread(
-            run_single_symbol_best_strategy,
+            run_selected_single_symbol_strategy,
             display_code,
             mk,
             name,
             display_code,
-            start_date,
-            effective_end,
+            selection=selection,
+            end_date=effective_end,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2799,7 +2838,12 @@ async def get_forecast_best_paper_strategy(
         raise HTTPException(status_code=500, detail=f"best strategy failed: {exc}") from exc
     _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), payload)
     _write_best_strategy_disk_cache(key, payload)
-    return {**payload, "cached": False}
+    return {
+        **payload,
+        "cached": False,
+        "selection_cached": selection_cached,
+        "signal_cached": False,
+    }
 
 
 def _terminate_current_process() -> None:

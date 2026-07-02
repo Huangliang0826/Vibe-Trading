@@ -248,10 +248,11 @@ export const api = {
     if (filters.query) params.set("query", filters.query);
     if (filters.symbol) params.set("symbol", filters.symbol);
     if (filters.watchlistOnly) params.set("watchlist_only", "true");
+    if (filters.language) params.set("language", filters.language);
     return request<NewsCenterList>(`/news-center/articles?${params}`);
   },
-  getNewsCenterDigest: (date: string) =>
-    request<NewsCenterDigest>(`/news-center/digest?date=${encodeURIComponent(date)}`),
+  getNewsCenterDigest: (date: string, language: "zh" | "en" = "zh") =>
+    request<NewsCenterDigest>(`/news-center/digest?date=${encodeURIComponent(date)}&language=${language}`),
   refreshNewsCenter: () => request<NewsCenterRefreshResult>("/news-center/refresh", { method: "POST" }),
 
   // 行业研报库
@@ -485,6 +486,7 @@ export interface NewsCenterMatch {
 export interface NewsCenterArticle {
   article_id: string; source: string; title: string; url: string; published_at: string;
   summary: string; sector: string; matches: NewsCenterMatch[]; importance: number; major: boolean;
+  language?: "zh" | "en";
 }
 export interface NewsCenterList { items: NewsCenterArticle[]; total: number; sectors: string[]; }
 export interface NewsCenterDigest {
@@ -495,6 +497,7 @@ export interface NewsCenterRefreshResult { fetched: number; total: number; lates
 export interface NewsCenterFilters {
   date?: string; sector?: string; direction?: string; query?: string;
   symbol?: string; watchlistOnly?: boolean;
+  language?: "zh" | "en";
 }
 
 export type PriceHistoryPeriod = "1D" | "1M" | "YTD" | "1Y" | "3Y" | "5Y" | "ALL";
@@ -851,7 +854,7 @@ export interface PaperTradingCreate {
 export interface RobustOptimizeRequest {
   holdings: PaperHolding[];
   strategies: { name: string; params: Record<string, unknown> }[];
-  start_date: string;
+  start_date?: string;
   end_date: string;
   initial_usd?: number;
   initial_hkd?: number;
@@ -893,6 +896,8 @@ export interface RobustOptimizeResult {
   window_years: number;
   data_start: string;
   data_end: string;
+  limiting_symbols: string[];
+  history_cap_years: number;
 }
 
 export interface PaperTradingRun {
@@ -970,6 +975,31 @@ export interface HSTechBestStrategyResponse {
   candidates: HSTechBestStrategyCandidate[];
   summary: string;
   cached?: boolean;
+  reliable?: boolean;
+  signal_as_of?: string;
+  selection_cached?: boolean;
+  signal_cached?: boolean;
+  selection?: {
+    selected_strategy: string;
+    selected_at?: string;
+    valid_until?: string;
+    reliable: boolean;
+    training_end?: string;
+    confidence_level?: "standard" | "low";
+    history_note?: string;
+    history_bars?: number;
+  };
+  oos_validation?: {
+    start_date: string;
+    end_date: string;
+    passed: boolean;
+    metrics?: {
+      total_return?: number | null;
+      sharpe?: number | null;
+      max_drawdown?: number | null;
+      trade_count?: number | null;
+    };
+  };
 }
 
 export interface ForecastResponse {

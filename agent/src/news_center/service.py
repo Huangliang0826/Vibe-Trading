@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from pathlib import Path
+import re
 from typing import Any
 
 from src.news_center.models import (
@@ -30,12 +31,14 @@ class NewsCenterService:
         query: str | None = None,
         symbol: str | None = None,
         watchlist_only: bool = False,
+        language: str = "zh",
         limit: int = 200,
     ) -> NewsCenterList:
         rows = self._current_rows()
         items = [self._article(row) for row in rows]
         if date_key:
             items = [item for item in items if item.published_at[:10] == date_key]
+        items = [item for item in items if item.language == language]
         if sector:
             items = [item for item in items if item.sector == sector]
         if direction:
@@ -59,8 +62,8 @@ class NewsCenterService:
         rows = self._current_rows()
         return sorted({str(row["published_at"])[:10] for row in rows}, reverse=True)
 
-    def get_digest(self, date_key: str) -> NewsCenterDigest:
-        result = self.list_articles(date_key=date_key, limit=500)
+    def get_digest(self, date_key: str, language: str = "zh") -> NewsCenterDigest:
+        result = self.list_articles(date_key=date_key, language=language, limit=500)
         items = result.items
         major = [item for item in items if item.major][:5] or items[:5]
         positive = sum(any(m.direction == "positive" for m in item.matches) for item in items)
@@ -104,4 +107,19 @@ class NewsCenterService:
         strength = max((float(match.get("strength") or 0) for match in matches), default=0)
         macro = row.get("sector") == "macro"
         importance = strength + (30 if direct else 15 if matches else 0) + (10 if macro else 0)
-        return NewsCenterArticle(**row, importance=importance, major=direct or strength >= 70 or macro)
+        language = _detect_language(str(row.get("title", "")), str(row.get("summary", "")))
+        return NewsCenterArticle(
+            **row, importance=importance, major=direct or strength >= 70 or macro,
+            language=language,
+        )
+
+
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+
+
+def _detect_language(title: str, summary: str) -> str:
+    """Classify mixed Chinese headlines as Chinese; otherwise inspect the summary."""
+    if _CJK_RE.search(title):
+        return "zh"
+    cjk_count = len(_CJK_RE.findall(summary))
+    return "zh" if cjk_count >= 2 else "en"

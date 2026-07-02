@@ -25,12 +25,42 @@ logger = logging.getLogger(__name__)
 
 MAX_LOSS_PENALTY = 2.0  # mirrors the frontend balanceScore weight
 _MAX_WINDOWS = 8         # bound compute (strategies × windows)
+_MAX_HISTORY_YEARS = 20
 
 
 def _balance_score(metrics: Dict[str, Any]) -> float:
     ret = float(metrics.get("total_return", 0.0) or 0.0)
     loss = abs(float(metrics.get("max_loss", 0.0) or 0.0))
     return ret - MAX_LOSS_PENALTY * loss
+
+
+def _history_start_date(end_date: str, max_years: int = _MAX_HISTORY_YEARS) -> str:
+    end = pd.Timestamp(end_date)
+    return (end - pd.DateOffset(years=max_years)).strftime("%Y-%m-%d")
+
+
+def _common_data_span(
+    data_map: Dict[str, pd.DataFrame],
+    required_codes: List[str],
+) -> tuple[pd.Timestamp, pd.Timestamp, List[str]]:
+    missing = [code for code in required_codes if code not in data_map or len(data_map[code]) < 2]
+    if missing:
+        raise ValueError(f"No price data for: {', '.join(missing)}")
+
+    starts = {
+        code: pd.Timestamp(pd.to_datetime(data_map[code].index).min()).tz_localize(None)
+        for code in required_codes
+    }
+    ends = {
+        code: pd.Timestamp(pd.to_datetime(data_map[code].index).max()).tz_localize(None)
+        for code in required_codes
+    }
+    span_start = max(starts.values())
+    span_end = min(ends.values())
+    if span_start >= span_end:
+        raise ValueError("Portfolio holdings have no overlapping price history")
+    limiting = sorted(code for code, start in starts.items() if start == span_start)
+    return span_start, span_end, limiting
 
 
 def _build_windows(
@@ -90,7 +120,7 @@ def _build_windows(
 
 def run_robust_optimize(
     holdings: List[PaperHolding],
-    start_date: str,
+    start_date: str | None,
     end_date: str,
     initial_cash: float,
     strategy_specs: List[Dict[str, Any]],
@@ -109,15 +139,13 @@ def run_robust_optimize(
         raise ValueError("Portfolio has no equity holdings — only cash")
 
     codes = [_to_code(h) for h in equity_holdings]
-    data_map = YFinanceLoader().fetch(codes, start_date, end_date, interval="1D")
+    fetch_start = _history_start_date(end_date)
+    data_map = YFinanceLoader().fetch(codes, fetch_start, end_date, interval="1D")
     if not data_map:
         raise ValueError("No price data fetched — check symbols and date range")
 
-    # Actual data extent (intersection-free union; we slice per-symbol later).
-    all_idx = sorted(set().union(*(df.index for df in data_map.values())))
-    if len(all_idx) < 2:
-        raise ValueError("Not enough price history")
-    span_start, span_end = pd.Timestamp(all_idx[0]), pd.Timestamp(all_idx[-1])
+    span_start, span_end, limiting_symbols = _common_data_span(data_map, codes)
+    data_map = {code: data_map[code].loc[span_start:span_end] for code in codes}
 
     windows = _build_windows(span_start, span_end, window_years, step_years)
 
@@ -216,4 +244,6 @@ def run_robust_optimize(
         "window_years": window_years,
         "data_start": span_start.strftime("%Y-%m-%d"),
         "data_end": span_end.strftime("%Y-%m-%d"),
+        "limiting_symbols": limiting_symbols,
+        "history_cap_years": _MAX_HISTORY_YEARS,
     }

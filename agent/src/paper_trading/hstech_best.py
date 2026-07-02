@@ -205,6 +205,216 @@ def run_single_symbol_best_strategy(
     }
 
 
+ROBUST_SELECTION_VERSION = "single-symbol-robust-oos-v2"
+
+
+def _robust_validation_profile(history_bars: int) -> dict[str, Any]:
+    if history_bars < 504:
+        raise ValueError("Robust selection requires at least two years of price history")
+    if history_bars < 1008:
+        return {
+            "window_years": 1,
+            "step_years": 1,
+            "holdout_months": 6,
+            "confidence_level": "low",
+            "history_note": "历史不足4年，使用1年滚动窗口和6个月样本外验证",
+        }
+    return {
+        "window_years": 3,
+        "step_years": 2,
+        "holdout_months": 12,
+        "confidence_level": "standard",
+        "history_note": "使用3年滚动窗口和最近1年样本外验证",
+    }
+
+
+def select_single_symbol_robust_strategy(
+    code: str,
+    market: str,
+    *,
+    end_date: str | None = None,
+    initial_usd: float = 100_000.0,
+    initial_hkd: float = 1_000_000.0,
+    loader: Any | None = None,
+    robust_runner: Any | None = None,
+    strategy_runner: Any | None = None,
+) -> dict[str, Any]:
+    """Select a rolling-window winner using the latest year only for validation."""
+    from src.paper_trading.robust import _history_start_date, run_robust_optimize
+
+    end = end_date or default_end_date()
+    mk = market.lower().strip()
+    paper_symbol, yahoo_symbol, display_code = normalize_best_strategy_symbol(code, mk)
+    holding = PaperHolding(symbol=paper_symbol, market=mk, allocation_pct=100.0)
+    initial_total_usd = round(initial_usd + initial_hkd * HKD_TO_USD, 2)
+    data_loader = loader or YFinanceLoader()
+    full_data = data_loader.fetch([yahoo_symbol], _history_start_date(end), end, interval="1D")
+    frame = full_data.get(yahoo_symbol) if full_data else None
+    if frame is None:
+        raise ValueError(f"Not enough price history for robust selection: {yahoo_symbol}")
+
+    profile = _robust_validation_profile(len(frame))
+    full_end = pd.Timestamp(frame.index.max()).tz_localize(None)
+    training_end = full_end - pd.DateOffset(months=profile["holdout_months"])
+    oos_start = training_end + pd.Timedelta(days=1)
+    training_frame = frame.loc[:training_end]
+    oos_frame = frame.loc[oos_start:full_end]
+    min_training_bars = 252 if profile["confidence_level"] == "low" else 756
+    min_oos_bars = 80 if profile["confidence_level"] == "low" else 120
+    if len(training_frame) < min_training_bars or len(oos_frame) < min_oos_bars:
+        raise ValueError(f"Not enough train/OOS history for robust selection: {yahoo_symbol}")
+
+    specs = [{"name": strategy_name, "params": strategy_params(strategy_name)} for strategy_name in STRATEGY_NAMES]
+    runner = robust_runner or run_robust_optimize
+    robust_result = runner(
+        [holding], None, training_end.strftime("%Y-%m-%d"), initial_total_usd,
+        specs, profile["window_years"], profile["step_years"],
+    )
+    ranked_names = [row["name"] for row in robust_result.get("strategies", [])]
+    if not ranked_names:
+        raise ValueError(f"No robust strategy candidates for {display_code}")
+
+    run_strategy = strategy_runner or _run_strategy
+    oos_runs: dict[str, dict[str, Any]] = {}
+    selected = ranked_names[0]
+    reliable = False
+    for strategy_name in ranked_names:
+        oos_run = run_strategy(
+            strategy_name,
+            holding=holding,
+            data_map={yahoo_symbol: oos_frame},
+            start_date=oos_start.strftime("%Y-%m-%d"),
+            end_date=full_end.strftime("%Y-%m-%d"),
+            initial_total_usd=initial_total_usd,
+            run_prefix=f"oos-{mk}-{display_code.lower()}",
+            title_prefix=display_code,
+        )
+        oos_runs[strategy_name] = oos_run
+        if _oos_passed(oos_run):
+            selected = strategy_name
+            reliable = True
+            break
+
+    selected_oos = oos_runs[selected]
+    metrics = selected_oos.get("metrics") or {}
+    return {
+        "selection_version": ROBUST_SELECTION_VERSION,
+        "selected_strategy": selected,
+        "reliable": reliable,
+        "training_end": training_end.strftime("%Y-%m-%d"),
+        "confidence_level": profile["confidence_level"],
+        "history_note": profile["history_note"],
+        "history_bars": len(frame),
+        "oos_validation": {
+            "start_date": oos_start.strftime("%Y-%m-%d"),
+            "end_date": full_end.strftime("%Y-%m-%d"),
+            "passed": reliable,
+            "metrics": {
+                "total_return": metrics.get("total_return"),
+                "sharpe": metrics.get("sharpe"),
+                "max_drawdown": metrics.get("max_drawdown"),
+                "trade_count": metrics.get("trade_count"),
+            },
+        },
+        "robust_result": robust_result,
+    }
+
+
+def run_selected_single_symbol_strategy(
+    code: str,
+    market: str,
+    name: str | None,
+    display_code: str | None,
+    *,
+    selection: dict[str, Any],
+    end_date: str | None = None,
+    initial_usd: float = 100_000.0,
+    initial_hkd: float = 1_000_000.0,
+    loader: Any | None = None,
+    strategy_runner: Any | None = None,
+) -> dict[str, Any]:
+    """Refresh current trades by running only the annually selected strategy."""
+    from src.paper_trading.robust import _history_start_date
+
+    end = end_date or default_end_date()
+    mk = market.lower().strip()
+    paper_symbol, yahoo_symbol, normalized_display = normalize_best_strategy_symbol(code, mk)
+    shown_code = display_code or normalized_display
+    shown_name = name or shown_code
+    holding = PaperHolding(symbol=paper_symbol, market=mk, allocation_pct=100.0)
+    initial_total_usd = round(initial_usd + initial_hkd * HKD_TO_USD, 2)
+    data_loader = loader or YFinanceLoader()
+    data_map = data_loader.fetch([yahoo_symbol], _history_start_date(end), end, interval="1D")
+    frame = data_map.get(yahoo_symbol) if data_map else None
+    if frame is None or len(frame) < 2:
+        raise ValueError(f"No price data fetched for {yahoo_symbol}")
+    actual_start = pd.Timestamp(frame.index.min()).strftime("%Y-%m-%d")
+    actual_end = pd.Timestamp(frame.index.max()).strftime("%Y-%m-%d")
+    strategy_name = str(selection["selected_strategy"])
+    run_strategy = strategy_runner or _run_strategy
+    best = run_strategy(
+        strategy_name,
+        holding=holding,
+        data_map={yahoo_symbol: frame},
+        start_date=actual_start,
+        end_date=actual_end,
+        initial_total_usd=initial_total_usd,
+        run_prefix=f"robust-{mk}-{normalized_display.lower()}",
+        title_prefix=shown_code,
+    )
+    if best.get("status") != "completed":
+        raise ValueError(best.get("error") or f"Selected strategy failed for {shown_code}")
+    oos = selection.get("oos_validation") or {}
+    oos_metrics = oos.get("metrics") or {}
+    robust_rows = (selection.get("robust_result") or {}).get("strategies", [])
+    summary = " ".join([
+        STRATEGY_PRINCIPLES.get(strategy_name, f"策略原理：{STRATEGY_LABELS.get(strategy_name, strategy_name)} 根据历史价格动态调整仓位。"),
+        f"该策略按多时间段平均排名筛选，最近一年样本外夏普为 {_finite(oos_metrics.get('sharpe')):.2f}，"
+        f"样本外收益为 {_fmt_pct(_finite(oos_metrics.get('total_return')))}。",
+        _latest_trade_summary(best.get("trades") or [], shown_code),
+    ])
+    return {
+        "code": shown_code,
+        "name": shown_name,
+        "market": mk,
+        "start_date": actual_start,
+        "end_date": actual_end,
+        "initial_total_usd": initial_total_usd,
+        "best": best,
+        "candidates": [_robust_candidate_row(row) for row in robust_rows],
+        "summary": summary,
+        "selection": selection,
+        "oos_validation": oos,
+        "reliable": bool(selection.get("reliable")),
+        "signal_as_of": end,
+    }
+
+
+def _oos_passed(run: dict[str, Any]) -> bool:
+    metrics = run.get("metrics") or {}
+    return (
+        run.get("status") == "completed"
+        and _finite(metrics.get("sharpe"), -1.0) >= 0
+        and _finite(metrics.get("max_drawdown"), -1.0) >= -0.35
+    )
+
+
+def _robust_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
+    strategy_name = str(row.get("name", ""))
+    return {
+        "strategy": {"name": strategy_name, "label": STRATEGY_LABELS.get(strategy_name, strategy_name), "params": strategy_params(strategy_name)},
+        "status": "completed" if row.get("ok_count", 0) else "failed",
+        "metrics": {
+            "mean_rank": row.get("mean_rank"),
+            "worst_rank": row.get("worst_rank"),
+            "rank_std": row.get("rank_std"),
+            "total_return": row.get("mean_return"),
+            "max_drawdown": row.get("mean_max_loss"),
+        },
+        "error": None,
+    }
+
+
 def strategy_params(strategy_name: str) -> dict[str, Any]:
     if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend"}:
         return {"frequency": "monthly"}

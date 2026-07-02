@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const apiMock = vi.hoisted(() => ({
@@ -32,4 +33,19 @@ it("renders the daily digest and traceable news article", async () => {
     "href", "https://example.com",
   );
   expect(screen.getByText("0700")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "中文新闻" })).toHaveAttribute("aria-selected", "true");
+  expect(apiMock.getNewsCenterArticles).toHaveBeenCalledWith(expect.objectContaining({ language: "zh" }));
+  expect(apiMock.getNewsCenterDigest).toHaveBeenCalledWith("2026-07-01", "zh");
+});
+
+it("switches the article list and digest to English", async () => {
+  render(<NewsCenter />);
+  await screen.findByText("今日重点关注腾讯。");
+
+  await userEvent.click(screen.getByRole("tab", { name: "英文新闻" }));
+
+  await waitFor(() => expect(apiMock.getNewsCenterArticles).toHaveBeenLastCalledWith(
+    expect.objectContaining({ language: "en" }),
+  ));
+  expect(apiMock.getNewsCenterDigest).toHaveBeenLastCalledWith("2026-07-01", "en");
 });

@@ -45,7 +45,7 @@ function daysAgoISO(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function recentSignalsFromBestStrategies(
+export function recentSignalsFromBestStrategies(
   items: WatchlistItem[],
   states: Record<string, BestStrategyState>,
   sinceISO: string,
@@ -54,8 +54,9 @@ function recentSignalsFromBestStrategies(
   for (const item of items) {
     const key = stockKey(item.market, item.code);
     const run = states[key]?.data;
+    if (run?.reliable === false) continue;
     const trades = run?.best?.trades || [];
-    const strategyLabel = run?.best?.strategy?.label || run?.best?.strategy?.name || "最优策略";
+    const strategyLabel = run?.best?.strategy?.label || run?.best?.strategy?.name || "最稳健策略";
     for (const trade of trades as TradeSignal[]) {
       if (trade.entry_date >= sinceISO) {
         signals.push({
@@ -69,7 +70,7 @@ function recentSignalsFromBestStrategies(
           price: trade.entry_price,
         });
       }
-      if (trade.exit_date >= sinceISO) {
+      if (trade.exit_reason !== "end_of_backtest" && trade.exit_date >= sinceISO) {
         signals.push({
           key: `${key}:exit:${trade.exit_date}`,
           market: item.market,
@@ -85,7 +86,8 @@ function recentSignalsFromBestStrategies(
     }
   }
   const latestByStock = new Map<string, RecentStrategySignal>();
-  for (const signal of signals.sort((a, b) => b.date.localeCompare(a.date))) {
+  // Later events on the same date win (for example, rebalance exit then reopen).
+  for (const signal of signals.sort((a, b) => a.date.localeCompare(b.date)).reverse()) {
     const key = stockKey(signal.market, signal.code);
     if (!latestByStock.has(key)) {
       latestByStock.set(key, signal);
@@ -97,6 +99,23 @@ function recentSignalsFromBestStrategies(
 function fmtRet(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+}
+
+export function formatHistoryDuration(startISO: string, endISO: string): string {
+  const start = new Date(`${startISO}T00:00:00Z`);
+  const end = new Date(`${endISO}T00:00:00Z`);
+  const days = Math.max(0, (end.getTime() - start.getTime()) / 86_400_000);
+  if (days >= 365.2425 * 2) {
+    const roundedYears = Math.round((days / 365.2425) * 10) / 10;
+    return `${Number.isInteger(roundedYears) ? roundedYears.toFixed(0) : roundedYears.toFixed(1)}年`;
+  }
+  const months = Math.max(
+    0,
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12
+      + end.getUTCMonth() - start.getUTCMonth()
+      - (end.getUTCDate() < start.getUTCDate() ? 1 : 0),
+  );
+  return months < 1 ? "不足1个月" : `${months}个月`;
 }
 
 function RecentSignalsPanel({
@@ -114,7 +133,7 @@ function RecentSignalsPanel({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h2 className="text-sm font-semibold text-foreground">最近 7 天策略信号</h2>
-          <p className="text-[11px] text-muted-foreground">来自每只自选股的模拟盘最优策略，结果每日自动缓存</p>
+          <p className="text-[11px] text-muted-foreground">来自每只自选股的多时间段稳健策略，年度选择、每日更新信号</p>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           {loadingCount > 0 && (
@@ -221,7 +240,11 @@ function ForecastCard({
   const bestStrategy = bestStrategyState?.data || null;
   const bestStrategyLoading = !!bestStrategyState?.loading;
   const bestStrategyError = bestStrategyState?.error || null;
-  const trades = bestStrategy?.best?.trades || [];
+  const trades = bestStrategy?.reliable === false ? [] : bestStrategy?.best?.trades || [];
+  const oosMetrics = bestStrategy?.oos_validation?.metrics;
+  const historyDuration = bestStrategy
+    ? formatHistoryDuration(bestStrategy.start_date, bestStrategy.end_date)
+    : "";
 
   useEffect(() => {
     let cancelled = false;
@@ -249,7 +272,7 @@ function ForecastCard({
           {bestStrategy?.best?.metrics && (
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
-                总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}
+                总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}（{historyDuration}）
               </span>
               <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
                 最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
@@ -263,10 +286,16 @@ function ForecastCard({
             onClick={() => onRefreshBestStrategy(market, code, true)}
             disabled={bestStrategyLoading}
             className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
-            title={bestStrategy?.best?.strategy?.label ? `当前最优：${bestStrategy.best.strategy.label}` : "运行模拟盘策略池，刷新最优买卖信号"}
+            title={bestStrategy?.best?.strategy?.label ? `当前最稳健：${bestStrategy.best.strategy.label}` : "运行多时间段测试，刷新稳健策略"}
           >
             {bestStrategyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TrendingUp className="h-3.5 w-3.5" />}
-            {bestStrategyLoading ? "策略回测中" : bestStrategy?.best?.strategy?.label ? `最优：${bestStrategy.best.strategy.label}` : "最优策略"}
+            {bestStrategyLoading
+              ? "策略筛选中"
+              : bestStrategy?.reliable === false
+                ? "暂无可靠策略"
+                : bestStrategy?.best?.strategy?.label
+                  ? `最稳健：${bestStrategy.best.strategy.label}`
+                  : "最稳健策略"}
           </button>
           {data && !data.model && (
             <span className="text-[10px] text-yellow-600 dark:text-yellow-400">
@@ -291,27 +320,47 @@ function ForecastCard({
             <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium text-foreground">AI 总结 · 模拟盘最优策略</p>
+                  <p className="text-xs font-medium text-foreground">AI 总结 · 多时间段最稳健策略</p>
                   {bestStrategy?.best?.metrics && (
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {bestStrategy.best.strategy.label || bestStrategy.best.strategy.name}
                       <span className="mx-1">·</span>
-                      总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}
+                      总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}（{historyDuration}）
                       <span className="mx-1">·</span>
                       最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
                       <span className="mx-1">·</span>
                       夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
                     </p>
                   )}
+                  {oosMetrics && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      样本外收益 {fmtRet(oosMetrics.total_return)}
+                      <span className="mx-1">·</span>
+                      样本外夏普 {Number(oosMetrics.sharpe ?? 0).toFixed(2)}
+                      <span className="mx-1">·</span>
+                      样本外最大亏损 {fmtRet(oosMetrics.max_drawdown)}
+                    </p>
+                  )}
+                  {bestStrategy?.selection?.confidence_level === "low" && (
+                    <p className="mt-1 text-[11px] text-amber-600">
+                      低可信度 · {bestStrategy.selection.history_note}
+                    </p>
+                  )}
                 </div>
-                {bestStrategy?.cached && <span className="text-[10px] text-muted-foreground">24小时缓存</span>}
+                <div className="text-right text-[10px] text-muted-foreground">
+                  {bestStrategy?.selection_cached && <p>年度选择已缓存</p>}
+                  {bestStrategy?.signal_cached && <p>每日信号已缓存</p>}
+                  {bestStrategy?.selection?.valid_until && <p>有效至 {bestStrategy.selection.valid_until.slice(0, 10)}</p>}
+                </div>
               </div>
               {bestStrategyLoading ? (
                 <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在运行模拟盘策略池…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在运行多时间段策略筛选…
                 </p>
               ) : bestStrategyError ? (
                 <p className="mt-2 text-xs text-red-500">{bestStrategyError}</p>
+              ) : bestStrategy?.reliable === false ? (
+                <p className="mt-2 text-sm leading-6 text-amber-600">最近一年样本外验证未通过，暂不提供开仓或平仓信号。</p>
               ) : bestStrategy?.summary ? (
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">{bestStrategy.summary}</p>
               ) : null}
@@ -372,7 +421,7 @@ export function Forecast() {
       .catch((e) => {
         setBestByKey((prev) => ({
           ...prev,
-          [key]: { data: prev[key]?.data || null, loading: false, error: e?.message || "最优策略回测失败" },
+          [key]: { data: prev[key]?.data || null, loading: false, error: e?.message || "稳健策略筛选失败" },
         }));
       });
   }, []);
