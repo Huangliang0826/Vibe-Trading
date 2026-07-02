@@ -4,10 +4,10 @@ import { Overview, stockChartViewTabs } from "../Overview";
 
 
 describe("Overview historical event tabs", () => {
-  it("shows historical events for HK and US but not A shares", () => {
+  it("shows historical events for A shares, HK, and US", () => {
     expect(stockChartViewTabs("hk").map((tab) => tab.key)).toContain("historical_events");
     expect(stockChartViewTabs("us").map((tab) => tab.key)).toContain("historical_events");
-    expect(stockChartViewTabs("cn").map((tab) => tab.key)).not.toContain("historical_events");
+    expect(stockChartViewTabs("cn").map((tab) => tab.key)).toContain("historical_events");
   });
 });
 

@@ -7,6 +7,29 @@ import { ValuationChart } from "@/components/charts/ValuationChart";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 30_000;
+const MARKET_INDEX_CACHE_KEY = "overview-market-indices:v1";
+
+interface MarketIndexCache {
+  cachedAt: number;
+  data: MarketIndex[];
+}
+
+function loadMarketIndexCache(): MarketIndexCache | null {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(MARKET_INDEX_CACHE_KEY) || "null") as MarketIndexCache | null;
+    return parsed && Array.isArray(parsed.data) && parsed.data.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveMarketIndexCache(data: MarketIndex[], cachedAt: number) {
+  try {
+    sessionStorage.setItem(MARKET_INDEX_CACHE_KEY, JSON.stringify({ data, cachedAt }));
+  } catch {
+    // A disabled or full session store should not block live quotes.
+  }
+}
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -362,8 +385,8 @@ const VIEW_TABS: { key: CardView; label: string }[] = [
   { key: "mktcap", label: "市值" },
 ];
 
-export function stockChartViewTabs(market: WatchlistMarket): { key: CardView; label: string }[] {
-  return market === "cn" ? VIEW_TABS : [...VIEW_TABS, { key: "historical_events", label: "重大历史事件" }];
+export function stockChartViewTabs(_market: WatchlistMarket): { key: CardView; label: string }[] {
+  return [...VIEW_TABS, { key: "historical_events", label: "重大历史事件" }];
 }
 
 function StockChartCard({ code, market, id }: { code: string; market: WatchlistMarket; id?: string }) {
@@ -494,10 +517,11 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
 // ── Overview page ─────────────────────────────────────────────────────────
 
 export function Overview() {
-  const [indices, setIndices] = useState<MarketIndex[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialIndexCache = useRef(loadMarketIndexCache()).current;
+  const [indices, setIndices] = useState<MarketIndex[]>(() => initialIndexCache?.data ?? []);
+  const [loading, setLoading] = useState(() => !initialIndexCache);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(() => initialIndexCache ? new Date(initialIndexCache.cachedAt) : null);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
 
@@ -512,7 +536,9 @@ export function Overview() {
     try {
       const data = await api.getMarketIndices();
       setIndices(data);
-      setLastUpdated(new Date());
+      const updatedAt = Date.now();
+      setLastUpdated(new Date(updatedAt));
+      saveMarketIndexCache(data, updatedAt);
       setFlash(true);
       setTimeout(() => setFlash(false), 700);
     } catch (e) {

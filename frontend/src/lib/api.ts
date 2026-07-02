@@ -412,14 +412,14 @@ export const api = {
   getOpportunityCalibration: (scope: "top3" | "all" = "top3") =>
     request<OpportunityCalibrationSummary>(`/opportunities/calibration?scope=${scope}`),
 
-  startHistoricalEventRun: (market: "hk" | "us", code: string, companyName: string, period: HistoricalEventPeriod, force = false) =>
+  startHistoricalEventRun: (market: "cn" | "hk" | "us", code: string, companyName: string, period: HistoricalEventPeriod, force = false) =>
     request<HistoricalEventRun>("/historical-events/runs", {
       method: "POST",
       body: JSON.stringify({ market, code, company_name: companyName, period, force }),
     }),
   getHistoricalEventRun: (runId: string) =>
     request<HistoricalEventRun>(`/historical-events/runs/${encodeURIComponent(runId)}`),
-  getHistoricalEvents: (market: "hk" | "us", code: string, period: HistoricalEventPeriod) =>
+  getHistoricalEvents: (market: "cn" | "hk" | "us", code: string, period: HistoricalEventPeriod) =>
     request<HistoricalEvent[]>(`/historical-events/${market}/${encodeURIComponent(code)}?period=${period}`),
 
 };
@@ -440,7 +440,7 @@ export interface HistoricalEventEvidence {
 
 export interface HistoricalEvent {
   event_id: string;
-  market: "hk" | "us";
+  market: "cn" | "hk" | "us";
   symbol: string;
   company_name: string;
   start_date: string;
@@ -467,7 +467,7 @@ export interface HistoricalEvent {
 
 export interface HistoricalEventRun {
   run_id: string;
-  market: "hk" | "us";
+  market: "cn" | "hk" | "us";
   symbol: string;
   company_name: string;
   period: HistoricalEventPeriod;

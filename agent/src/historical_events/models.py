@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 EventDirection = Literal["up", "down"]
 AssetType = Literal["stock", "etf"]
-EventMarket = Literal["hk", "us"]
+EventMarket = Literal["cn", "hk", "us"]
 Confidence = Literal["高", "中", "低"]
 
 

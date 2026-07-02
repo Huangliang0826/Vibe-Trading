@@ -10,7 +10,7 @@ from src.historical_events.models import HistoricalEvent, HistoricalEventRun
 from src.historical_events.service import HistoricalEventService
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
-Market = Literal["hk", "us"]
+Market = Literal["cn", "hk", "us"]
 Period = Literal["1Y", "3Y", "5Y", "ALL"]
 
 

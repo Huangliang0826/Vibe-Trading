@@ -53,4 +53,42 @@ describe("HistoricalEventsView", () => {
     expect(screen.getAllByText("季度业绩高于预期")).not.toHaveLength(0);
     expect(screen.getAllByRole("link", { name: "腾讯公布第一季度业绩" })[0]).toHaveAttribute("href", "https://example.com/results");
   });
+
+  it("shows DeepSeek attribution without an empty news section", async () => {
+    apiMock.getHistoricalEvents.mockResolvedValue([{
+      ...event,
+      primary_driver: "游戏监管草案引发盈利担忧，股价大跌。",
+      narrative: "",
+      evidence: [],
+      analysis_version: "historical-event-analysis-v7",
+      causality_note: "该归因由 DeepSeek 基于历史知识生成，仅用于快速研究。",
+    }]);
+    render(<HistoricalEventsView market="hk" code="0700" companyName="腾讯控股" period="1Y" bars={bars} onPeriodChange={vi.fn()} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "打开2024-05-14重大事件" }));
+
+    expect(screen.getAllByText("DeepSeek 快速归因")).not.toHaveLength(0);
+    expect(screen.queryByText("未找到足够可靠的同期证据。")).not.toBeInTheDocument();
+  });
+
+  it("shows detected markers before DeepSeek finishes", async () => {
+    apiMock.startHistoricalEventRun.mockResolvedValue({
+      run_id: "r2", status: "running", cached: false, progress: 40,
+      stage: "波动标记已就绪，DeepSeek 正在分析", event_count: 1,
+    });
+    apiMock.getHistoricalEvents.mockResolvedValue([{
+      ...event,
+      primary_driver: "正在分析原因",
+      narrative: "",
+      confidence: "低",
+      evidence: [],
+      analysis_version: "historical-event-analysis-v7",
+    }]);
+    apiMock.getHistoricalEventRun.mockReturnValue(new Promise(() => {}));
+
+    render(<HistoricalEventsView market="hk" code="0700" companyName="腾讯控股" period="1Y" bars={bars} onPeriodChange={vi.fn()} />);
+
+    expect(await screen.findByText("1 次重大波动")).toBeInTheDocument();
+    expect(screen.getByText(/DeepSeek 正在分析/)).toBeInTheDocument();
+  });
 });

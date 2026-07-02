@@ -7,8 +7,6 @@ from src.historical_events.models import HistoricalEventRun
 
 class FakeService:
     def start_run(self, market, code, company_name, period, force=False):
-        if market == "cn":
-            raise ValueError("仅支持港股和美股")
         return HistoricalEventRun(run_id="run-1", market=market, symbol=code, company_name=company_name, period=period)
 
     def run(self, run_id):
@@ -36,7 +34,7 @@ def test_create_run_returns_structured_job():
     assert response.json()["run_id"] == "run-1"
 
 
-def test_get_events_validates_supported_market():
+def test_get_events_supports_a_shares():
     response = client().get("/historical-events/cn/600519?period=1Y")
 
-    assert response.status_code == 422
+    assert response.status_code == 200

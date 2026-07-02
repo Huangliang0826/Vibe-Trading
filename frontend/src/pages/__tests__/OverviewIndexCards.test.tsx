@@ -16,12 +16,27 @@ import { Overview } from "../Overview";
 describe("Overview index cards", () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     apiMock.getWatchlistCodes.mockResolvedValue({ codes: [] });
     apiMock.getMarketIndices.mockResolvedValue([
       { code: "000001.SS", name: "上证指数", market: "A股", price: 3000, change_pct: 1, prev_close: 2970 },
       { code: "HSI", name: "恒生指数", market: "港股", price: 22000, change_pct: 1, prev_close: 21800 },
       { code: "^GSPC", name: "标普500", market: "美股", price: 6000, change_pct: 1, prev_close: 5940 },
     ]);
+  });
+
+  it("restores index cards immediately while refreshing in the background", () => {
+    sessionStorage.setItem("overview-market-indices:v1", JSON.stringify({
+      cachedAt: Date.now(),
+      data: [
+        { code: "sh000001", name: "缓存上证指数", market: "A股", price: 3000, change_pct: 1, prev_close: 2970 },
+      ],
+    }));
+    apiMock.getMarketIndices.mockReturnValue(new Promise(() => {}));
+
+    render(<Overview />);
+
+    expect(screen.getByText("缓存上证指数")).toBeInTheDocument();
   });
 
   it("omits market labels and previous close values inside index cards", async () => {
