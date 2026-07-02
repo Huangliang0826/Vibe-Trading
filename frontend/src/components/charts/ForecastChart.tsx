@@ -4,6 +4,46 @@ import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import type { ForecastResponse, TradeSignal } from "@/lib/api";
 
+type MarkerDatum = {
+  value: [string, number];
+  strategyPrice: number;
+  pnlPct?: number;
+};
+
+export function buildTradeOverlays(
+  bars: ForecastResponse["history"],
+  trades: TradeSignal[],
+): { entryData: MarkerDatum[]; exitData: MarkerDatum[]; markAreas: { xAxis: string }[][] } {
+  const prices = new Map(bars.map((bar) => [bar.date, bar.close]));
+  const firstDate = bars[0]?.date;
+  const lastDate = bars[bars.length - 1]?.date;
+  const entryData: MarkerDatum[] = [];
+  const exitData: MarkerDatum[] = [];
+  const markAreas: { xAxis: string }[][] = [];
+  if (!firstDate || !lastDate) return { entryData, exitData, markAreas };
+
+  for (const trade of trades) {
+    const entryDisplayPrice = prices.get(trade.entry_date);
+    const exitDisplayPrice = prices.get(trade.exit_date);
+    if (entryDisplayPrice != null) {
+      entryData.push({ value: [trade.entry_date, entryDisplayPrice], strategyPrice: trade.entry_price });
+    }
+    if (trade.exit_reason !== "end_of_backtest" && exitDisplayPrice != null) {
+      exitData.push({
+        value: [trade.exit_date, exitDisplayPrice], strategyPrice: trade.exit_price, pnlPct: trade.pnl_pct,
+      });
+    }
+    if (trade.entry_date <= lastDate && trade.exit_date >= firstDate) {
+      const areaStart = trade.entry_date < firstDate ? firstDate : trade.entry_date;
+      const areaEnd = trade.exit_reason === "end_of_backtest" || trade.exit_date > lastDate
+        ? lastDate
+        : trade.exit_date;
+      if (areaStart <= areaEnd) markAreas.push([{ xAxis: areaStart }, { xAxis: areaEnd }]);
+    }
+  }
+  return { entryData, exitData, markAreas };
+}
+
 interface Props {
   data: ForecastResponse;
   height?: number;
@@ -103,28 +143,15 @@ export function ForecastChart({ data, height = 320, trades }: Props) {
     );
 
     // Trade signal markers (entry ▲ / exit ▼) + holding shading
-    const dateIdx = new Map(allDates.map((d, i) => [d, i]));
     const legendNames = ["历史价格", "TimesFM 中位", "80% 区间", "随机游走", "趋势外推"];
     if (trades && trades.length > 0) {
-      const entryData: any[] = [];
-      const exitData: any[] = [];
-      const markAreas: any[] = [];
-      for (const tr of trades) {
-        const ei = dateIdx.get(tr.entry_date);
-        const xi = dateIdx.get(tr.exit_date);
-        if (ei != null) {
-          entryData.push([tr.entry_date, tr.entry_price]);
-        }
-        if (xi != null) {
-          exitData.push([tr.exit_date, tr.exit_price]);
-        }
-        // Shading: use entry or chart start, exit or chart end
-        const areaStart = ei != null ? tr.entry_date : (xi != null ? allDates[0] : null);
-        const areaEnd = xi != null ? tr.exit_date : (ei != null ? histDates[nHist - 1] : null);
-        if (areaStart && areaEnd) {
-          markAreas.push([{ xAxis: areaStart }, { xAxis: areaEnd }]);
-        }
-      }
+      const { entryData, exitData, markAreas } = buildTradeOverlays(hist, trades);
+      const markerTooltip = {
+        formatter: (params: { data: MarkerDatum; seriesName: string }) => {
+          const [date, displayPrice] = params.data.value;
+          return `${params.seriesName}<br/>${date}<br/>图表价格 ${displayPrice.toFixed(2)}<br/>策略复权价 ${params.data.strategyPrice.toFixed(2)}`;
+        },
+      };
       series.push(
         {
           name: "开仓",
@@ -133,6 +160,7 @@ export function ForecastChart({ data, height = 320, trades }: Props) {
           symbol: "triangle",
           symbolSize: 12,
           itemStyle: { color: "#10b981" },
+          tooltip: markerTooltip,
           z: 10,
         },
         {
@@ -143,6 +171,7 @@ export function ForecastChart({ data, height = 320, trades }: Props) {
           symbolSize: 12,
           symbolRotate: 180,
           itemStyle: { color: "#ef4444" },
+          tooltip: markerTooltip,
           z: 10,
         },
       );

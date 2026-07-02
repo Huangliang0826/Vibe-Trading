@@ -1,8 +1,18 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { LineChart, Loader2, AlertTriangle, TrendingUp } from "lucide-react";
 import { api, type WatchlistMarket, type ForecastResponse, type HSTechBestStrategyResponse, type TradeSignal } from "@/lib/api";
 import { ForecastChart } from "@/components/charts/ForecastChart";
 import { cn } from "@/lib/utils";
+import {
+  compactStrategyResponse,
+  forecastSessionKey,
+  readSessionCache,
+  strategySessionKey,
+  writeSessionCache,
+} from "@/lib/forecast-session-cache";
+
+const FORECAST_SESSION_TTL = 48 * 60 * 60 * 1000;
+const STRATEGY_SESSION_TTL = 24 * 60 * 60 * 1000;
 
 function loadList(key: string): string[] {
   try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
@@ -234,8 +244,10 @@ function ForecastCard({
   bestStrategyState?: BestStrategyState;
   onRefreshBestStrategy: (market: WatchlistMarket, code: string, refresh?: boolean) => void;
 }) {
-  const [data, setData] = useState<ForecastResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = forecastSessionKey(market, code, context, displayHistory);
+  const initialCached = useRef(readSessionCache<ForecastResponse>(cacheKey, FORECAST_SESSION_TTL));
+  const [data, setData] = useState<ForecastResponse | null>(initialCached.current);
+  const [loading, setLoading] = useState(!initialCached.current);
   const [error, setError] = useState<string | null>(null);
   const bestStrategy = bestStrategyState?.data || null;
   const bestStrategyLoading = !!bestStrategyState?.loading;
@@ -248,14 +260,19 @@ function ForecastCard({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    setLoading(!initialCached.current);
     setError(null);
     api.getForecast(market, code, 3, context, 0, displayHistory)
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch((e) => { if (!cancelled) setError(e?.message || "预测失败"); })
+      .then((d) => {
+        if (!cancelled) {
+          setData(d);
+          writeSessionCache(cacheKey, d);
+        }
+      })
+      .catch((e) => { if (!cancelled && !initialCached.current) setError(e?.message || "预测失败"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [market, code, context, displayHistory]);
+  }, [market, code, context, displayHistory, cacheKey]);
 
   return (
     <div id={forecastCardId(market, code)} className="scroll-mt-24 rounded-2xl border bg-card p-4">
@@ -410,18 +427,27 @@ export function Forecast() {
   ], [hk, us, cnList]);
   const loadBestStrategy = useCallback((market: WatchlistMarket, code: string, refresh = false) => {
     const key = stockKey(market, code);
+    const sessionKey = strategySessionKey(market, code);
+    const cached = refresh
+      ? null
+      : readSessionCache<HSTechBestStrategyResponse>(sessionKey, STRATEGY_SESSION_TTL);
     setBestByKey((prev) => ({
       ...prev,
-      [key]: { data: prev[key]?.data || null, loading: true, error: null },
+      [key]: { data: cached || prev[key]?.data || null, loading: !cached, error: null },
     }));
     api.getForecastBestPaperStrategy(market, code, refresh)
       .then((data) => {
+        writeSessionCache(sessionKey, compactStrategyResponse(data));
         setBestByKey((prev) => ({ ...prev, [key]: { data, loading: false, error: null } }));
       })
       .catch((e) => {
         setBestByKey((prev) => ({
           ...prev,
-          [key]: { data: prev[key]?.data || null, loading: false, error: e?.message || "稳健策略筛选失败" },
+          [key]: {
+            data: prev[key]?.data || null,
+            loading: false,
+            error: prev[key]?.data ? null : e?.message || "稳健策略筛选失败",
+          },
         }));
       });
   }, []);

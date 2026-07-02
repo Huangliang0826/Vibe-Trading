@@ -10,6 +10,7 @@ vi.mock("@/lib/api", async (original) => ({ ...(await original<object>()), api: 
 vi.mock("@/components/charts/ForecastChart", () => ({ ForecastChart: () => <div>chart</div> }));
 
 import { Forecast, formatHistoryDuration } from "../Forecast";
+import { strategySessionKey, writeSessionCache } from "@/lib/forecast-session-cache";
 
 const robustPayload = {
   code: "NVDA", name: "NVIDIA", market: "us", reliable: true,
@@ -32,6 +33,7 @@ const robustPayload = {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   localStorage.setItem("watchlist-us", JSON.stringify(["NVDA"]));
   apiMock.getForecast.mockResolvedValue({ code: "NVDA", name: "NVIDIA", model: true });
   apiMock.getForecastBestPaperStrategy.mockResolvedValue(robustPayload);
@@ -65,4 +67,14 @@ it("marks adaptive short-history selection as low confidence", async () => {
   render(<Forecast />);
 
   expect(await screen.findByText(/低可信度 · 历史不足4年/)).toBeInTheDocument();
+});
+
+it("restores the strategy from session cache before background revalidation finishes", async () => {
+  writeSessionCache(strategySessionKey("us", "NVDA"), robustPayload);
+  apiMock.getForecastBestPaperStrategy.mockReturnValue(new Promise(() => {}));
+
+  render(<Forecast />);
+
+  expect(await screen.findByText("最稳健：唐奇安突破")).toBeInTheDocument();
+  expect(screen.queryByText("策略筛选中")).not.toBeInTheDocument();
 });

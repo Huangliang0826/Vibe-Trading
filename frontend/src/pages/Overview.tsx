@@ -4,7 +4,6 @@ import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote,
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { HistoricalEventsView } from "@/components/charts/HistoricalEventsView";
 import { ValuationChart } from "@/components/charts/ValuationChart";
-import { TodayOpportunities } from "@/components/opportunities/TodayOpportunities";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 30_000;
@@ -46,8 +45,7 @@ function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
       "rounded-2xl border bg-card p-4 flex flex-col gap-1 shadow-sm transition-colors duration-700",
       flash && "bg-primary/5 border-primary/20"
     )}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">{idx.market}</span>
+      <div className="flex items-center justify-end">
         {idx.change_pct > 0
           ? <TrendingUp className={cn("h-3.5 w-3.5", color)} />
           : idx.change_pct < 0
@@ -59,11 +57,6 @@ function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
         {fmtPrice(idx.price, idx.market === "美股" ? "us" : "cn")}
       </p>
       <p className={cn("text-sm font-medium tabular-nums", color)}>{fmtPct(idx.change_pct)}</p>
-      {idx.prev_close > 0 && (
-        <p className="text-[11px] text-muted-foreground tabular-nums mt-0.5">
-          昨收&nbsp;{fmtPrice(idx.prev_close, idx.market === "美股" ? "us" : "cn")}
-        </p>
-      )}
     </div>
   );
 }
@@ -570,8 +563,6 @@ export function Overview() {
           {error}
         </div>
       )}
-
-      <TodayOpportunities />
 
       {/* Index cards — A-share */}
       <section className="space-y-2">
