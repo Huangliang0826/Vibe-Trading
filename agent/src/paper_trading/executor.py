@@ -9,6 +9,7 @@ weight-based engine.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from typing import Any, Dict, List
 
 import numpy as np
@@ -413,10 +414,12 @@ def _run_deep_drawdown_recovery(
     data_map: Dict[str, pd.DataFrame],
     params: Dict[str, Any],
 ) -> tuple:
-    """Buy six monthly tranches after a 40% peak drawdown; exit at +30% cost."""
+    """Stage entries after a three-year drawdown and exits after recovery."""
     drawdown_threshold = abs(float(params.get("drawdown_threshold", 0.40)))
-    take_profit_pct = abs(float(params.get("take_profit_pct", 0.30)))
-    tranche_count = max(int(params.get("tranches", 6)), 1)
+    take_profit_pct = abs(float(params.get("take_profit_pct", 0.40)))
+    tranche_count = max(int(params.get("tranches", 10)), 1)
+    exit_tranche_count = max(int(params.get("exit_tranches", 5)), 1)
+    lookback_years = max(int(params.get("lookback_years", 3)), 1)
     code_map = {_to_code(holding): holding for holding in holdings}
     valid_codes = sorted(code for code in code_map if code in data_map and not data_map[code].empty)
     if not valid_codes:
@@ -430,11 +433,14 @@ def _run_deep_drawdown_recovery(
     }
     shares = {code: 0.0 for code in valid_codes}
     cost_basis = {code: 0.0 for code in valid_codes}
-    peak_close: Dict[str, float | None] = {code: None for code in valid_codes}
     previous_close: Dict[str, float | None] = {code: None for code in valid_codes}
+    rolling_highs = {code: deque() for code in valid_codes}
     monthly_buys: Dict[str, set[pd.Timestamp]] = {code: set() for code in valid_codes}
+    monthly_sells: Dict[str, set[pd.Timestamp]] = {code: set() for code in valid_codes}
     tranche_amount = {code: 0.0 for code in valid_codes}
     buys_completed = {code: 0 for code in valid_codes}
+    sells_completed = {code: 0 for code in valid_codes}
+    exit_share_amount = {code: 0.0 for code in valid_codes}
     open_buys: Dict[str, List[Dict[str, Any]]] = {code: [] for code in valid_codes}
     trades: List[TradeRecord] = []
     equity_points: List[tuple] = []
@@ -450,28 +456,56 @@ def _run_deep_drawdown_recovery(
         buys_completed[code] += 1
         open_buys[code].append({"time": ts, "price": price, "shares": quantity})
 
-    def close_cycle(code: str, ts: pd.Timestamp, price: float) -> None:
-        for entry in open_buys[code]:
-            pnl = entry["shares"] * (price - entry["price"])
+    def sell(code: str, ts: pd.Timestamp, quantity: float, price: float) -> None:
+        quantity = min(quantity, shares[code])
+        remaining = quantity
+        while remaining > 1e-10 and open_buys[code]:
+            entry = open_buys[code][0]
+            sold = min(remaining, entry["shares"])
+            pnl = sold * (price - entry["price"])
             trades.append(TradeRecord(
                 symbol=code, direction=1,
                 entry_price=round(entry["price"], 4), exit_price=round(price, 4),
                 entry_time=entry["time"], exit_time=ts,
-                size=round(entry["shares"], 4), leverage=1.0,
+                size=round(sold, 4), leverage=1.0,
                 pnl=round(pnl, 2),
                 pnl_pct=round((price / entry["price"] - 1) * 100, 4),
-                exit_reason="take_profit_30pct",
+                exit_reason="staged_take_profit_40pct",
                 holding_bars=(ts - entry["time"]).days,
                 commission=0.0,
             ))
-        sleeve_cash[code] += shares[code] * price
-        shares[code] = 0.0
-        cost_basis[code] = 0.0
-        open_buys[code] = []
-        monthly_buys[code] = set()
-        buys_completed[code] = 0
-        tranche_amount[code] = 0.0
-        peak_close[code] = None
+            cost_basis[code] -= sold * entry["price"]
+            entry["shares"] -= sold
+            remaining -= sold
+            if entry["shares"] <= 1e-10:
+                open_buys[code].pop(0)
+        shares[code] -= quantity - remaining
+        sleeve_cash[code] += (quantity - remaining) * price
+        sells_completed[code] += 1
+
+        if sells_completed[code] >= exit_tranche_count or shares[code] <= 1e-10:
+            shares[code] = 0.0
+            cost_basis[code] = 0.0
+            open_buys[code] = []
+            monthly_buys[code] = set()
+            monthly_sells[code] = set()
+            buys_completed[code] = 0
+            sells_completed[code] = 0
+            tranche_amount[code] = 0.0
+            exit_share_amount[code] = 0.0
+
+    def schedule_monthly_dates(
+        frame: pd.DataFrame, ts: pd.Timestamp, count: int,
+    ) -> set[pd.Timestamp]:
+        dates: set[pd.Timestamp] = set()
+        trading_idx = pd.DatetimeIndex(frame.index)
+        for month_start in pd.date_range(
+            start=ts + pd.offsets.MonthBegin(1), periods=count, freq="MS",
+        ):
+            future = trading_idx[trading_idx >= month_start]
+            if len(future) > 0:
+                dates.add(pd.Timestamp(future[0]))
+        return dates
 
     for raw_ts in all_dates:
         ts = pd.Timestamp(raw_ts)
@@ -482,28 +516,35 @@ def _run_deep_drawdown_recovery(
             open_price = float(frame.loc[ts, "open"])
             prior = previous_close[code]
             exited = False
+            cutoff = ts - pd.DateOffset(years=lookback_years)
+            history = rolling_highs[code]
+            while history and history[0][0] < cutoff:
+                history.popleft()
+            rolling_peak = history[0][1] if history else None
 
-            if shares[code] > 0 and prior is not None and cost_basis[code] > 0:
+            if monthly_sells[code] and ts in monthly_sells[code]:
+                final_sale = sells_completed[code] + 1 >= exit_tranche_count
+                sell(code, ts, shares[code] if final_sale else exit_share_amount[code], open_price)
+                exited = True
+            elif not monthly_sells[code] and shares[code] > 0 and prior is not None and cost_basis[code] > 0:
                 average_cost = cost_basis[code] / shares[code]
                 if prior >= average_cost * (1.0 + take_profit_pct) - 1e-12:
-                    close_cycle(code, ts, open_price)
+                    monthly_buys[code] = set()
+                    exit_share_amount[code] = shares[code] / exit_tranche_count
+                    monthly_sells[code] = schedule_monthly_dates(
+                        frame, ts, max(exit_tranche_count - 1, 0),
+                    )
+                    sell(code, ts, exit_share_amount[code], open_price)
                     exited = True
 
-            if not exited and shares[code] == 0 and prior is not None and peak_close[code]:
-                drawdown = prior / float(peak_close[code]) - 1.0
+            if not exited and shares[code] == 0 and prior is not None and rolling_peak:
+                drawdown = prior / float(rolling_peak) - 1.0
                 if drawdown <= -drawdown_threshold + 1e-12:
                     tranche_amount[code] = sleeve_cash[code] / tranche_count
                     buy(code, ts, tranche_amount[code], open_price)
-                    trading_idx = pd.DatetimeIndex(frame.index)
-                    month_starts = pd.date_range(
-                        start=ts + pd.offsets.MonthBegin(1),
-                        periods=max(tranche_count - 1, 0),
-                        freq="MS",
+                    monthly_buys[code] = schedule_monthly_dates(
+                        frame, ts, max(tranche_count - 1, 0),
                     )
-                    for month_start in month_starts:
-                        future = trading_idx[trading_idx >= month_start]
-                        if len(future) > 0:
-                            monthly_buys[code].add(pd.Timestamp(future[0]))
             elif (
                 not exited
                 and shares[code] > 0
@@ -514,8 +555,9 @@ def _run_deep_drawdown_recovery(
 
             close_price = float(frame.loc[ts, "close"])
             previous_close[code] = close_price
-            if shares[code] == 0:
-                peak_close[code] = close_price if peak_close[code] is None else max(peak_close[code], close_price)
+            while history and history[-1][1] <= close_price:
+                history.pop()
+            history.append((ts, close_price))
 
         portfolio_value = sum(sleeve_cash.values())
         for code in valid_codes:

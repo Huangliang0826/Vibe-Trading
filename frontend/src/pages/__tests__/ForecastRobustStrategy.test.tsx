@@ -32,6 +32,7 @@ const robustPayload = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   localStorage.clear();
   sessionStorage.clear();
   localStorage.setItem("watchlist-us", JSON.stringify(["NVDA"]));
@@ -69,7 +70,7 @@ it("marks adaptive short-history selection as low confidence", async () => {
   expect(await screen.findByText(/低可信度 · 历史不足4年/)).toBeInTheDocument();
 });
 
-it("restores the strategy from session cache before background revalidation finishes", async () => {
+it("uses a fresh strategy cache without starting background recomputation", async () => {
   writeSessionCache(strategySessionKey("us", "NVDA"), robustPayload);
   apiMock.getForecastBestPaperStrategy.mockReturnValue(new Promise(() => {}));
 
@@ -77,4 +78,15 @@ it("restores the strategy from session cache before background revalidation fini
 
   expect(await screen.findByText("最稳健：唐奇安突破")).toBeInTheDocument();
   expect(screen.queryByText("策略筛选中")).not.toBeInTheDocument();
+  expect(apiMock.getForecastBestPaperStrategy).not.toHaveBeenCalled();
+});
+
+it("starts at most one uncached robust strategy computation at a time", async () => {
+  localStorage.setItem("watchlist-us", JSON.stringify(["NVDA", "AAPL", "MSFT"]));
+  apiMock.getForecastBestPaperStrategy.mockReturnValue(new Promise(() => {}));
+
+  render(<Forecast />);
+
+  await screen.findAllByText("chart");
+  expect(apiMock.getForecastBestPaperStrategy).toHaveBeenCalledTimes(1);
 });

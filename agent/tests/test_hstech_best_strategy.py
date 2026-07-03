@@ -1,6 +1,7 @@
 import pandas as pd
 
 from src.paper_trading.hstech_best import (
+    STRATEGY_NAMES,
     _candidate_row,
     _paired_trade_signals,
     normalize_best_strategy_symbol,
@@ -150,7 +151,36 @@ def test_candidate_row_keeps_compact_metrics():
 def test_strategy_params_exposes_catalog_defaults():
     assert strategy_params("dca") == {"frequency": "monthly"}
     assert strategy_params("grid") == {"grid_count": 5}
+    assert strategy_params("dca_two_year_then_hold") == {"frequency": "monthly"}
+    assert strategy_params("accelerated_dca_entry") == {
+        "initial_pct": 0.25,
+        "n_months": 12,
+        "accelerate_drawdown": 0.1,
+        "all_in_drawdown": 0.2,
+        "accelerated_investment_pct": 0.2,
+    }
+    assert strategy_params("deep_drawdown_recovery") == {
+        "drawdown_threshold": 0.4,
+        "take_profit_pct": 0.4,
+        "tranches": 10,
+        "exit_tranches": 5,
+        "lookback_years": 3,
+    }
     assert strategy_params("buy_and_hold") == {}
+
+
+def test_forecast_catalog_matches_paper_trading_options():
+    assert STRATEGY_NAMES == (
+        "buy_and_hold", "dca", "grid", "momentum_breakout", "moving_average_cross",
+        "rsi_reversion", "volatility_target", "drawdown_rebalance", "smart_dca",
+        "dca_then_hold", "dca_two_year_then_hold", "accelerated_dca_entry",
+        "deep_drawdown_recovery", "trend_volatility_filter", "donchian_breakout",
+        "bollinger_reversion", "trailing_stop", "monthly_rebalance", "macd_divergence",
+        "dual_momentum", "atr_trend_stop", "mean_reversion_scaleout",
+        "enhanced_dca_trend", "breakout_pullback", "quality_momentum",
+        "low_volatility_rotation", "volatility_squeeze_breakout", "risk_parity",
+        "price_volume_efficiency",
+    )
 
 
 class _FakeLoader:
@@ -163,7 +193,7 @@ class _FakeLoader:
         return {codes[0]: pd.DataFrame({"close": range(1, len(index) + 1)}, index=index)}
 
 
-def test_robust_selection_reserves_latest_year_and_uses_first_oos_pass(monkeypatch):
+def test_forecast_robust_selection_matches_paper_trading_winner(monkeypatch):
     loader = _FakeLoader()
     robust_calls = []
 
@@ -191,11 +221,12 @@ def test_robust_selection_reserves_latest_year_and_uses_first_oos_pass(monkeypat
         robust_runner=robust_runner, strategy_runner=strategy_runner,
     )
 
-    assert robust_calls[0][1] == "2025-07-01"
-    assert selection["selected_strategy"] == "donchian_breakout"
-    assert selection["reliable"] is True
-    assert selection["oos_validation"]["start_date"] == "2025-07-02"
-    assert selection["oos_validation"]["passed"] is True
+    assert robust_calls[0][1] == "2026-07-01"
+    assert robust_calls[0][2] == list(STRATEGY_NAMES)
+    assert selection["selected_strategy"] == "buy_and_hold"
+    assert selection["robust_result"]["best_strategy"] == "buy_and_hold"
+    assert selection["window_years"] == 3
+    assert selection["step_years"] == 1
 
 
 def test_daily_selected_strategy_evaluates_only_cached_strategy():

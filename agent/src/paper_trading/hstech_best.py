@@ -12,14 +12,11 @@ from typing import Any
 
 import pandas as pd
 
-from backtest.engines.base import _align
-from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.loaders.yfinance_loader import DataLoader as YFinanceLoader
 from backtest.metrics import by_symbol_stats, calc_metrics
-from src.paper_trading.executor import _build_equity_curve, _build_trades_list, _run_dca
+from src.paper_trading.executor import _build_equity_curve, _build_trades_list, evaluate_strategy
 from src.paper_trading.models import PaperHolding
 from src.paper_trading.storage import HKD_TO_USD
-from src.paper_trading.strategies import generate_signals
 
 HSTECH_DISPLAY_CODE = "03033"
 HSTECH_PAPER_CODE = "3033"
@@ -36,6 +33,10 @@ STRATEGY_LABELS: dict[str, str] = {
     "volatility_target": "波动率目标",
     "drawdown_rebalance": "回撤再平衡",
     "smart_dca": "智能定投",
+    "dca_then_hold": "三年定投后持有",
+    "dca_two_year_then_hold": "两年定投后持有",
+    "accelerated_dca_entry": "回撤加速建仓",
+    "deep_drawdown_recovery": "深跌分批止盈",
     "trend_volatility_filter": "趋势波动过滤",
     "donchian_breakout": "唐奇安突破",
     "bollinger_reversion": "布林均值回归",
@@ -43,7 +44,6 @@ STRATEGY_LABELS: dict[str, str] = {
     "monthly_rebalance": "月度再平衡",
     "macd_divergence": "MACD 背离",
     "dual_momentum": "双动量轮动",
-    "vol_trend_rotation": "攻守轮动",
     "atr_trend_stop": "ATR 趋势止损",
     "mean_reversion_scaleout": "均值回归分批止盈",
     "enhanced_dca_trend": "趋势增强定投",
@@ -65,6 +65,10 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "volatility_target": "策略原理：根据近期波动率动态调仓，波动越高仓位越低，优先控制风险暴露。",
     "drawdown_rebalance": "策略原理：价格从高点回撤越多越提高仓位，接近前高时降低仓位锁定恢复收益。",
     "smart_dca": "策略原理：在普通定投基础上根据均线偏离和波动率调整投入倍率，低估多投、过热少投。",
+    "dca_then_hold": "策略原理：把资金分三年逐月投入，完成建仓后长期持有。",
+    "dca_two_year_then_hold": "策略原理：把资金分两年逐月投入，完成建仓后长期持有。",
+    "accelerated_dca_entry": "策略原理：先投入25%，再分十二个月建仓；回撤10%时加速，回撤20%时投入剩余资金。",
+    "deep_drawdown_recovery": "策略原理：距前三年最高收盘价下跌40%后分十个月建仓，价格达到平均成本的140%后分五个月退出。",
     "trend_volatility_filter": "策略原理：只有价格处于长期上升趋势时才持有，同时用波动率控制仓位大小。",
     "donchian_breakout": "策略原理：突破长期高点时买入，跌破近期低点时退出，属于经典趋势跟随方法。",
     "bollinger_reversion": "策略原理：价格跌破布林带下轨时认为短期偏离过大，买入等待回归均线后卖出。",
@@ -72,7 +76,6 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "monthly_rebalance": "策略原理：每月恢复到目标权重，保持风险结构稳定。",
     "macd_divergence": "策略原理：当价格创新低但 MACD 抬高（底背离）且柱状图转向时买入，出现顶背离或 MACD 死叉时退出，捕捉动量反转。",
     "dual_momentum": "策略原理：每月按近期涨幅排序，只在动量为正时持有该标的，否则转为现金。",
-    "vol_trend_rotation": "策略原理：趋势向上且波动低于自身长期均值时持有，否则转为现金，优先控制回撤。",
     "atr_trend_stop": "策略原理：趋势突破时买入，并用 ATR 波动幅度计算动态止损线；价格继续上涨时止损线随高点上移，趋势破坏或触发止损时离场。",
     "mean_reversion_scaleout": "策略原理：价格跌到统计下轨时认为短期超跌并买入，回到均线附近先减半，到上轨或触发止损时退出，用分批止盈降低反转失败风险。",
     "enhanced_dca_trend": "策略原理：保留定投的分批建仓纪律，但长期趋势偏弱时降低目标仓位，趋势向上且价格仍偏低时提高投入，避免在弱势里机械满仓。",
@@ -205,7 +208,7 @@ def run_single_symbol_best_strategy(
     }
 
 
-ROBUST_SELECTION_VERSION = "single-symbol-robust-oos-v2"
+ROBUST_SELECTION_VERSION = "paper-robust-parity-v3"
 
 
 def _robust_validation_profile(history_bars: int) -> dict[str, Any]:
@@ -239,7 +242,7 @@ def select_single_symbol_robust_strategy(
     robust_runner: Any | None = None,
     strategy_runner: Any | None = None,
 ) -> dict[str, Any]:
-    """Select a rolling-window winner using the latest year only for validation."""
+    """Select the same rolling-window winner as paper trading's robust test."""
     from src.paper_trading.robust import _history_start_date, run_robust_optimize
 
     end = end_date or default_end_date()
@@ -253,69 +256,27 @@ def select_single_symbol_robust_strategy(
     if frame is None:
         raise ValueError(f"Not enough price history for robust selection: {yahoo_symbol}")
 
-    profile = _robust_validation_profile(len(frame))
     full_end = pd.Timestamp(frame.index.max()).tz_localize(None)
-    training_end = full_end - pd.DateOffset(months=profile["holdout_months"])
-    oos_start = training_end + pd.Timedelta(days=1)
-    training_frame = frame.loc[:training_end]
-    oos_frame = frame.loc[oos_start:full_end]
-    min_training_bars = 252 if profile["confidence_level"] == "low" else 756
-    min_oos_bars = 80 if profile["confidence_level"] == "low" else 120
-    if len(training_frame) < min_training_bars or len(oos_frame) < min_oos_bars:
-        raise ValueError(f"Not enough train/OOS history for robust selection: {yahoo_symbol}")
 
     specs = [{"name": strategy_name, "params": strategy_params(strategy_name)} for strategy_name in STRATEGY_NAMES]
     runner = robust_runner or run_robust_optimize
     robust_result = runner(
-        [holding], None, training_end.strftime("%Y-%m-%d"), initial_total_usd,
-        specs, profile["window_years"], profile["step_years"],
+        [holding], None, full_end.strftime("%Y-%m-%d"), initial_total_usd,
+        specs, 3, 1,
     )
-    ranked_names = [row["name"] for row in robust_result.get("strategies", [])]
-    if not ranked_names:
+    selected = robust_result.get("best_strategy")
+    if not selected:
         raise ValueError(f"No robust strategy candidates for {display_code}")
-
-    run_strategy = strategy_runner or _run_strategy
-    oos_runs: dict[str, dict[str, Any]] = {}
-    selected = ranked_names[0]
-    reliable = False
-    for strategy_name in ranked_names:
-        oos_run = run_strategy(
-            strategy_name,
-            holding=holding,
-            data_map={yahoo_symbol: oos_frame},
-            start_date=oos_start.strftime("%Y-%m-%d"),
-            end_date=full_end.strftime("%Y-%m-%d"),
-            initial_total_usd=initial_total_usd,
-            run_prefix=f"oos-{mk}-{display_code.lower()}",
-            title_prefix=display_code,
-        )
-        oos_runs[strategy_name] = oos_run
-        if _oos_passed(oos_run):
-            selected = strategy_name
-            reliable = True
-            break
-
-    selected_oos = oos_runs[selected]
-    metrics = selected_oos.get("metrics") or {}
     return {
         "selection_version": ROBUST_SELECTION_VERSION,
         "selected_strategy": selected,
-        "reliable": reliable,
-        "training_end": training_end.strftime("%Y-%m-%d"),
-        "confidence_level": profile["confidence_level"],
-        "history_note": profile["history_note"],
+        "reliable": True,
+        "training_end": full_end.strftime("%Y-%m-%d"),
+        "confidence_level": "standard",
+        "history_note": "与模拟盘一致：3年窗口、每1年滚动，按平均排名选择",
         "history_bars": len(frame),
-        "oos_validation": {
-            "start_date": oos_start.strftime("%Y-%m-%d"),
-            "end_date": full_end.strftime("%Y-%m-%d"),
-            "passed": reliable,
-            "metrics": {
-                "total_return": metrics.get("total_return"),
-                "sharpe": metrics.get("sharpe"),
-                "max_drawdown": metrics.get("max_drawdown"),
-                "trade_count": metrics.get("trade_count"),
-            },
-        },
+        "window_years": 3,
+        "step_years": 1,
         "robust_result": robust_result,
     }
 
@@ -365,12 +326,10 @@ def run_selected_single_symbol_strategy(
     if best.get("status") != "completed":
         raise ValueError(best.get("error") or f"Selected strategy failed for {shown_code}")
     oos = selection.get("oos_validation") or {}
-    oos_metrics = oos.get("metrics") or {}
     robust_rows = (selection.get("robust_result") or {}).get("strategies", [])
     summary = " ".join([
         STRATEGY_PRINCIPLES.get(strategy_name, f"策略原理：{STRATEGY_LABELS.get(strategy_name, strategy_name)} 根据历史价格动态调整仓位。"),
-        f"该策略按多时间段平均排名筛选，最近一年样本外夏普为 {_finite(oos_metrics.get('sharpe')):.2f}，"
-        f"样本外收益为 {_fmt_pct(_finite(oos_metrics.get('total_return')))}。",
+        "该策略使用与模拟盘相同的3年滚动窗口、每1年步进，并按各窗口平均排名选出。",
         _latest_trade_summary(best.get("trades") or [], shown_code),
     ])
     return {
@@ -416,10 +375,26 @@ def _robust_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def strategy_params(strategy_name: str) -> dict[str, Any]:
-    if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend"}:
+    if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend", "dca_then_hold", "dca_two_year_then_hold"}:
         return {"frequency": "monthly"}
     if strategy_name == "grid":
         return {"grid_count": 5}
+    if strategy_name == "accelerated_dca_entry":
+        return {
+            "initial_pct": 0.25,
+            "n_months": 12,
+            "accelerate_drawdown": 0.1,
+            "all_in_drawdown": 0.2,
+            "accelerated_investment_pct": 0.2,
+        }
+    if strategy_name == "deep_drawdown_recovery":
+        return {
+            "drawdown_threshold": 0.4,
+            "take_profit_pct": 0.4,
+            "tranches": 10,
+            "exit_tranches": 5,
+            "lookback_years": 3,
+        }
     return {}
 
 
@@ -438,30 +413,9 @@ def _run_strategy(
 ) -> dict[str, Any]:
     params = strategy_params(strategy_name)
     try:
-        if strategy_name in {"dca", "smart_dca"}:
-            equity_series, trade_records = _run_dca(
-                initial_total_usd,
-                [holding],
-                data_map,
-                params,
-                smart=strategy_name == "smart_dca",
-            )
-        else:
-            signal_map = generate_signals([holding], data_map, strategy_name, params)
-            valid_codes = sorted(c for c in signal_map if c in data_map)
-            if not valid_codes:
-                raise ValueError("No valid signals generated")
-            dates, close_df, target_pos, _ret_df = _align(data_map, signal_map, valid_codes)
-            # The engine only models US/HK cost rules; A-shares use the US-rule
-            # base (fractional shares, negligible commission) like other markets.
-            engine_market = "hk" if holding.market == "hk" else "us"
-            engine = GlobalEquityEngine({"initial_cash": initial_total_usd}, market=engine_market)
-            engine._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
-            equity_series = pd.Series(
-                [s.equity for s in engine.equity_snapshots],
-                index=[s.timestamp for s in engine.equity_snapshots],
-            )
-            trade_records = engine.trades
+        equity_series, trade_records = evaluate_strategy(
+            [holding], data_map, strategy_name, params, initial_total_usd,
+        )
 
         metrics = calc_metrics(equity_series, trade_records, initial_total_usd, bars_per_year=None)
         metrics["by_symbol"] = by_symbol_stats(trade_records)

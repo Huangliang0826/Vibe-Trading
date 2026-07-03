@@ -144,9 +144,9 @@ def test_accelerated_entry_does_not_use_same_day_close_for_open_decision():
     assert february.entry_price * february.size == pytest.approx(6_250, abs=1)
 
 
-def test_deep_drawdown_recovery_builds_six_tranches_and_exits_at_30_percent_profit():
+def test_deep_drawdown_recovery_builds_ten_tranches_and_stages_five_exits():
     holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
-    idx = pd.bdate_range("2024-01-02", "2024-10-31")
+    idx = pd.bdate_range("2024-01-02", "2025-03-31")
     frame = pd.DataFrame(
         {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1_000},
         index=idx,
@@ -154,22 +154,53 @@ def test_deep_drawdown_recovery_builds_six_tranches_and_exits_at_30_percent_prof
     drop_day = idx[5]
     first_buy_day = idx[6]
     frame.loc[drop_day:, ["open", "high", "low", "close"]] = 60.0
-    take_profit_signal = pd.Timestamp("2024-08-01")
-    take_profit_exit = pd.Timestamp("2024-08-02")
-    frame.loc[take_profit_signal:, ["open", "high", "low", "close"]] = 78.0
+    take_profit_signal = pd.Timestamp("2024-11-01")
+    first_exit = pd.Timestamp("2024-11-04")
+    frame.loc[take_profit_signal, ["open", "high", "low", "close"]] = 84.0
+    frame.loc[first_exit:, ["open", "high", "low", "close"]] = 70.0
+    frame.loc[first_exit, "open"] = 84.0
 
     _equity, trades = evaluate_strategy(
         [holding], {"AAPL.US": frame}, "deep_drawdown_recovery",
-        {"drawdown_threshold": 0.4, "take_profit_pct": 0.3, "tranches": 6},
+        {
+            "drawdown_threshold": 0.4, "take_profit_pct": 0.4,
+            "tranches": 10, "exit_tranches": 5, "lookback_years": 3,
+        },
         120_000,
     )
 
-    assert len(trades) == 6
+    assert len(trades) == 10
     assert trades[0].entry_time == first_buy_day
-    assert all(trade.exit_time == take_profit_exit for trade in trades)
-    assert all(trade.exit_reason == "take_profit_30pct" for trade in trades)
+    assert sorted({trade.exit_time for trade in trades}) == [
+        pd.Timestamp("2024-11-04"), pd.Timestamp("2024-12-02"),
+        pd.Timestamp("2025-01-01"), pd.Timestamp("2025-02-03"),
+        pd.Timestamp("2025-03-03"),
+    ]
+    assert all(trade.exit_reason == "staged_take_profit_40pct" for trade in trades)
     assert sum(trade.size for trade in trades) == pytest.approx(2_000, abs=0.1)
     StrategyConfig(name="deep_drawdown_recovery")
+
+
+def test_deep_drawdown_recovery_ignores_peaks_older_than_three_years():
+    holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
+    idx = pd.bdate_range("2020-01-02", "2024-03-29")
+    frame = pd.DataFrame(
+        {"open": 80.0, "high": 80.0, "low": 80.0, "close": 80.0, "volume": 1_000},
+        index=idx,
+    )
+    frame.loc[idx[0], ["open", "high", "low", "close"]] = 100.0
+    frame.loc[pd.Timestamp("2024-01-02"):, ["open", "high", "low", "close"]] = 60.0
+
+    _equity, trades = evaluate_strategy(
+        [holding], {"AAPL.US": frame}, "deep_drawdown_recovery",
+        {
+            "drawdown_threshold": 0.4, "take_profit_pct": 0.4,
+            "tranches": 10, "exit_tranches": 5, "lookback_years": 3,
+        },
+        120_000,
+    )
+
+    assert trades == []
 
 
 def test_new_strategy_names_are_accepted_and_generate_bounded_signals():

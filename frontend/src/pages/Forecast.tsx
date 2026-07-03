@@ -404,6 +404,7 @@ export function Forecast() {
   const [cnList, setCnList] = useState<string[]>([]);
   const [context, setContext] = useState(1260); // 默认 5 年：更适合观察中长期走势和策略信号
   const [bestByKey, setBestByKey] = useState<Record<string, BestStrategyState>>({});
+  const bestRequestsRef = useRef(new Map<string, Promise<void>>());
   const selectedContext = CONTEXT_OPTIONS.find((option) => option.value === context) || CONTEXT_OPTIONS[2];
 
   const sync = useCallback(() => {
@@ -425,17 +426,26 @@ export function Forecast() {
     ...hk.map((code) => ({ market: "hk" as const, code: code.toUpperCase() })),
     ...us.map((code) => ({ market: "us" as const, code: code.toUpperCase() })),
   ], [hk, us, cnList]);
-  const loadBestStrategy = useCallback((market: WatchlistMarket, code: string, refresh = false) => {
+  const loadBestStrategy = useCallback(async (market: WatchlistMarket, code: string, refresh = false) => {
     const key = stockKey(market, code);
     const sessionKey = strategySessionKey(market, code);
     const cached = refresh
       ? null
       : readSessionCache<HSTechBestStrategyResponse>(sessionKey, STRATEGY_SESSION_TTL);
+    if (cached) {
+      setBestByKey((prev) => ({
+        ...prev,
+        [key]: { data: cached, loading: false, error: null },
+      }));
+      return;
+    }
+    const pending = bestRequestsRef.current.get(key);
+    if (pending) return pending;
     setBestByKey((prev) => ({
       ...prev,
-      [key]: { data: cached || prev[key]?.data || null, loading: !cached, error: null },
+      [key]: { data: prev[key]?.data || null, loading: true, error: null },
     }));
-    api.getForecastBestPaperStrategy(market, code, refresh)
+    const request = api.getForecastBestPaperStrategy(market, code, refresh)
       .then((data) => {
         writeSessionCache(sessionKey, compactStrategyResponse(data));
         setBestByKey((prev) => ({ ...prev, [key]: { data, loading: false, error: null } }));
@@ -449,17 +459,25 @@ export function Forecast() {
             error: prev[key]?.data ? null : e?.message || "稳健策略筛选失败",
           },
         }));
+      })
+      .finally(() => {
+        bestRequestsRef.current.delete(key);
       });
+    bestRequestsRef.current.set(key, request);
+    return request;
   }, []);
 
   useEffect(() => {
-    for (const item of watchlistItems) {
-      const key = stockKey(item.market, item.code);
-      if (!bestByKey[key]) {
-        loadBestStrategy(item.market, item.code, false);
+    let cancelled = false;
+    const loadQueue = async () => {
+      for (const item of watchlistItems) {
+        if (cancelled) break;
+        await loadBestStrategy(item.market, item.code, false);
       }
-    }
-  }, [watchlistItems, bestByKey, loadBestStrategy]);
+    };
+    void loadQueue();
+    return () => { cancelled = true; };
+  }, [watchlistItems, loadBestStrategy]);
 
   const recentSignals = useMemo(
     () => recentSignalsFromBestStrategies(watchlistItems, bestByKey, daysAgoISO(7)),

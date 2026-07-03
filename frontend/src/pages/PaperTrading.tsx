@@ -104,7 +104,7 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "dca_then_hold", label: "三年定投后持有", desc: "把现金分三年逐月投入，投完长期持有" },
   { value: "dca_two_year_then_hold", label: "两年定投后持有", desc: "把现金分两年逐月投入，投完长期持有" },
   { value: "accelerated_dca_entry", label: "回撤加速建仓", desc: "首投25%，十二个月分批；跌10%投20%，跌20%投完" },
-  { value: "deep_drawdown_recovery", label: "深跌分批止盈", desc: "距高点跌40%分六次建仓，平均成本上涨30%清仓" },
+  { value: "deep_drawdown_recovery", label: "深跌分批止盈", desc: "距三年高点跌40%分十次建仓，涨至平均成本140%后分五次卖出" },
   { value: "trend_volatility_filter", label: "趋势波动过滤", desc: "只在趋势向上时持有，并按波动率降仓" },
   { value: "donchian_breakout", label: "唐奇安突破", desc: "突破长期高点买入，跌破近期低点退出" },
   { value: "bollinger_reversion", label: "布林带反转", desc: "跌破下轨买入，回归均线后卖出" },
@@ -172,7 +172,7 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   risk_parity: "策略原理：按近期波动率反向分配组合权重，波动大的标的少配，波动小的标的多配，让组合风险贡献更均衡。",
   price_volume_efficiency: "策略原理：把价格行为切成上涨效率和下跌效率，再看成交量是否配合；上涨高效且放量确认加分，下跌高效且放量确认扣分，最后按综合 rank 轮动持有前几名。",
   accelerated_dca_entry: "策略原理：T0先投入目标预算的25%，剩余75%在之后十二个月的首个交易日按固定基础金额投入；相对T0收盘回撤达到10%时当期投入总预算的20%，达到20%时一次性投入全部剩余资金。",
-  deep_drawdown_recovery: "策略原理：价格相对当时已知的历史最高点下跌40%后开始建仓，将资金分六份、每隔一个月投入一份；全部持仓相对加权平均成本上涨30%后一次性卖出。继续下跌不止损，买完后等待恢复。",
+  deep_drawdown_recovery: "策略原理：价格相对此前三年的最高收盘价下跌40%后开始建仓，将资金分十份、每隔一个月投入一份；收盘价达到加权平均成本的140%后锁定退出计划，从下一交易日开始分五份、每隔一个月卖出一份。触发退出后即使价格回落也继续执行。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
@@ -188,8 +188,10 @@ function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: 
   }
   if (name === "deep_drawdown_recovery") {
     params.drawdown_threshold = 0.4;
-    params.take_profit_pct = 0.3;
-    params.tranches = 6;
+    params.take_profit_pct = 0.4;
+    params.tranches = 10;
+    params.exit_tranches = 5;
+    params.lookback_years = 3;
   }
   return params;
 }
