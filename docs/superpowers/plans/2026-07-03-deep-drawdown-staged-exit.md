@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Change `deep_drawdown_recovery` to use a rolling three-year high, ten monthly entry tranches, and five monthly exits after price reaches 140% of weighted average cost.
+**Goal:** Change `deep_drawdown_recovery` to hold a permanent 25% core position while the remaining 75% uses a rolling three-year high, ten monthly entry tranches, and five monthly exits after price reaches 140% of tactical weighted average cost.
 
 **Architecture:** Keep the strategy in the shared paper-trading executor so single runs and robust optimization use identical behavior. Store each symbol's scheduled entry and exit dates in isolated per-symbol state, and make every decision from the previous close before executing at the next open.
 
@@ -11,6 +11,8 @@
 ## Global Constraints
 
 - Use the highest known close from the previous three calendar years; use available history when shorter.
+- Buy a permanent 25% core position on the first trading day and never sell it.
+- Apply all drawdown entries and staged exits only to the remaining 75% tactical budget.
 - Trigger entry at a 40% drawdown and split the budget into 10 monthly tranches.
 - Trigger exit at 140% of weighted average cost and sell in 5 monthly tranches.
 - Once an exit schedule starts, price declines do not cancel it.
@@ -26,11 +28,11 @@
 
 **Interfaces:**
 - Consumes: `evaluate_strategy(..., strategy_name="deep_drawdown_recovery", params, initial_cash)`.
-- Produces: an equity series and `TradeRecord` rows whose entries span 10 monthly purchases and whose exits span 5 monthly sales.
+- Produces: an equity series and `TradeRecord` rows containing one permanent core purchase plus tactical entries spanning 10 months and tactical exits spanning 5 months.
 
 - [ ] **Step 1: Replace the old six-tranche test with failing tests**
 
-Create deterministic OHLCV frames that assert: ten equal monthly entry tranches; no entry when an older-than-three-years peak is the only qualifying peak; a 140% prior-close signal starts five 20% exits at the next open and monthly thereafter; falling prices do not cancel scheduled exits.
+Create deterministic OHLCV frames that assert: 25% buys on the first trading day and remains open through the backtest; the remaining 75% forms ten equal monthly entry tranches; the core cost does not affect the 140% tactical trigger; five tactical exits occur at the next open and monthly thereafter; falling prices do not cancel scheduled exits.
 
 - [ ] **Step 2: Verify the tests fail**
 
@@ -48,9 +50,10 @@ take_profit_pct = 0.40
 tranche_count = 10
 exit_tranche_count = 5
 lookback_years = 3
+core_position_pct = 0.25
 ```
 
-Compute the rolling high from closes strictly before the current execution day and no earlier than `ts - pd.DateOffset(years=3)`. On trigger, schedule ten buys. On take-profit trigger, freeze the current share count, sell one fifth immediately, and schedule four further sales on subsequent monthly first trading days. Reset cycle state only after the final sale.
+Buy the core position separately on the first trading day. Compute the rolling high from closes strictly before the current execution day and no earlier than `ts - pd.DateOffset(years=3)`. On trigger, schedule ten tactical buys from the 75% sleeve. On take-profit trigger, freeze only tactical shares, sell one fifth immediately, and schedule four further tactical sales on subsequent monthly first trading days. Never pass core shares to the staged-sale function.
 
 - [ ] **Step 4: Verify strategy tests pass**
 
@@ -66,7 +69,7 @@ Expected: all tests pass.
 - Modify: `frontend/src/pages/PaperTrading.tsx`
 
 **Interfaces:**
-- Produces backend and frontend defaults `{drawdown_threshold: 0.4, take_profit_pct: 0.4, tranches: 10, exit_tranches: 5, lookback_years: 3}`.
+- Produces backend and frontend defaults `{core_position_pct: 0.25, drawdown_threshold: 0.4, take_profit_pct: 0.4, tranches: 10, exit_tranches: 5, lookback_years: 3}`.
 
 - [ ] **Step 1: Update the backend default contract test first**
 
