@@ -24,7 +24,7 @@ from src.paper_trading.strategies import _to_code
 logger = logging.getLogger(__name__)
 
 MAX_LOSS_PENALTY = 2.0  # mirrors the frontend balanceScore weight
-_MAX_WINDOWS = 8         # bound compute (strategies × windows)
+_MAX_WINDOWS = 20        # full 20-year span: up to 18 three-year windows + full history
 _MAX_HISTORY_YEARS = 20
 
 
@@ -242,6 +242,7 @@ def run_robust_optimize(
         "strategies": strategies,
         "best_strategy": best_name,
         "window_years": window_years,
+        "step_years": step_years,
         "data_start": span_start.strftime("%Y-%m-%d"),
         "data_end": span_end.strftime("%Y-%m-%d"),
         "limiting_symbols": limiting_symbols,

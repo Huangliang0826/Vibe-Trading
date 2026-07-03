@@ -33,6 +33,8 @@ class StrategyConfig(BaseModel):
         "drawdown_rebalance",
         "smart_dca",
         "dca_then_hold",
+        "dca_one_year_then_hold",
+        "dca_two_year_then_hold",
         "trend_volatility_filter",
         "donchian_breakout",
         "bollinger_reversion",
@@ -50,6 +52,8 @@ class StrategyConfig(BaseModel):
         "volatility_squeeze_breakout",
         "risk_parity",
         "price_volume_efficiency",
+        "accelerated_dca_entry",
+        "deep_drawdown_recovery",
     ] = "buy_and_hold"
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -100,4 +104,4 @@ class RobustOptimizeCreate(BaseModel):
     initial_usd: float = Field(default=100_000.0, gt=0)
     initial_hkd: float = Field(default=1_000_000.0, ge=0)
     window_years: int = Field(default=3, ge=2, le=10)
-    step_years: int = Field(default=2, ge=1, le=5)
+    step_years: int = Field(default=1, ge=1, le=5)

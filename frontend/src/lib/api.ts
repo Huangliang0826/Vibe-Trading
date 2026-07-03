@@ -821,6 +821,7 @@ export interface PaperStrategyConfig {
     | "drawdown_rebalance"
     | "smart_dca"
     | "dca_then_hold"
+    | "dca_two_year_then_hold"
     | "trend_volatility_filter"
     | "donchian_breakout"
     | "bollinger_reversion"
@@ -828,7 +829,6 @@ export interface PaperStrategyConfig {
     | "monthly_rebalance"
     | "macd_divergence"
     | "dual_momentum"
-    | "vol_trend_rotation"
     | "atr_trend_stop"
     | "mean_reversion_scaleout"
     | "enhanced_dca_trend"
@@ -837,7 +837,9 @@ export interface PaperStrategyConfig {
     | "low_volatility_rotation"
     | "volatility_squeeze_breakout"
     | "risk_parity"
-    | "price_volume_efficiency";
+    | "price_volume_efficiency"
+    | "accelerated_dca_entry"
+    | "deep_drawdown_recovery";
   params: Record<string, unknown>;
 }
 
@@ -894,6 +896,7 @@ export interface RobustOptimizeResult {
   strategies: RobustStrategyRow[];
   best_strategy: string | null;
   window_years: number;
+  step_years: number;
   data_start: string;
   data_end: string;
   limiting_symbols: string[];

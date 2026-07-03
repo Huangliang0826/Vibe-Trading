@@ -71,6 +71,7 @@ type StrategyName =
   | "drawdown_rebalance"
   | "smart_dca"
   | "dca_then_hold"
+  | "dca_two_year_then_hold"
   | "trend_volatility_filter"
   | "donchian_breakout"
   | "bollinger_reversion"
@@ -78,7 +79,6 @@ type StrategyName =
   | "monthly_rebalance"
   | "macd_divergence"
   | "dual_momentum"
-  | "vol_trend_rotation"
   | "atr_trend_stop"
   | "mean_reversion_scaleout"
   | "enhanced_dca_trend"
@@ -87,7 +87,9 @@ type StrategyName =
   | "low_volatility_rotation"
   | "volatility_squeeze_breakout"
   | "risk_parity"
-  | "price_volume_efficiency";
+  | "price_volume_efficiency"
+  | "accelerated_dca_entry"
+  | "deep_drawdown_recovery";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -100,6 +102,9 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "drawdown_rebalance", label: "回撤加仓", desc: "下跌分批提高仓位，接近前高降仓" },
   { value: "smart_dca", label: "智能定投增强", desc: "低估多投，过热少投，高波动降速" },
   { value: "dca_then_hold", label: "三年定投后持有", desc: "把现金分三年逐月投入，投完长期持有" },
+  { value: "dca_two_year_then_hold", label: "两年定投后持有", desc: "把现金分两年逐月投入，投完长期持有" },
+  { value: "accelerated_dca_entry", label: "回撤加速建仓", desc: "首投25%，十二个月分批；跌10%投20%，跌20%投完" },
+  { value: "deep_drawdown_recovery", label: "深跌分批止盈", desc: "距高点跌40%分六次建仓，平均成本上涨30%清仓" },
   { value: "trend_volatility_filter", label: "趋势波动过滤", desc: "只在趋势向上时持有，并按波动率降仓" },
   { value: "donchian_breakout", label: "唐奇安突破", desc: "突破长期高点买入，跌破近期低点退出" },
   { value: "bollinger_reversion", label: "布林带反转", desc: "跌破下轨买入，回归均线后卖出" },
@@ -107,7 +112,6 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "monthly_rebalance", label: "月度再平衡", desc: "每月把组合调回目标比例" },
   { value: "macd_divergence", label: "MACD 背离", desc: "底背离买入，顶背离或死叉退出" },
   { value: "dual_momentum", label: "双动量轮动", desc: "在组合内只持有动量最强且为正的标的" },
-  { value: "vol_trend_rotation", label: "攻守轮动", desc: "趋势向上且波动低时持第一只(股票)，否则换入第二只(债券)" },
   { value: "atr_trend_stop", label: "ATR 趋势止损", desc: "趋势突破后买入，用 ATR 动态止损保护利润" },
   { value: "mean_reversion_scaleout", label: "均值回归分批止盈", desc: "超跌低吸，回归均线先减半，到上轨清仓" },
   { value: "enhanced_dca_trend", label: "趋势增强定投", desc: "按期建仓，弱趋势降仓，趋势回暖再提高投入" },
@@ -150,6 +154,7 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   drawdown_rebalance: "策略原理：价格从高点回撤越多越提高仓位，接近前高时降低仓位锁定恢复收益。",
   smart_dca: "策略原理：在普通定投基础上根据均线偏离和波动率调整投入倍率，低估多投、过热少投。",
   dca_then_hold: "策略原理：把全部资金平均分成三年、按所选频率（默认每月）逐步投入选定标的，三年内分批建仓摊低成本；投完后不再买卖，长期持有赚取标的长期涨幅。回测区间建议不少于三年，否则资金无法在区间内投完。",
+  dca_two_year_then_hold: "策略原理：把全部资金平均分成两年、按所选频率（默认每月）逐步投入选定标的；两年建仓完成后不再买卖，长期持有赚取标的长期涨幅。",
   trend_volatility_filter: "策略原理：只有价格处于长期上升趋势时才持有，同时用波动率控制仓位大小。",
   donchian_breakout: "策略原理：突破长期高点时买入，跌破近期低点时退出，属于经典趋势跟随方法。",
   bollinger_reversion: "策略原理：价格跌破布林带下轨时认为短期偏离过大，买入等待回归均线后卖出。",
@@ -157,7 +162,6 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   monthly_rebalance: "策略原理：每月把组合恢复到目标权重，卖出涨多的、补回跌多的，保持风险结构稳定。",
   macd_divergence: "策略原理：当价格创新低但 MACD 抬高（底背离）且柱状图转向时买入，出现顶背离或 MACD 死叉时退出，捕捉动量反转。",
   dual_momentum: "策略原理：每月按近期涨幅给组合内标的排名，只持有动量最强且收益为正的标的（绝对+相对动量），其余转为现金。",
-  vol_trend_rotation: "策略原理：以第一只(风险/股票)标的的价格判断行情——站上趋势均线且波动率低于自身一年均值时进攻持股，否则防守换入第二只(债券)标的，靠攻守切换控制回撤。需按“股票在前、债券在后”的顺序添加标的。",
   atr_trend_stop: "策略原理：趋势突破时买入，并用 ATR 波动幅度计算动态止损线；价格继续上涨时止损线随高点上移，趋势破坏或触发止损时离场。",
   mean_reversion_scaleout: "策略原理：价格跌到统计下轨时认为短期超跌并买入，回到均线附近先减半，到上轨或触发止损时退出，用分批止盈降低反转失败风险。",
   enhanced_dca_trend: "策略原理：保留定投的分批建仓纪律，但长期趋势偏弱时降低目标仓位，趋势向上且价格仍偏低时提高投入，避免在弱势里机械满仓。",
@@ -167,12 +171,26 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   volatility_squeeze_breakout: "策略原理：先等待布林带宽度/波动率降到历史低分位，随后只有价格向上突破且成交量确认时买入，捕捉压缩后的趋势释放。",
   risk_parity: "策略原理：按近期波动率反向分配组合权重，波动大的标的少配，波动小的标的多配，让组合风险贡献更均衡。",
   price_volume_efficiency: "策略原理：把价格行为切成上涨效率和下跌效率，再看成交量是否配合；上涨高效且放量确认加分，下跌高效且放量确认扣分，最后按综合 rank 轮动持有前几名。",
+  accelerated_dca_entry: "策略原理：T0先投入目标预算的25%，剩余75%在之后十二个月的首个交易日按固定基础金额投入；相对T0收盘回撤达到10%时当期投入总预算的20%，达到20%时一次性投入全部剩余资金。",
+  deep_drawdown_recovery: "策略原理：价格相对当时已知的历史最高点下跌40%后开始建仓，将资金分六份、每隔一个月投入一份；全部持仓相对加权平均成本上涨30%后一次性卖出。继续下跌不止损，买完后等待恢复。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
   const params: Record<string, unknown> = {};
-  if (name === "dca" || name === "smart_dca" || name === "enhanced_dca_trend" || name === "dca_then_hold") params.frequency = dcaFrequency;
+  if (name === "dca" || name === "smart_dca" || name === "enhanced_dca_trend" || name === "dca_then_hold" || name === "dca_two_year_then_hold") params.frequency = dcaFrequency;
   if (name === "grid") params.grid_count = gridCount;
+  if (name === "accelerated_dca_entry") {
+    params.initial_pct = 0.25;
+    params.n_months = 12;
+    params.accelerate_drawdown = 0.1;
+    params.all_in_drawdown = 0.2;
+    params.accelerated_investment_pct = 0.2;
+  }
+  if (name === "deep_drawdown_recovery") {
+    params.drawdown_threshold = 0.4;
+    params.take_profit_pct = 0.3;
+    params.tranches = 6;
+  }
   return params;
 }
 
@@ -696,7 +714,7 @@ export function PaperTrading() {
         initial_usd: initialUsd,
         initial_hkd: initialHkd,
         window_years: 3,
-        step_years: 2,
+        step_years: 1,
       });
       setRobustResult(result);
       if (result.best_strategy) setStrategy(result.best_strategy as StrategyName);
@@ -891,10 +909,10 @@ export function PaperTrading() {
           </div>
 
           {/* Strategy params */}
-          {(strategy === "dca" || strategy === "smart_dca" || strategy === "dca_then_hold") && (
+          {(strategy === "dca" || strategy === "smart_dca" || strategy === "dca_then_hold" || strategy === "dca_two_year_then_hold") && (
             <div className="flex items-center gap-3 pl-1">
               <label className="text-xs text-muted-foreground">
-                {strategy === "smart_dca" ? "智能定投频率" : strategy === "dca_then_hold" ? "三年定投频率" : "定投频率"}
+                {strategy === "smart_dca" ? "智能定投频率" : strategy === "dca_then_hold" ? "三年定投频率" : strategy === "dca_two_year_then_hold" ? "两年定投频率" : "定投频率"}
               </label>
               <select
                 value={dcaFrequency}
@@ -1099,7 +1117,7 @@ export function PaperTrading() {
           <div className="mb-2">
             <h2 className="text-sm font-semibold">多时间段稳健性测试</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              在 {robustResult.windows.filter((w) => !w.is_full).length} 个滚动 {robustResult.window_years} 年窗口 + 全历史上分别按平衡得分排名，取
+              在 {robustResult.windows.filter((w) => !w.is_full).length} 个 {robustResult.window_years} 年窗口（每 {robustResult.step_years} 年滚动）+ 全历史上分别按平衡得分排名，取
               <span className="font-medium text-foreground">平均排名</span>最优。共同数据区间 {robustResult.data_start} ~ {robustResult.data_end}
               （最多 {robustResult.history_cap_years} 年）
               {robustResult.limiting_symbols.length > 0 && `，受 ${robustResult.limiting_symbols.join("、")} 的历史长度限制`}。

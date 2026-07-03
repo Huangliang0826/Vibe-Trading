@@ -1,6 +1,7 @@
 import pandas as pd
+import pytest
 
-from src.paper_trading.executor import _run_dca, _smart_dca_multiplier
+from src.paper_trading.executor import _run_accelerated_entry, _run_dca, _smart_dca_multiplier, evaluate_strategy
 from src.paper_trading.models import PaperHolding, StrategyConfig
 from src.paper_trading.strategies import generate_dca, generate_grid, generate_signals
 
@@ -83,6 +84,92 @@ def test_dca_then_hold_uses_exactly_three_years_of_monthly_tranches():
     assert len(trades) == 36
     assert sum(trade.size for trade in trades) == 360
     StrategyConfig(name="dca_then_hold")
+
+
+def test_two_year_dca_then_hold_uses_twenty_four_monthly_tranches():
+    holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
+    idx = pd.bdate_range("2020-01-02", "2023-01-02")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1_000},
+        index=idx,
+    )
+
+    _equity, trades = evaluate_strategy(
+        [holding], {"AAPL.US": frame}, "dca_two_year_then_hold",
+        {"frequency": "monthly"}, 240_000,
+    )
+
+    assert len(trades) == 24
+    assert sum(trade.size for trade in trades) == 2_400
+    StrategyConfig(name="dca_two_year_then_hold")
+
+
+def test_accelerated_entry_deploys_25_percent_then_accelerates_on_drawdowns():
+    holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
+    idx = pd.bdate_range("2024-01-02", "2024-08-30")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1_000},
+        index=idx,
+    )
+    frame.loc[pd.Timestamp("2024-02-01"), "open"] = 90.0
+    frame.loc[pd.Timestamp("2024-03-01"), "open"] = 80.0
+
+    _equity, trades = _run_accelerated_entry(
+        100_000, [holding], {"AAPL.US": frame},
+        {"initial_pct": 0.25, "n_months": 12, "accelerated_investment_pct": 0.2},
+    )
+
+    amounts = [trade.entry_price * trade.size for trade in trades]
+    assert len(trades) == 3
+    assert amounts[0] == pytest.approx(25_000, abs=1)
+    assert amounts[1] == pytest.approx(20_000, abs=1)
+    assert amounts[2] == pytest.approx(55_000, abs=1)
+    StrategyConfig(name="accelerated_dca_entry")
+
+
+def test_accelerated_entry_does_not_use_same_day_close_for_open_decision():
+    holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
+    idx = pd.bdate_range("2024-01-02", "2024-08-30")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1_000},
+        index=idx,
+    )
+    frame.loc[pd.Timestamp("2024-02-01"), ["open", "close"]] = [95.0, 70.0]
+
+    _equity, trades = _run_accelerated_entry(
+        100_000, [holding], {"AAPL.US": frame}, {},
+    )
+
+    february = next(trade for trade in trades if trade.entry_time == pd.Timestamp("2024-02-01"))
+    assert february.entry_price * february.size == pytest.approx(6_250, abs=1)
+
+
+def test_deep_drawdown_recovery_builds_six_tranches_and_exits_at_30_percent_profit():
+    holding = PaperHolding(symbol="AAPL", market="us", allocation_pct=100)
+    idx = pd.bdate_range("2024-01-02", "2024-10-31")
+    frame = pd.DataFrame(
+        {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1_000},
+        index=idx,
+    )
+    drop_day = idx[5]
+    first_buy_day = idx[6]
+    frame.loc[drop_day:, ["open", "high", "low", "close"]] = 60.0
+    take_profit_signal = pd.Timestamp("2024-08-01")
+    take_profit_exit = pd.Timestamp("2024-08-02")
+    frame.loc[take_profit_signal:, ["open", "high", "low", "close"]] = 78.0
+
+    _equity, trades = evaluate_strategy(
+        [holding], {"AAPL.US": frame}, "deep_drawdown_recovery",
+        {"drawdown_threshold": 0.4, "take_profit_pct": 0.3, "tranches": 6},
+        120_000,
+    )
+
+    assert len(trades) == 6
+    assert trades[0].entry_time == first_buy_day
+    assert all(trade.exit_time == take_profit_exit for trade in trades)
+    assert all(trade.exit_reason == "take_profit_30pct" for trade in trades)
+    assert sum(trade.size for trade in trades) == pytest.approx(2_000, abs=0.1)
+    StrategyConfig(name="deep_drawdown_recovery")
 
 
 def test_new_strategy_names_are_accepted_and_generate_bounded_signals():
