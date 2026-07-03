@@ -38,6 +38,7 @@ Commands:
 Environment:
   VIBE_BACKEND_PORT   Backend port (default: 8899)
   VIBE_FRONTEND_PORT  Frontend port (default: 5899)
+  VIBE_TRADING_DATA_CACHE  Local market-data cache (default: 1)
   PYTHON              Python binary (default: local .venv, then python3)
 USAGE
 }
@@ -159,7 +160,7 @@ start_backend() {
     printf "backend already reachable at %s (external)\n" "$(service_url backend)"
     return
   fi
-  start_service backend env PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -c 'import cli, sys; raise SystemExit(cli.main(sys.argv[1:]))' serve \
+  start_service backend env PYTHONPATH="$ROOT/agent" VIBE_TRADING_DATA_CACHE="${VIBE_TRADING_DATA_CACHE:-1}" "$PYTHON_BIN" -c 'import cli, sys; raise SystemExit(cli.main(sys.argv[1:]))' serve \
     --host "$BACKEND_HOST" \
     --port "$BACKEND_PORT"
 }

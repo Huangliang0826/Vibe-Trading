@@ -1,13 +1,16 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { LayoutDashboard, RefreshCw, TrendingUp, TrendingDown, Plus, X, Loader2, AlertCircle } from "lucide-react";
-import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
+import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistHistoryResponse, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { HistoricalEventsView } from "@/components/charts/HistoricalEventsView";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { cn } from "@/lib/utils";
+import { historyCacheKey, quoteCacheKey, readOverviewCache, writeOverviewCache } from "@/lib/overview-price-cache";
 
 const REFRESH_MS = 30_000;
 const MARKET_INDEX_CACHE_KEY = "overview-market-indices:v1";
+const HISTORY_CACHE_TTL = 24 * 60 * 60 * 1000;
+const QUOTE_CACHE_TTL = 60 * 1000;
 
 interface MarketIndexCache {
   cachedAt: number;
@@ -414,24 +417,48 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   useEffect(() => {
     if (view !== "price" && view !== "historical_events") return;
     const activePeriod = view === "historical_events" ? historicalPeriod : period;
+    const historyKey = historyCacheKey(market, code, activePeriod);
+    const quoteKey = quoteCacheKey(market, code);
+    const historyCache = readOverviewCache<WatchlistHistoryResponse>(historyKey, HISTORY_CACHE_TTL);
+    const quoteCache = readOverviewCache<WatchlistQuote>(quoteKey, QUOTE_CACHE_TTL);
     let cancelled = false;
-    setLoading(true);
+    if (historyCache) {
+      setBars(historyCache.value.bars);
+      if (historyCache.value.name) setName(historyCache.value.name);
+    }
+    if (quoteCache) setQuote(quoteCache.value);
+    setLoading(!historyCache);
     setError(null);
+    if (historyCache?.isFresh && quoteCache?.isFresh) return;
+
+    const historyRequest = historyCache?.isFresh
+      ? Promise.resolve<WatchlistHistoryResponse | null>(null)
+      : api.getWatchlistHistory(code, activePeriod, market);
+    const quoteRequest = quoteCache?.isFresh
+      ? Promise.resolve<WatchlistQuote | null>(null)
+      : api.getWatchlistQuote([code], market).then((items) => items[0] || null).catch(() => null);
     Promise.all([
-      api.getWatchlistHistory(code, activePeriod, market),
-      api.getWatchlistQuote([code], market).catch(() => [] as WatchlistQuote[]),
+      historyRequest,
+      quoteRequest,
     ])
-      .then(([res, quoteList]) => {
+      .then(([res, nextQuote]) => {
         if (cancelled) return;
-        setBars(res.bars);
-        setQuote(quoteList[0] || null);
-        if (res.name) setName(res.name);
+        if (res) {
+          setBars(res.bars);
+          if (res.name) setName(res.name);
+          writeOverviewCache(historyKey, res);
+        }
+        if (nextQuote) {
+          setQuote(nextQuote);
+          writeOverviewCache(quoteKey, nextQuote);
+        }
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "获取走势失败");
-        setBars([]);
-        setQuote(null);
+        if (!historyCache) {
+          setError(e instanceof Error ? e.message : "获取走势失败");
+          setBars([]);
+        }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
