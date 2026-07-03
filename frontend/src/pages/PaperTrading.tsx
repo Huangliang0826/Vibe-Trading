@@ -4,6 +4,7 @@ import { ApiError, api, type PaperTradingRun, type PaperHolding, type PaperStrat
 import { PaperEquityChart } from "@/components/charts/PaperEquityChart";
 import { PaperHoldingPriceChart } from "@/components/charts/PaperHoldingPriceChart";
 import { cn } from "@/lib/utils";
+import { buildRobustWinnerRunRequest } from "@/lib/paper-trading-robust";
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | "neutral" }) {
   const color = tone === "good" ? "text-emerald-600 dark:text-emerald-400"
@@ -399,6 +400,7 @@ export function PaperTrading() {
   const [optimalBestRunId, setOptimalBestRunId] = useState<string | null>(null);
   const [robustResult, setRobustResult] = useState<RobustOptimizeResult | null>(null);
   const [robustLoading, setRobustLoading] = useState(false);
+  const [robustAutoRunning, setRobustAutoRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [singlePricePeriod, setSinglePricePeriod] = useState<PriceHistoryPeriod>("ALL");
@@ -457,7 +459,7 @@ export function PaperTrading() {
   }, []);
 
   // ── Polling for active run ──
-  const pollRun = useCallback((runId: string) => {
+  const pollRun = useCallback((runId: string, onFinished?: () => void) => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
@@ -467,6 +469,7 @@ export function PaperTrading() {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           refreshRuns();
+          onFinished?.();
         }
       } catch (e) {
         if (isMissingRunError(e)) {
@@ -475,6 +478,7 @@ export function PaperTrading() {
           setActiveRun(null);
           setError("这条回测记录已不存在，已刷新历史列表。");
           refreshRuns();
+          onFinished?.();
         }
       }
     }, 1500);
@@ -719,7 +723,21 @@ export function PaperTrading() {
         step_years: 1,
       });
       setRobustResult(result);
-      if (result.best_strategy) setStrategy(result.best_strategy as StrategyName);
+      if (!result.best_strategy) throw new Error("多时间段测试没有找到可用的最稳健策略");
+      const winner = result.best_strategy as StrategyName;
+      setStrategy(winner);
+      const run = await api.createPaperTradingRun(buildRobustWinnerRunRequest({
+        bestStrategy: winner,
+        winnerParams: strategyParamsFor(winner, dcaFrequency, gridCount),
+        holdings,
+        startDate,
+        endDate,
+        initialUsd,
+        initialHkd,
+      }));
+      setActiveRun(run);
+      setRobustAutoRunning(true);
+      pollRun(run.run_id, () => setRobustAutoRunning(false));
     } catch (e: any) {
       setError(e?.message || "多时间段测试失败");
     } finally {
@@ -992,10 +1010,10 @@ export function PaperTrading() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleOptimizeStrategies}
-              disabled={submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid}
+              disabled={submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
-                submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid
+                submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
                   : "bg-background hover:bg-accent",
               )}
@@ -1005,24 +1023,24 @@ export function PaperTrading() {
             </button>
             <button
               onClick={handleRobustOptimize}
-              disabled={submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid}
+              disabled={submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid}
               title="在多个滚动时间段上分别测试，取平均排名最稳健的策略"
               className={cn(
                 "flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
-                submitting || optimizing || robustLoading || holdings.length === 0 || !allocValid
+                submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
                   : "bg-background hover:bg-accent",
               )}
             >
-              {robustLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              多时间段测试
+              {robustLoading || robustAutoRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {robustAutoRunning ? "运行赢家回测" : "多时间段测试"}
             </button>
             <button
               onClick={handleSubmit}
-              disabled={submitting || optimizing || holdings.length === 0 || !allocValid}
+              disabled={submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-                submitting || optimizing || holdings.length === 0 || !allocValid
+                submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid
                   ? "bg-muted text-muted-foreground cursor-not-allowed"
                   : "bg-primary text-primary-foreground hover:bg-primary/90",
               )}
