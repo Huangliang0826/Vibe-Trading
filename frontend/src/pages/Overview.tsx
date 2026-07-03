@@ -389,6 +389,10 @@ export function stockChartViewTabs(_market: WatchlistMarket): { key: CardView; l
   return [...VIEW_TABS, { key: "historical_events", label: "重大历史事件" }];
 }
 
+export function shouldRenderHistoricalEvents(view: CardView, _market: WatchlistMarket): boolean {
+  return view === "historical_events";
+}
+
 function StockChartCard({ code, market, id }: { code: string; market: WatchlistMarket; id?: string }) {
   const [view, setView] = useState<CardView>("price");
   const [name, setName] = useState(code);
@@ -491,7 +495,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>
-      ) : view === "historical_events" && market !== "cn" ? (
+      ) : shouldRenderHistoricalEvents(view, market) ? (
         <HistoricalEventsView
           market={market}
           code={code}

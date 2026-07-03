@@ -173,7 +173,7 @@ def _load_prices(market: str, symbol: str, period: str) -> pd.DataFrame:
     fetch_symbol = symbol
     if market == "hk" and symbol not in {"^HSI"} and symbol.isdigit():
         fetch_symbol = f"{int(symbol):04d}.HK"
-    inferred = infer_market(fetch_symbol)
+    inferred = "a_share" if market == "cn" else infer_market(fetch_symbol)
     loader = resolve_loader(inferred)
     result = loader.fetch(
         codes=[fetch_symbol], start_date=(start - timedelta(days=100)).isoformat(),

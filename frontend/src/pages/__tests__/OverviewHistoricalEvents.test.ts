@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Overview, stockChartViewTabs } from "../Overview";
+import { Overview, shouldRenderHistoricalEvents, stockChartViewTabs } from "../Overview";
 
 
 describe("Overview historical event tabs", () => {
@@ -8,6 +8,12 @@ describe("Overview historical event tabs", () => {
     expect(stockChartViewTabs("hk").map((tab) => tab.key)).toContain("historical_events");
     expect(stockChartViewTabs("us").map((tab) => tab.key)).toContain("historical_events");
     expect(stockChartViewTabs("cn").map((tab) => tab.key)).toContain("historical_events");
+  });
+
+  it("renders the historical event component for A shares", () => {
+    expect(shouldRenderHistoricalEvents("historical_events", "cn")).toBe(true);
+    expect(shouldRenderHistoricalEvents("historical_events", "hk")).toBe(true);
+    expect(shouldRenderHistoricalEvents("historical_events", "us")).toBe(true);
   });
 });
 

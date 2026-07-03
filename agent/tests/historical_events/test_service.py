@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.historical_events.models import EvidenceItem
-from src.historical_events.service import HistoricalEventService
+from src.historical_events.service import HistoricalEventService, _load_prices
 from src.historical_events.storage import HistoricalEventStore
 
 
@@ -122,6 +122,26 @@ def test_service_supports_a_shares_with_csi300_benchmark(tmp_path: Path):
 
     assert completed.status == "completed"
     assert ("cn", "000300.SH", "5Y") in calls
+
+
+def test_a_share_price_loader_does_not_misclassify_chinext(monkeypatch):
+    resolved_markets = []
+
+    class Loader:
+        def fetch(self, codes, start_date, end_date, interval):
+            index = pd.date_range("2025-01-02", periods=3, freq="B")
+            return {codes[0]: pd.DataFrame({"close": [100.0, 101.0, 102.0]}, index=index)}
+
+    def resolve(market):
+        resolved_markets.append(market)
+        return Loader()
+
+    monkeypatch.setattr("backtest.loaders.registry.resolve_loader", resolve)
+
+    result = _load_prices("cn", "300750", "1Y")
+
+    assert not result.empty
+    assert resolved_markets == ["a_share"]
 
 
 def test_old_analysis_version_is_not_reused(tmp_path: Path):
