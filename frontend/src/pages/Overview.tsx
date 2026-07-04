@@ -1,16 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { LayoutDashboard, RefreshCw, TrendingUp, TrendingDown, Plus, X, Loader2, AlertCircle } from "lucide-react";
-import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistHistoryResponse, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
+import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type WatchlistHistoryResponse, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { HistoricalEventsView } from "@/components/charts/HistoricalEventsView";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { cn } from "@/lib/utils";
-import { historyCacheKey, quoteCacheKey, readOverviewCache, writeOverviewCache } from "@/lib/overview-price-cache";
+import { historyCacheKey, readOverviewCache, writeOverviewCache } from "@/lib/overview-price-cache";
 
 const REFRESH_MS = 30_000;
 const MARKET_INDEX_CACHE_KEY = "overview-market-indices:v1";
 const HISTORY_CACHE_TTL = 24 * 60 * 60 * 1000;
-const QUOTE_CACHE_TTL = 60 * 1000;
 
 interface MarketIndexCache {
   cachedAt: number;
@@ -403,8 +402,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   // Price view state
   const [period, setPeriod] = useState<PriceHistoryPeriod>("1Y");
   const [historicalPeriod, setHistoricalPeriod] = useState<HistoricalEventPeriod>("1Y");
-  const [bars, setBars] = useState<PriceHistoryBar[]>([]);
-  const [quote, setQuote] = useState<WatchlistQuote | null>(null);
+  const [history, setHistory] = useState<WatchlistHistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -418,46 +416,28 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
     if (view !== "price" && view !== "historical_events") return;
     const activePeriod = view === "historical_events" ? historicalPeriod : period;
     const historyKey = historyCacheKey(market, code, activePeriod);
-    const quoteKey = quoteCacheKey(market, code);
     const historyCache = readOverviewCache<WatchlistHistoryResponse>(historyKey, HISTORY_CACHE_TTL);
-    const quoteCache = readOverviewCache<WatchlistQuote>(quoteKey, QUOTE_CACHE_TTL);
     let cancelled = false;
     if (historyCache) {
-      setBars(historyCache.value.bars);
+      setHistory(historyCache.value);
       if (historyCache.value.name) setName(historyCache.value.name);
     }
-    if (quoteCache) setQuote(quoteCache.value);
     setLoading(!historyCache);
     setError(null);
-    if (historyCache?.isFresh && quoteCache?.isFresh) return;
+    if (historyCache?.isFresh) return;
 
-    const historyRequest = historyCache?.isFresh
-      ? Promise.resolve<WatchlistHistoryResponse | null>(null)
-      : api.getWatchlistHistory(code, activePeriod, market);
-    const quoteRequest = quoteCache?.isFresh
-      ? Promise.resolve<WatchlistQuote | null>(null)
-      : api.getWatchlistQuote([code], market).then((items) => items[0] || null).catch(() => null);
-    Promise.all([
-      historyRequest,
-      quoteRequest,
-    ])
-      .then(([res, nextQuote]) => {
+    api.getWatchlistHistory(code, activePeriod, market)
+      .then((res) => {
         if (cancelled) return;
-        if (res) {
-          setBars(res.bars);
-          if (res.name) setName(res.name);
-          writeOverviewCache(historyKey, res);
-        }
-        if (nextQuote) {
-          setQuote(nextQuote);
-          writeOverviewCache(quoteKey, nextQuote);
-        }
+        setHistory(res);
+        if (res.name) setName(res.name);
+        writeOverviewCache(historyKey, res);
       })
       .catch((e) => {
         if (cancelled) return;
         if (!historyCache) {
           setError(e instanceof Error ? e.message : "获取走势失败");
-          setBars([]);
+          setHistory(null);
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -512,13 +492,12 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
       {view === "price" ? (
         <>
           <PriceHistoryChart
-            bars={bars}
+            history={history}
             period={period}
             onPeriodChange={setPeriod}
             loading={loading}
             height={260}
             showRisk
-            quote={quote}
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>
@@ -528,7 +507,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
           code={code}
           companyName={name}
           period={historicalPeriod}
-          bars={bars}
+          bars={history?.bars ?? []}
           onPeriodChange={setHistoricalPeriod}
         />
       ) : (

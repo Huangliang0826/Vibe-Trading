@@ -52,7 +52,8 @@ def test_one_year_history_starts_at_exact_calendar_boundary(monkeypatch):
     result = api_server._fetch_price_history("NVDA", "1Y", "us")
 
     target = api_server._price_period_baseline_date("1Y", today)
-    assert result["bars"][0]["date"] == _previous_business_day(target).isoformat()
+    expected_baseline = _previous_business_day(target - timedelta(days=1))
+    assert result["bars"][0]["date"] == expected_baseline.isoformat()
     assert loader.calls[-1][1] == today.isoformat()
 
 
@@ -76,3 +77,25 @@ def test_all_history_keeps_the_earliest_available_bar(monkeypatch):
 
     assert len(result["bars"]) == len(frame)
     assert result["bars"][0]["date"] == "2000-01-03"
+
+
+def test_one_day_history_includes_previous_official_close(monkeypatch):
+    today = date.today()
+    frame = _daily_frame(today - timedelta(days=10), today)
+    _install_loader(monkeypatch, frame)
+
+    result = api_server._fetch_price_history("NVDA", "1D", "us")
+
+    assert len(result["bars"]) >= 2
+    assert result["bars"][0]["date"] < result["bars"][-1]["date"]
+    payload = api_server._build_history_metrics_payload(
+        code="NVDA",
+        name="Test",
+        market="us",
+        period="1D",
+        requested_start=result["requested_start"],
+        source=result["source"],
+        bars=result["bars"],
+    )
+    assert payload["baseline"]["date"] == result["bars"][0]["date"]
+    assert payload["metrics"]["interval_return_pct"] is not None

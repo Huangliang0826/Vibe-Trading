@@ -32,8 +32,14 @@ from src.live.order_guard import LiveOrderGuardTool
 from src.live.registry import wrap_live_broker_tools
 from src.trading.connectors.robinhood.classification import ROBINHOOD_TOOL_CLASS
 from src.tools.mcp import MCPRemoteTool, build_mcp_tool_wrappers
+from src.live import paths as live_paths
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def isolated_live_runtime(tmp_path, monkeypatch):
+    monkeypatch.setattr(live_paths, "get_runtime_root", lambda: tmp_path)
 
 # Tool names exercising every tier of the ladder.
 _READ_TOOL = "get_positions"  # curated READ

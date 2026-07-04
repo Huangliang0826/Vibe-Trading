@@ -32,6 +32,16 @@ _DCA_FREQ_MAP = {
 }
 _INITIAL_CASH = 100_000.0
 _ACTION_TOLERANCE = 1e-9
+_EXECUTOR_ONLY_STRATEGIES = frozenset({
+    "dca_then_hold",
+    "dca_one_year_then_hold",
+    "dca_two_year_then_hold",
+    "accelerated_dca_entry",
+    "deep_drawdown_recovery",
+})
+OPPORTUNITY_STRATEGY_NAMES = tuple(
+    name for name in STRATEGY_NAMES if name not in _EXECUTOR_ONLY_STRATEGIES
+)
 
 
 @dataclass(frozen=True)
@@ -85,7 +95,7 @@ def evaluate_frame(
 
     training = trimmed.iloc[:-252].copy()
     oos = trimmed.iloc[-252:].copy()
-    candidate_names = tuple(strategy_names or STRATEGY_NAMES)
+    candidate_names = tuple(strategy_names or OPPORTUNITY_STRATEGY_NAMES)
 
     runs: list[dict[str, object]] = []
     for strategy_name in candidate_names:

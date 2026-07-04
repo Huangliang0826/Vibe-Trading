@@ -504,15 +504,55 @@ export type PriceHistoryPeriod = "1D" | "1M" | "YTD" | "1Y" | "3Y" | "5Y" | "ALL
 
 export interface PriceHistoryBar {
   date: string;
+  open?: number;
+  high?: number;
+  low?: number;
   close: number;
-  volume: number;
+  volume: number | null;
+}
+
+export interface PriceObservation {
+  date: string;
+  value: number;
+  source: string;
+}
+
+export interface MarketMetricValues {
+  interval_return_pct: number | null;
+  dca_return_pct: number | null;
+  dca_max_loss_pct: number | null;
+  dca_contribution_count: number | null;
+  buy_hold_max_loss_pct: number | null;
+  max_drawdown_pct: number | null;
+}
+
+export interface MarketDataIssue {
+  code: string;
+  message: string;
+  blocking: boolean;
+  timestamp?: string;
 }
 
 export interface WatchlistHistoryResponse {
   code: string;
+  symbol: string;
   name: string;
+  market: string;
+  currency: string;
   period: PriceHistoryPeriod;
+  adjustment: "adjusted";
+  formula_version: string;
   bars: PriceHistoryBar[];
+  metrics: MarketMetricValues;
+  baseline: PriceObservation | null;
+  endpoint: PriceObservation | null;
+  metric_reasons: Record<string, string>;
+  data_status: {
+    quality: "valid" | "warning" | "invalid";
+    source: string;
+    data_through: string | null;
+    issues: MarketDataIssue[];
+  };
 }
 
 export type ValuationMetric = "pe" | "pb" | "mktcap";

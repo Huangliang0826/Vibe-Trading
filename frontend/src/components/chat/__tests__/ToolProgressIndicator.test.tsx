@@ -29,7 +29,7 @@ describe("ToolProgressIndicator", () => {
     const tcs = [makeTc({ elapsed_s: 5 })];
     render(<ToolProgressIndicator toolCalls={tcs} />);
     expect(screen.getByRole("status")).toBeInTheDocument();
-    expect(screen.getByText(/Run backtest/)).toBeInTheDocument();
+    expect(screen.getByText(/运行回测/)).toBeInTheDocument();
     expect(screen.getByText("5s")).toBeInTheDocument();
   });
 
@@ -40,8 +40,8 @@ describe("ToolProgressIndicator", () => {
     ];
     render(<ToolProgressIndicator toolCalls={tcs} />);
     expect(screen.getByText("2 tools running")).toBeInTheDocument();
-    expect(screen.getByText(/Run command/)).toBeInTheDocument();
-    expect(screen.getByText(/Generate code/)).toBeInTheDocument();
+    expect(screen.getByText(/执行命令/)).toBeInTheDocument();
+    expect(screen.getByText(/生成代码/)).toBeInTheDocument();
   });
 
   it("shows overflow indicator for > 3 running tools", () => {

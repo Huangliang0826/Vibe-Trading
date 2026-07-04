@@ -36,8 +36,10 @@ VALID_SOURCES: set[str] = {
     "yfinance",
     "akshare",
     "mootdx",
+    "a_stock_data",
     "ccxt",
     "futu",
+    "alpaca",
     "auto",
 }
 

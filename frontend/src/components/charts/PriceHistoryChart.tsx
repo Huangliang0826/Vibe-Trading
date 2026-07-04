@@ -3,94 +3,17 @@ import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
-import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistQuote } from "@/lib/api";
+import type { PriceHistoryPeriod, WatchlistHistoryResponse } from "@/lib/api";
 
 export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"];
 
 interface Props {
-  bars: PriceHistoryBar[];
+  history: WatchlistHistoryResponse | null;
   period: PriceHistoryPeriod;
   onPeriodChange: (p: PriceHistoryPeriod) => void;
   loading?: boolean;
   height?: number;
   showRisk?: boolean;
-  quote?: WatchlistQuote | null;
-}
-
-/** Max drawdown over the displayed window + recovery time of that episode.
- *
- * maxDD: deepest peak-to-trough drop (negative fraction). recoveryDays: calendar
- * days from the trough back up to the prior peak; null if not yet recovered, in
- * which case ``sinceTroughDays`` counts days from the trough to the last bar. */
-function computeDrawdown(bars: PriceHistoryBar[]): {
-  maxDD: number; recovered: boolean; recoveryDays: number | null;
-  sincePeakDays: number; recoveredPct: number;
-} | null {
-  if (bars.length < 2) return null;
-  let peak = bars[0].close, peakIdx = 0;
-  let maxDD = 0, troughIdx = -1, ddPeakIdx = 0;
-  for (let i = 0; i < bars.length; i++) {
-    const c = bars[i].close;
-    if (c > peak) { peak = c; peakIdx = i; }
-    const dd = peak > 0 ? c / peak - 1 : 0;
-    if (dd < maxDD) { maxDD = dd; troughIdx = i; ddPeakIdx = peakIdx; }
-  }
-  if (troughIdx < 0 || maxDD === 0) {
-    return { maxDD: 0, recovered: true, recoveryDays: 0, sincePeakDays: 0, recoveredPct: 100 };
-  }
-  const dayDiff = (a: string, b: string) =>
-    Math.round((new Date(b.slice(0, 10)).getTime() - new Date(a.slice(0, 10)).getTime()) / 86400000);
-  const peakValue = bars[ddPeakIdx].close;
-  for (let j = troughIdx + 1; j < bars.length; j++) {
-    if (bars[j].close >= peakValue) {
-      return { maxDD, recovered: true, recoveryDays: dayDiff(bars[troughIdx].date, bars[j].date), sincePeakDays: 0, recoveredPct: 100 };
-    }
-  }
-  // Not recovered: days since the PEAK (how long this drawdown has lasted) +
-  // how far back up from the trough toward the prior peak.
-  const troughValue = bars[troughIdx].close;
-  const span = peakValue - troughValue;
-  const last = bars[bars.length - 1].close;
-  const recoveredPct = span > 0 ? Math.min(Math.max((last - troughValue) / span * 100, 0), 100) : 0;
-  return { maxDD, recovered: false, recoveryDays: null,
-           sincePeakDays: dayDiff(bars[ddPeakIdx].date, bars[bars.length - 1].date), recoveredPct };
-}
-
-export function computeDailyDca(bars: PriceHistoryBar[]): {
-  totalReturn: number;
-  maxLoss: number;
-  contributions: number;
-} | null {
-  if (bars.length < 2 || bars[0].close <= 0) return null;
-
-  let wealth = 1;
-  let contributed = 1;
-  let contributionDays = 1;
-  let lastContributionDate = bars[0].date.slice(0, 10);
-  const nav = [1];
-
-  for (let i = 1; i < bars.length; i++) {
-    const prevClose = bars[i - 1].close;
-    const close = bars[i].close;
-    if (prevClose > 0) {
-      wealth *= close / prevClose;
-    }
-
-    const currentDate = bars[i].date.slice(0, 10);
-    if (currentDate !== lastContributionDate) {
-      wealth += 1;
-      contributed += 1;
-      contributionDays += 1;
-      lastContributionDate = currentDate;
-    }
-    nav.push(wealth / contributed);
-  }
-
-  return {
-    totalReturn: nav[nav.length - 1] - 1,
-    maxLoss: Math.min(...nav.map((value) => value - 1)),
-    contributions: contributionDays,
-  };
 }
 
 // Change over the displayed range — computed from the exact plotted bars so
@@ -109,21 +32,17 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   return val.slice(5); // MM-DD
 }
 
-export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null }: Props) {
+export function PriceHistoryChart({ history, period, onPeriodChange, loading = false, height = 300, showRisk = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
 
+  const bars = history?.bars ?? [];
   const hasData = bars.length >= 2;
-  const firstClose = hasData ? bars[0].close : 0;
   const lastClose = hasData ? bars[bars.length - 1].close : 0;
-  const hasLiveDayQuote = period === "1D" && !!quote && quote.price > 0 && quote.prev_close > 0;
-  const displayClose = hasLiveDayQuote ? quote.price : lastClose;
-  const absChange = hasLiveDayQuote ? quote.price - quote.prev_close : lastClose - firstClose;
-  const pctChange = hasLiveDayQuote ? (absChange / quote.prev_close) * 100 : firstClose ? (absChange / firstClose) * 100 : 0;
-  const up = absChange >= 0;
-  const changeLabel = hasLiveDayQuote ? "今日涨跌" : `${period} 区间涨跌`;
-  const dd = showRisk && hasData ? computeDrawdown(bars) : null;
-  const dailyDca = showRisk && hasData && period !== "1D" ? computeDailyDca(bars) : null;
+  const displayClose = history?.endpoint?.value ?? lastClose;
+  const pctChange = history?.metrics.interval_return_pct ?? null;
+  const up = (pctChange ?? 0) >= 0;
+  const changeLabel = period === "1D" ? "今日涨跌" : `${period} 区间涨跌`;
 
   useEffect(() => {
     if (!ref.current || bars.length < 2) return;
@@ -131,9 +50,9 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
 
     const dates = bars.map((b) => b.date);
     const closes = bars.map((b) => b.close);
-    const volumes = bars.map((b) => b.volume);
+    const volumes = bars.map((b) => b.volume ?? null);
 
-    const positive = closes[closes.length - 1] >= closes[0];
+    const positive = (history?.metrics.interval_return_pct ?? 0) >= 0;
     const lineColor = positive ? t.upColor : t.downColor;
 
     const chart = echarts.init(ref.current);
@@ -236,10 +155,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           if (!params?.length) return "";
           const date = params[0].axisValue;
           const price = params.find((p) => p.seriesType === "line")?.value;
-          const base = bars[0]?.close ?? 0;
-          const pct = base && price !== undefined ? ((price - base) / base) * 100 : 0;
-          const pctStr = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
-          return `<div style="font-size:11px;line-height:1.8">${date}<br/>价格&nbsp;<b>${price !== undefined ? price.toFixed(2) : "—"}</b>&nbsp;<span style="opacity:.7">(${pctStr})</span></div>`;
+          return `<div style="font-size:11px;line-height:1.8">${date}<br/>价格&nbsp;<b>${price !== undefined ? price.toFixed(2) : "—"}</b></div>`;
         },
       },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
@@ -248,7 +164,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [bars, dark, period]);
+  }, [bars, dark, history?.metrics.interval_return_pct, period]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -261,7 +177,11 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
                 {displayClose.toFixed(2)}
               </span>
               <span className={cn("text-base font-medium tabular-nums text-muted-foreground")}>
-                {changeLabel}：<span className={changeClass(up)}>{up ? "+" : ""}{pctChange.toFixed(2)}%</span>
+                {changeLabel}：{pctChange == null ? (
+                  <span className="text-muted-foreground">数据不足</span>
+                ) : (
+                  <span className={changeClass(up)}>{up ? "+" : ""}{pctChange.toFixed(2)}%</span>
+                )}
               </span>
             </>
           ) : (
@@ -286,42 +206,33 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
         </div>
       </div>
 
-      {/* Risk metrics over the displayed window: max drawdown + recovery time */}
-      {dd && !loading && (
+      {showRisk && history && hasData && !loading && (
         <div className="flex items-center gap-x-4 gap-y-1 text-[11px] -mt-1 flex-wrap">
           <span className="text-muted-foreground">
-            最大回撤{" "}
-            <b className={cn("tabular-nums", dd.maxDD < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
-              {(dd.maxDD * 100).toFixed(1)}%
-            </b>
+            买入持有最大亏损 <MetricValue value={history.metrics.buy_hold_max_loss_pct} />
           </span>
           <span className="text-muted-foreground">
-            回撤修复{" "}
-            {dd.maxDD === 0 ? (
-              <b className="text-foreground">—</b>
-            ) : dd.recovered ? (
-              <b className="tabular-nums text-emerald-600 dark:text-emerald-400">{dd.recoveryDays} 天</b>
-            ) : (
-              <b className="tabular-nums text-amber-600 dark:text-amber-400">暂未修复（距高点 {dd.sincePeakDays} 天 · 已恢复 {dd.recoveredPct.toFixed(0)}%）</b>
-            )}
+            最大回撤 <MetricValue value={history.metrics.max_drawdown_pct} />
           </span>
-          {dailyDca && (
+          {period !== "1D" && (
             <>
               <span className="text-muted-foreground">
-                每日定投收益{" "}
-                <b className={cn("tabular-nums", dailyDca.totalReturn >= 0 ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
-                  {dailyDca.totalReturn >= 0 ? "+" : ""}{(dailyDca.totalReturn * 100).toFixed(1)}%
-                </b>
+                每日定投收益 <MetricValue value={history.metrics.dca_return_pct} signed />
               </span>
               <span className="text-muted-foreground">
-                每日定投最大亏损{" "}
-                <b className={cn("tabular-nums", dailyDca.maxLoss < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
-                  {(dailyDca.maxLoss * 100).toFixed(1)}%
-                </b>
-                <span className="ml-1 text-muted-foreground/70">({dailyDca.contributions} 次)</span>
+                每日定投最大亏损 <MetricValue value={history.metrics.dca_max_loss_pct} />
+                {history.metrics.dca_contribution_count != null && (
+                  <span className="ml-1 text-muted-foreground/70">({history.metrics.dca_contribution_count} 次)</span>
+                )}
               </span>
             </>
           )}
+        </div>
+      )}
+
+      {history && history.data_status.issues.length > 0 && !loading && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-600 dark:text-amber-400">
+          {history.data_status.issues.map((issue) => <span key={`${issue.code}:${issue.timestamp ?? ""}`}>{issue.message}</span>)}
         </div>
       )}
 
@@ -341,5 +252,15 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
         <div key="chart" ref={ref} style={{ height }} />
       )}
     </div>
+  );
+}
+
+function MetricValue({ value, signed = false }: { value: number | null; signed?: boolean }) {
+  if (value == null) return <b className="text-muted-foreground">—</b>;
+  const prefix = signed && value >= 0 ? "+" : "";
+  return (
+    <b className={cn("tabular-nums", value < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+      {prefix}{value.toFixed(1)}%
+    </b>
   );
 }

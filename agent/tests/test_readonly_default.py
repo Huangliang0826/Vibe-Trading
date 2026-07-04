@@ -218,7 +218,7 @@ def test_order_tools_appear_gate_wrapped_when_allowlisted(live_runtime: Path) ->
 # --- H8: a Robinhood URL under an aliased key is still a live broker ----------
 
 
-def test_aliased_key_with_robinhood_url_is_gated() -> None:
+def test_aliased_key_with_robinhood_url_is_gated(live_runtime: Path) -> None:
     """A Robinhood agentic URL parked under key 'rh' is gated + broker-resolved."""
     from src.config.schema import MCPServerConfig
 
