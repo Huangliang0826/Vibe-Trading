@@ -30,4 +30,3 @@ def test_fixed_capital_loss_and_drawdown_remain_distinct():
 
     assert metrics["max_loss"] == 0.0
     assert metrics["max_drawdown"] == pytest.approx(-0.20)
-

@@ -62,4 +62,3 @@ class MarketMetricsCache:
         except (OSError, TypeError, ValueError):
             tmp.unlink(missing_ok=True)
             return False
-

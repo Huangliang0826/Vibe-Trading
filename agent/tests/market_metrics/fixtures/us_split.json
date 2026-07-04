@@ -1,0 +1,19 @@
+{
+  "symbol": "SPLT",
+  "market": "us",
+  "currency": "USD",
+  "period": "1Y",
+  "requested_start": "2025-01-03",
+  "bars": [
+    ["2025-01-02", 100.0, 1000.0],
+    ["2025-01-03", 50.0, 2200.0],
+    ["2025-01-06", 55.0, 1800.0]
+  ],
+  "expected": {
+    "quality": "valid",
+    "interval_return_pct": -45.0,
+    "dca_return_pct": 5.0,
+    "buy_hold_max_loss_pct": -50.0,
+    "max_drawdown_pct": -50.0
+  }
+}

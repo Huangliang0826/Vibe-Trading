@@ -61,4 +61,3 @@ def test_malformed_cache_is_a_miss(tmp_path):
     path.write_text("not json", encoding="utf-8")
 
     assert cache.get(key, source_revision="rev") is None
-

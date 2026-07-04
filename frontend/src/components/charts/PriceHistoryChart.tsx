@@ -155,10 +155,7 @@ export function PriceHistoryChart({ history, period, onPeriodChange, loading = f
           if (!params?.length) return "";
           const date = params[0].axisValue;
           const price = params.find((p) => p.seriesType === "line")?.value;
-          const base = history?.baseline?.value ?? 0;
-          const pct = base && price !== undefined ? ((price - base) / base) * 100 : 0;
-          const pctStr = `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
-          return `<div style="font-size:11px;line-height:1.8">${date}<br/>价格&nbsp;<b>${price !== undefined ? price.toFixed(2) : "—"}</b>&nbsp;<span style="opacity:.7">(${pctStr})</span></div>`;
+          return `<div style="font-size:11px;line-height:1.8">${date}<br/>价格&nbsp;<b>${price !== undefined ? price.toFixed(2) : "—"}</b></div>`;
         },
       },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
@@ -167,7 +164,7 @@ export function PriceHistoryChart({ history, period, onPeriodChange, loading = f
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [bars, dark, history?.baseline?.value, history?.metrics.interval_return_pct, period]);
+  }, [bars, dark, history?.metrics.interval_return_pct, period]);
 
   return (
     <div className="flex flex-col gap-3">

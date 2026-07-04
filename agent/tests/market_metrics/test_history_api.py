@@ -69,4 +69,3 @@ def test_non_positive_adjusted_a_share_data_is_not_replaced_with_raw(monkeypatch
 
     assert result["adjustment"] == "adjusted"
     assert result["bars"][0]["close"] == -1.0
-

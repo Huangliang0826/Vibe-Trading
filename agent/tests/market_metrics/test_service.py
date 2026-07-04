@@ -81,4 +81,3 @@ def test_all_period_uses_first_bar_as_baseline_and_investment_day():
     assert response.baseline is not None
     assert response.baseline.date == "2025-01-02"
     assert response.metrics.dca_contribution_count == 3
-

@@ -1512,7 +1512,7 @@ export function HSTech() {
                           <span className="mx-1">·</span>
                           总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}
                           <span className="mx-1">·</span>
-                          最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
+                          最大回撤 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
                           <span className="mx-1">·</span>
                           夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
                         </p>
