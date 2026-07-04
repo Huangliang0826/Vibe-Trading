@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Cpu, RefreshCw, Loader2, BookOpen, ExternalLink, Sparkles, ChevronDown, ChevronUp, Newspaper, TrendingUp } from "lucide-react";
-import { api, type PriceHistoryPeriod, type PriceHistoryBar, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote, type SmartTResponse, type HSTechBestStrategyResponse } from "@/lib/api";
+import { api, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistHistoryResponse, type ValuationMetric, type ValuationPeriod, type ValuationPoint, type IndustryReport, type ForecastResponse, type CalibrationResponse, type StrategyResponse, type StrategyMetrics, type NewsItem, type QuintileResponse, type FactorScreening, type WalkForwardResponse, type ScanPortfolioResponse, type WatchlistQuote, type SmartTResponse, type HSTechBestStrategyResponse } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { ForecastChart } from "@/components/charts/ForecastChart";
@@ -1051,11 +1051,11 @@ export function HSTech() {
   // Chart view state
   const [view, setView] = useState<CardView>("price");
   const [period, setPeriod] = useState<PriceHistoryPeriod>("1Y");
-  const [bars, setBars] = useState<PriceHistoryBar[]>([]);
+  const [history, setHistory] = useState<WatchlistHistoryResponse | null>(null);
+  const bars = history?.bars ?? [];
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
   const [stockName, setStockName] = useState(HSTECH_NAME);
-  const [quote, setQuote] = useState<WatchlistQuote | null>(null);
 
   // Valuation state
   const [valPeriod, setValPeriod] = useState<ValuationPeriod>("5Y");
@@ -1114,21 +1114,16 @@ export function HSTech() {
     let cancelled = false;
     setChartLoading(true);
     setChartError(null);
-    Promise.all([
-      api.getWatchlistHistory(HSTECH_CODE, period, HSTECH_MARKET),
-      api.getWatchlistQuote([HSTECH_CODE], HSTECH_MARKET).catch(() => [] as WatchlistQuote[]),
-    ])
-      .then(([res, quoteList]) => {
+    api.getWatchlistHistory(HSTECH_CODE, period, HSTECH_MARKET)
+      .then((res) => {
         if (cancelled) return;
-        setBars(res.bars);
-        setQuote(quoteList[0] || null);
+        setHistory(res);
         if (res.name) setStockName(res.name);
       })
       .catch((e) => {
         if (cancelled) return;
         setChartError(e instanceof Error ? e.message : "获取走势失败");
-        setBars([]);
-        setQuote(null);
+        setHistory(null);
       })
       .finally(() => { if (!cancelled) setChartLoading(false); });
     return () => { cancelled = true; };
@@ -1422,13 +1417,12 @@ export function HSTech() {
         {view === "price" ? (
           <>
             <PriceHistoryChart
-              bars={bars}
+              history={history}
               period={period}
               onPeriodChange={setPeriod}
               loading={chartLoading}
               height={300}
               showRisk
-              quote={quote}
             />
             {chartError && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{chartError}</p>}
           </>

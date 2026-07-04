@@ -2257,7 +2257,8 @@ def _build_history_metrics_payload(
     cache = MarketMetricsCache()
     cache_key = make_cache_key(market, code, period, "adjusted")
     source_revision = (
-        f"{bars[-1]['date']}:{bars[-1]['close']}:{len(bars)}" if bars else "empty"
+        f"{requested_start}:{bars[-1]['date']}:{bars[-1]['close']}:{len(bars)}"
+        if bars else f"{requested_start}:empty"
     )
     response = cache.get(cache_key, source_revision=source_revision)
     if response is None:
@@ -2356,13 +2357,26 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
             keep = set(unique_dates[-sessions:])
             df = df[[ts.date() in keep for ts in df.index]]
             if not df.empty:
+                intraday_bars = _df_to_bars(df, intraday=True)
+                try:
+                    daily_result = loader.fetch(
+                        codes=[code], start_date=start_str, end_date=end_str, interval="1D",
+                    )
+                    daily = daily_result.get(code)
+                except Exception:
+                    daily = None
+                if daily is not None and not daily.empty:
+                    session_date = min(ts.date() for ts in df.index)
+                    prior = daily.sort_index()[[ts.date() < session_date for ts in daily.index]]
+                    if not prior.empty:
+                        intraday_bars = _df_to_bars(prior.iloc[-1:], intraday=False) + intraday_bars
                 return {
                     "name": name,
-                    "bars": _df_to_bars(df, intraday=True),
+                    "bars": intraday_bars,
                     "market": market,
                     "source": type(loader).__name__,
                     "adjustment": "adjusted",
-                    "requested_start": _price_period_requested_start(period, today),
+                    "requested_start": session_date,
                 }
         # Fallback: short daily window so the feature still works.
         fb_days = {"1D": 4}[period]
@@ -2378,13 +2392,18 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
             }
         df = df.sort_index()
         keep_n = {"1D": 2}[period]
+        fallback_bars = _df_to_bars(df.iloc[-keep_n:], intraday=False)
+        fallback_start = (
+            datetime.fromisoformat(fallback_bars[-1]["date"][:10]).date()
+            if fallback_bars else _price_period_requested_start(period, today)
+        )
         return {
             "name": name,
-            "bars": _df_to_bars(df.iloc[-keep_n:], intraday=False),
+            "bars": fallback_bars,
             "market": market,
             "source": type(loader).__name__,
             "adjustment": "adjusted",
-            "requested_start": _price_period_requested_start(period, today),
+            "requested_start": fallback_start,
         }
 
     # ── Daily periods (1M / YTD / 1Y / 3Y / 5Y / ALL) ───────────────────────
