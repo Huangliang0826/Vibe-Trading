@@ -154,6 +154,7 @@ def calc_metrics(
     initial_cash: float,
     bars_per_year: Optional[int] = 252,
     bench_ret: Optional[pd.Series] = None,
+    invested_principal: Optional[pd.Series] = None,
 ) -> Dict[str, Any]:
     """Full set of performance metrics.
 
@@ -164,6 +165,8 @@ def calc_metrics(
         bars_per_year: Bars per year for annualisation. None = auto-detect
             from equity curve dates (calendar-day method, for cross-market).
         bench_ret: Benchmark per-bar return series (optional).
+        invested_principal: Cumulative external capital through each timestamp.
+            When omitted, ``initial_cash`` is the fixed principal.
 
     Returns:
         Metrics dictionary (compatible with daily_portfolio format).
@@ -189,16 +192,20 @@ def calc_metrics(
     vol = float(port_ret.std())
     sharpe = float(port_ret.mean() / (vol + 1e-10) * np.sqrt(bpy))
 
-    # Drawdown
-    peak = equity_curve.cummax()
-    dd = (equity_curve - peak) / peak.replace(0, 1)
-    max_dd = float(dd.min())
+    from src.market_metrics.calculations import maximum_drawdown, maximum_loss
 
-    # Max loss relative to the initial capital: the worst the portfolio ever
-    # sank below the money actually put in. Unlike max drawdown (peak→trough,
-    # which can be large even when the account never went below principal),
-    # this is 0 if equity never dipped under the starting cash.
-    max_loss = float(min(0.0, equity_curve.min() / initial_cash - 1)) if initial_cash > 0 else 0.0
+    max_dd = maximum_drawdown(equity_curve.astype(float).tolist())
+    max_dd = float(max_dd) if max_dd is not None else 0.0
+
+    if invested_principal is None:
+        principal = pd.Series(float(initial_cash), index=equity_curve.index)
+    else:
+        principal = invested_principal.reindex(equity_curve.index).ffill()
+    loss = maximum_loss(
+        equity_curve.astype(float).tolist(),
+        principal.astype(float).tolist(),
+    )
+    max_loss = float(min(0.0, loss)) if loss is not None else 0.0
 
     calmar = ann_ret / abs(max_dd) if abs(max_dd) > 1e-10 else 0.0
 
