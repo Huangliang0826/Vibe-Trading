@@ -27,7 +27,7 @@ _METRIC_FIELDS = (
 
 
 def _pct(value: float | None) -> float | None:
-    return value * 100.0 if value is not None else None
+    return round(value * 100.0, 10) if value is not None else None
 
 
 def _empty_metrics(reason: str) -> tuple[MarketMetricValues, dict[str, str]]:
@@ -112,4 +112,3 @@ def build_market_metrics_response(
         symbol, market, currency, period, "adjusted", FORMULA_VERSION,
         canonical, metrics, baseline, endpoint, reasons, status,
     )
-

@@ -2150,7 +2150,7 @@ def _resolve_symbol_name(code: str, market: str) -> str:
 
 
 def _df_to_bars(df, intraday: bool) -> list[dict]:
-    """Serialize an OHLCV DataFrame to [{date, close, volume}] rows."""
+    """Serialize an OHLCV DataFrame without inventing missing volume."""
     import pandas as pd
 
     fmt = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
@@ -2160,11 +2160,22 @@ def _df_to_bars(df, intraday: bool) -> list[dict]:
             close_val = float(row["close"])
             if pd.isna(close_val):
                 continue
-            vol_val = int(row.get("volume", 0) or 0)
+            open_val = float(row.get("open", close_val))
+            high_val = float(row.get("high", close_val))
+            low_val = float(row.get("low", close_val))
+            raw_volume = row.get("volume")
+            vol_val = None if raw_volume is None or pd.isna(raw_volume) else float(raw_volume)
         except (ValueError, TypeError):
             continue
         date_str = ts.strftime(fmt) if hasattr(ts, "strftime") else str(ts)[: (16 if intraday else 10)]
-        rows.append({"date": date_str, "close": round(close_val, 4), "volume": vol_val})
+        rows.append({
+            "date": date_str,
+            "open": round(open_val, 4),
+            "high": round(high_val, 4),
+            "low": round(low_val, 4),
+            "close": round(close_val, 4),
+            "volume": vol_val,
+        })
     return rows
 
 
@@ -2194,10 +2205,81 @@ def _trim_daily_history_to_period(df, period: str, today):
     if baseline is None or df.empty:
         return df
 
-    eligible = [i for i, ts in enumerate(df.index) if ts.date() <= baseline]
+    if period == "YTD":
+        eligible = [i for i, ts in enumerate(df.index) if ts.date() <= baseline]
+    else:
+        eligible = [i for i, ts in enumerate(df.index) if ts.date() < baseline]
     if not eligible:
         return df
     return df.iloc[eligible[-1]:]
+
+
+def _price_period_requested_start(period: str, today):
+    """Return the first calendar date inside a displayed investment range."""
+    if period == "ALL":
+        return None
+    if period == "YTD":
+        return today.replace(month=1, day=1)
+    if period == "1D":
+        return today
+    return _price_period_baseline_date(period, today)
+
+
+def _build_history_metrics_payload(
+    *,
+    code: str,
+    name: str,
+    market: str,
+    period: str,
+    requested_start,
+    source: str,
+    bars: list[dict],
+) -> dict:
+    """Attach canonical backend-owned metrics to a compatible history payload."""
+    from src.market_metrics.cache import MarketMetricsCache, make_cache_key
+    from src.market_metrics.models import MarketBar
+    from src.market_metrics.service import build_market_metrics_response
+
+    currency = {"cn": "CNY", "a_share": "CNY", "hk": "HKD", "hk_equity": "HKD"}.get(
+        market, "USD",
+    )
+    canonical = [
+        MarketBar(
+            timestamp=str(bar["date"]),
+            open=float(bar.get("open", bar["close"])),
+            high=float(bar.get("high", bar["close"])),
+            low=float(bar.get("low", bar["close"])),
+            close=float(bar["close"]),
+            volume=None if bar.get("volume") is None else float(bar["volume"]),
+        )
+        for bar in bars
+    ]
+    cache = MarketMetricsCache()
+    cache_key = make_cache_key(market, code, period, "adjusted")
+    source_revision = (
+        f"{bars[-1]['date']}:{bars[-1]['close']}:{len(bars)}" if bars else "empty"
+    )
+    response = cache.get(cache_key, source_revision=source_revision)
+    if response is None:
+        response = build_market_metrics_response(
+            symbol=code.upper(),
+            market=market,
+            currency=currency,
+            period=period,
+            requested_start=requested_start,
+            bars=canonical,
+            source=source,
+        )
+        cache.put(cache_key, response, source_revision=source_revision)
+    metrics_payload = response.to_dict()
+    metrics_payload.pop("bars", None)
+    return {
+        "code": code.upper(),
+        "name": name,
+        "period": period,
+        "bars": bars,
+        **metrics_payload,
+    }
 
 
 def _cn_raw_daily(code: str, start_str: str, end_str: str):
@@ -2274,7 +2356,14 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
             keep = set(unique_dates[-sessions:])
             df = df[[ts.date() in keep for ts in df.index]]
             if not df.empty:
-                return {"name": name, "bars": _df_to_bars(df, intraday=True)}
+                return {
+                    "name": name,
+                    "bars": _df_to_bars(df, intraday=True),
+                    "market": market,
+                    "source": type(loader).__name__,
+                    "adjustment": "adjusted",
+                    "requested_start": _price_period_requested_start(period, today),
+                }
         # Fallback: short daily window so the feature still works.
         fb_days = {"1D": 4}[period]
         start_str = (today - timedelta(days=fb_days)).strftime("%Y-%m-%d")
@@ -2282,10 +2371,21 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
         df = result.get(code)
         if df is None or df.empty:
-            return {"name": name, "bars": []}
+            return {
+                "name": name, "bars": [], "market": market,
+                "source": type(loader).__name__, "adjustment": "adjusted",
+                "requested_start": _price_period_requested_start(period, today),
+            }
         df = df.sort_index()
         keep_n = {"1D": 2}[period]
-        return {"name": name, "bars": _df_to_bars(df.iloc[-keep_n:], intraday=False)}
+        return {
+            "name": name,
+            "bars": _df_to_bars(df.iloc[-keep_n:], intraday=False),
+            "market": market,
+            "source": type(loader).__name__,
+            "adjustment": "adjusted",
+            "requested_start": _price_period_requested_start(period, today),
+        }
 
     # ── Daily periods (1M / YTD / 1Y / 3Y / 5Y / ALL) ───────────────────────
     baseline = _price_period_baseline_date(period, today)
@@ -2302,19 +2402,22 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
     result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
     df = result.get(code)
     if df is None or df.empty:
-        return {"name": name, "bars": []}
-
-    # The Baidu A-share source is forward-adjusted (前复权) and goes negative for
-    # long-history, high-dividend names. Fall back to raw (不复权) prices when
-    # that happens so returns and the daily-DCA stat are valid.
-    if market == "a_share" and (df["close"] <= 0).any():
-        raw = _cn_raw_daily(code, start_str, end_str)
-        if raw is not None and not raw.empty:
-            df = raw
+        return {
+            "name": name, "bars": [], "market": market,
+            "source": type(loader).__name__, "adjustment": "adjusted",
+            "requested_start": _price_period_requested_start(period, today),
+        }
 
     df = df.sort_index()
     df = _trim_daily_history_to_period(df, period, today)
-    return {"name": name, "bars": _df_to_bars(df, intraday=False)}
+    return {
+        "name": name,
+        "bars": _df_to_bars(df, intraday=False),
+        "market": market,
+        "source": type(loader).__name__,
+        "adjustment": "adjusted",
+        "requested_start": _price_period_requested_start(period, today),
+    }
 
 
 @app.get("/watchlist/history")
@@ -2332,7 +2435,15 @@ async def get_watchlist_history(
         raise HTTPException(status_code=400, detail=f"period must be one of {sorted(_VALID)}")
     try:
         data = await asyncio.to_thread(_fetch_price_history, code.strip(), period, market)
-        return {"code": code.strip().upper(), "name": data["name"], "period": period, "bars": data["bars"]}
+        return _build_history_metrics_payload(
+            code=code.strip(),
+            name=data["name"],
+            market=market or data["market"],
+            period=period,
+            requested_start=data["requested_start"],
+            source=data["source"],
+            bars=data["bars"],
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Price history fetch failed: {exc}")
 

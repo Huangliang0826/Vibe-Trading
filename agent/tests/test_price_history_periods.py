@@ -52,7 +52,8 @@ def test_one_year_history_starts_at_exact_calendar_boundary(monkeypatch):
     result = api_server._fetch_price_history("NVDA", "1Y", "us")
 
     target = api_server._price_period_baseline_date("1Y", today)
-    assert result["bars"][0]["date"] == _previous_business_day(target).isoformat()
+    expected_baseline = _previous_business_day(target - timedelta(days=1))
+    assert result["bars"][0]["date"] == expected_baseline.isoformat()
     assert loader.calls[-1][1] == today.isoformat()
 
 
