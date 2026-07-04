@@ -8,7 +8,12 @@ import pytest
 
 from backtest.metrics import calc_metrics
 from backtest.models import TradeRecord
-from src.opportunity_center.strategy_context import _classify_action, _oos_metrics, evaluate_frame
+from src.opportunity_center.strategy_context import (
+    OPPORTUNITY_STRATEGY_NAMES,
+    _classify_action,
+    _oos_metrics,
+    evaluate_frame,
+)
 from src.paper_trading.models import PaperHolding
 
 
@@ -63,6 +68,15 @@ def test_strategy_context_ignores_rows_after_as_of():
     assert second.data_as_of == first.data_as_of == as_of.isoformat()
 
 
+def test_opportunity_strategy_pool_excludes_executor_only_cashflow_strategies():
+    assert "dca_then_hold" not in OPPORTUNITY_STRATEGY_NAMES
+    assert "dca_two_year_then_hold" not in OPPORTUNITY_STRATEGY_NAMES
+    assert "accelerated_dca_entry" not in OPPORTUNITY_STRATEGY_NAMES
+    assert "deep_drawdown_recovery" not in OPPORTUNITY_STRATEGY_NAMES
+    assert "dca" in OPPORTUNITY_STRATEGY_NAMES
+    assert "smart_dca" in OPPORTUNITY_STRATEGY_NAMES
+
+
 def test_evaluate_frame_selects_strategy_on_training_only(monkeypatch: pytest.MonkeyPatch):
     holding = PaperHolding(symbol="0700", market="hk", allocation_pct=100)
     training = np.linspace(100.0, 200.0, 252)
@@ -70,7 +84,7 @@ def test_evaluate_frame_selects_strategy_on_training_only(monkeypatch: pytest.Mo
     frame = make_ohlcv("2024-01-01", periods=504, closes=list(training) + list(oos))
 
     monkeypatch.setattr(
-        "src.opportunity_center.strategy_context.STRATEGY_NAMES",
+        "src.opportunity_center.strategy_context.OPPORTUNITY_STRATEGY_NAMES",
         ("train_winner", "flat_cash"),
     )
     monkeypatch.setattr(

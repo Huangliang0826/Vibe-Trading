@@ -39,7 +39,7 @@ describe("ThinkingTimeline", () => {
     ];
 
     render(<ThinkingTimeline messages={msgs} isLatest />);
-    expect(screen.getByText(/Running Run backtest/)).toBeInTheDocument();
+    expect(screen.getByText(/Running 运行回测/)).toBeInTheDocument();
   });
 
   it("expands and collapses on click", async () => {
@@ -52,13 +52,13 @@ describe("ThinkingTimeline", () => {
     render(<ThinkingTimeline messages={msgs} />);
 
     // Initially collapsed
-    expect(screen.queryByText("Run command")).not.toBeInTheDocument();
+    expect(screen.queryByText("执行命令")).not.toBeInTheDocument();
 
     // Click to expand
     await user.click(screen.getByRole("button"));
 
     // Now expanded — should show step labels
-    expect(screen.getByText("Run command")).toBeInTheDocument();
+    expect(screen.getByText("执行命令")).toBeInTheDocument();
   });
 
   it("shows error icon when a step failed", () => {
@@ -92,7 +92,7 @@ describe("ThinkingTimeline", () => {
 
     render(<ThinkingTimeline messages={msgs} isLatest />);
     // Should be expanded immediately — "Generate code" label visible
-    expect(screen.getByText("Generate code")).toBeInTheDocument();
+    expect(screen.getByText("生成代码")).toBeInTheDocument();
   });
 
   it("handles multiple tool steps", async () => {
@@ -111,8 +111,8 @@ describe("ThinkingTimeline", () => {
     expect(screen.getByText(/5\.7s/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button"));
-    expect(screen.getByText("Run command")).toBeInTheDocument();
-    expect(screen.getByText("Generate code")).toBeInTheDocument();
-    expect(screen.getByText("Run backtest")).toBeInTheDocument();
+    expect(screen.getByText("执行命令")).toBeInTheDocument();
+    expect(screen.getByText("生成代码")).toBeInTheDocument();
+    expect(screen.getByText("运行回测")).toBeInTheDocument();
   });
 });
