@@ -96,4 +96,15 @@ describe("Scanner", () => {
     await userEvent.click(screen.getByRole("button", { name: "更新机会" }));
     expect(apiMock.runScan).toHaveBeenLastCalledWith("hstech", 20);
   });
+
+  it("keeps forward-return columns visible while tracking data is unavailable", async () => {
+    apiMock.getScanTracking.mockRejectedValue(new Error("no tracking"));
+
+    render(<Scanner />);
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "1日" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "5日" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "20日" })).toBeInTheDocument();
+  });
 });

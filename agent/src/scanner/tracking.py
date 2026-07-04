@@ -96,8 +96,8 @@ def load_all_tracking(
 
 
 def _strip_suffix(symbol: str) -> str:
-    """Remove exchange suffix (e.g. '.US') for yfinance compatibility."""
-    return symbol.rsplit(".", 1)[0] if "." in symbol else symbol
+    """Remove the internal US suffix while preserving Yahoo exchange suffixes."""
+    return symbol[:-3] if symbol.upper().endswith(".US") else symbol
 
 
 def _fetch_prices(symbols: list[str], start: str, end: str) -> pd.DataFrame:

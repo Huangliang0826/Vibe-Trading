@@ -380,13 +380,9 @@ export function Scanner() {
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">股票</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">综合评分</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">归因</th>
-              {tracking.size > 0 && (
-                <>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">1日</th>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">5日</th>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">20日</th>
-                </>
-              )}
+              <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">1日</th>
+              <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">5日</th>
+              <th className="text-right px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">20日</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">因子贡献</th>
             </tr>
           </thead>
@@ -432,19 +428,15 @@ export function Scanner() {
                   <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell max-w-[200px] truncate">
                     {c.attribution}
                   </td>
-                  {tracking.size > 0 && (
-                    <>
-                      <td className="px-4 py-3 text-right hidden lg:table-cell">
-                        <ReturnCell value={tracking.get(c.symbol)?.fwd_1d} />
-                      </td>
-                      <td className="px-4 py-3 text-right hidden lg:table-cell">
-                        <ReturnCell value={tracking.get(c.symbol)?.fwd_5d} />
-                      </td>
-                      <td className="px-4 py-3 text-right hidden lg:table-cell">
-                        <ReturnCell value={tracking.get(c.symbol)?.fwd_20d} />
-                      </td>
-                    </>
-                  )}
+                  <td className="px-4 py-3 text-right hidden lg:table-cell">
+                    <ReturnCell value={tracking.get(c.symbol)?.fwd_1d} />
+                  </td>
+                  <td className="px-4 py-3 text-right hidden lg:table-cell">
+                    <ReturnCell value={tracking.get(c.symbol)?.fwd_5d} />
+                  </td>
+                  <td className="px-4 py-3 text-right hidden lg:table-cell">
+                    <ReturnCell value={tracking.get(c.symbol)?.fwd_20d} />
+                  </td>
                   <td className="px-4 py-3 hidden md:table-cell">
                     <FactorChips detail={c.detail} />
                   </td>
@@ -453,7 +445,7 @@ export function Scanner() {
             })}
             {ranked.length === 0 && (
               <tr>
-                <td colSpan={tracking.size > 0 ? 8 : 5} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-sm">
                   暂无排名数据
                 </td>
               </tr>

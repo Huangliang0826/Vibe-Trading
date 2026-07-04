@@ -5,6 +5,7 @@ import pandas as pd
 
 from src.scanner.tracking import (
     TrackingRecord,
+    _fetch_prices,
     backfill_returns,
     calibration_check,
     load_all_tracking,
@@ -94,6 +95,19 @@ class TestPersistence:
 
 
 class TestBackfillReturns:
+    def test_fetch_prices_keeps_hk_suffix(self, monkeypatch):
+        seen = []
+
+        def fake_download(symbols, **kwargs):
+            seen.extend(symbols)
+            return pd.DataFrame()
+
+        monkeypatch.setattr("src.scanner.tracking.yf.download", fake_download)
+
+        _fetch_prices(["0700.HK", "AAPL.US"], "2025-06-02", "2025-06-10")
+
+        assert seen == ["0700.HK", "AAPL"]
+
     def _make_price_df(self, symbols, n_days=25):
         """Create a fake price DataFrame mimicking yfinance output."""
         dates = pd.bdate_range("2025-06-02", periods=n_days)

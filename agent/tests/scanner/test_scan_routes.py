@@ -78,3 +78,29 @@ def test_scan_routes_reject_unknown_universe():
 
     assert resp.status_code == 400
     assert "universe" in resp.json()["detail"]
+
+
+def test_scan_tracking_backfills_missing_records_from_saved_scan(monkeypatch):
+    from src.api import scan_routes
+    from src.scanner.tracking import TrackingRecord
+
+    result = ScanResult(
+        "hstech", "2026-07-01", ["factor_rank"],
+        [Candidate("0700.HK", 92.4, "factor_rank", "top", {})], [],
+    )
+    seen = []
+    monkeypatch.setattr(scan_routes, "load_tracking", lambda *args, **kwargs: [])
+    monkeypatch.setattr(scan_routes, "load_by_date", lambda *args, **kwargs: result)
+    monkeypatch.setattr(
+        scan_routes,
+        "backfill_returns",
+        lambda asof, candidates, universe: seen.append((asof, candidates, universe)) or [
+            TrackingRecord("0700.HK", 92.4, asof, fwd_1d=1.25)
+        ],
+    )
+
+    resp = TestClient(_app()).get("/scan/tracking/2026-07-01?universe=hstech")
+
+    assert resp.status_code == 200
+    assert resp.json()["records"][0]["fwd_1d"] == 1.25
+    assert seen == [("2026-07-01", [result.candidates[0].to_dict()], "hstech")]
