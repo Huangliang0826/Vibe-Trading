@@ -2013,59 +2013,33 @@ def _fetch_cn_watchlist_quotes(codes: list[str]) -> list[dict]:
 
     # fetch_quote returns keys as bare 6-digit codes (exchange prefix stripped)
     norm_to_orig: dict[str, str] = {}
-    index_to_orig: dict[str, str] = {}
     for c in codes:
         norm = normalize_ticker(c)
-        index_code = _CN_INDEX_ALIASES.get(norm)
-        if index_code:
-            index_to_orig[index_code["quote"]] = c
-        else:
-            norm_to_orig[norm] = c
+        norm_to_orig[norm] = c
 
-    raw = fetch_quote(list(norm_to_orig.keys())) if norm_to_orig else {}
-    index_raw = {item["code"]: item for item in _fetch_cn_indices()} if index_to_orig else {}
+    raw = fetch_quote(list(norm_to_orig.keys()))
 
-    by_original: dict[str, dict] = {}
+    out = []
     for norm, orig in norm_to_orig.items():
         data = raw.get(norm, {})
         if data and data.get("price", 0):
-            by_original[orig] = {
+            out.append({
                 "code": orig,
                 "name": data.get("name", orig),
                 "price": data.get("price", 0.0),
                 "change_pct": data.get("change_pct", 0.0),
                 "prev_close": data.get("last_close", 0.0),
-            }
+            })
         else:
-            by_original[orig] = {
+            out.append({
                 "code": orig,
                 "name": orig,
                 "price": 0.0,
                 "change_pct": 0.0,
                 "prev_close": 0.0,
                 "error": "not_found",
-            }
-    for index_code, orig in index_to_orig.items():
-        data = index_raw.get(index_code, {})
-        if data and data.get("price", 0):
-            by_original[orig] = {
-                "code": orig,
-                "name": data.get("name", orig),
-                "price": data.get("price", 0.0),
-                "change_pct": data.get("change_pct", 0.0),
-                "prev_close": data.get("prev_close", 0.0),
-            }
-        else:
-            by_original[orig] = {
-                "code": orig, "name": orig, "price": 0.0,
-                "change_pct": 0.0, "prev_close": 0.0, "error": "not_found",
-            }
-    return [by_original[code] for code in codes if code in by_original]
-
-
-_CN_INDEX_ALIASES = {
-    "399300": {"quote": "sh000300", "history": "000300.SS", "name": "沪深300"},
-}
+            })
+    return out
 
 
 def _fetch_us_watchlist_quotes(codes: list[str]) -> list[dict]:
@@ -2348,7 +2322,6 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
     from backtest.loaders.registry import resolve_loader
 
     today = date.today()
-    cn_index = None
     # HK codes need normalizing to the ``.HK`` form before market inference.
     if market_hint == "hk":
         _, yf_code = _normalize_hk_code(code)
@@ -2360,18 +2333,10 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         # codes as HK because bare numeric tickers are ambiguous. Trust the
         # explicit ``cn`` hint from the frontend instead.
         market = "a_share"
-        from backtest.loaders.a_stock_data_research import normalize_ticker
-        normalized = normalize_ticker(code)
-        cn_index = _CN_INDEX_ALIASES.get(normalized)
-        code = cn_index["history"] if cn_index else normalized
     else:
         market = infer_market(code)
-    name = cn_index["name"] if cn_index else _resolve_symbol_name(code, market)
-    if cn_index:
-        from backtest.loaders.yfinance_loader import DataLoader as YFinanceLoader
-        loader = YFinanceLoader()
-    else:
-        loader = resolve_loader(market)
+    name = _resolve_symbol_name(code, market)
+    loader = resolve_loader(market)
 
     # ── Intraday period (1D) ─────────────────────────────────────────────────
     # sessions: how many trailing trading days to keep after fetching.
