@@ -45,8 +45,6 @@ it("labels the annual robust selection and daily signal cache", async () => {
 
   expect(await screen.findByText("最稳健：唐奇安突破")).toBeInTheDocument();
   expect(screen.getByText("总收益 +50.0%（20年）")).toBeInTheDocument();
-  expect(screen.getAllByText(/最大回撤/).length).toBeGreaterThan(0);
-  expect(screen.queryByText(/最大亏损/)).not.toBeInTheDocument();
   expect(screen.getByText(/样本外收益 \+18.0%/)).toBeInTheDocument();
   expect(screen.getByText(/年度选择已缓存/)).toBeInTheDocument();
   expect(screen.getByText(/每日信号已缓存/)).toBeInTheDocument();

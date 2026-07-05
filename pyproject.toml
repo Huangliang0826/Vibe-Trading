@@ -126,7 +126,6 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["agent/tests"]
 pythonpath = ["agent"]
-addopts = ["--import-mode=importlib"]
 markers = [
     "unit: Unit tests (fast, no network)",
     "integration: Integration tests (may need network)",

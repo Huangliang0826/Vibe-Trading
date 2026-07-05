@@ -10,8 +10,8 @@ import {
 
 describe("getMetricLabel", () => {
   it("returns human label for known keys", () => {
-    expect(getMetricLabel("sharpe")).toBe("夏普比率");
-    expect(getMetricLabel("max_drawdown")).toBe("最大回撤");
+    expect(getMetricLabel("sharpe")).toBe("Sharpe");
+    expect(getMetricLabel("max_drawdown")).toBe("Max DD");
   });
 
   it("returns raw key for unknown keys", () => {

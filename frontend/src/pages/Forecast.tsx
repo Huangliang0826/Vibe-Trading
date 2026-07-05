@@ -292,7 +292,7 @@ function ForecastCard({
                 总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}（{historyDuration}）
               </span>
               <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
-                最大回撤 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
+                最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
               </span>
               <span className="rounded-md border bg-background px-2 py-1 tabular-nums">
                 夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
@@ -344,7 +344,7 @@ function ForecastCard({
                       <span className="mx-1">·</span>
                       总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}（{historyDuration}）
                       <span className="mx-1">·</span>
-                      最大回撤 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
+                      最大亏损 {fmtRet(bestStrategy.best.metrics.max_drawdown as number)}
                       <span className="mx-1">·</span>
                       夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
                     </p>
@@ -355,7 +355,7 @@ function ForecastCard({
                       <span className="mx-1">·</span>
                       样本外夏普 {Number(oosMetrics.sharpe ?? 0).toFixed(2)}
                       <span className="mx-1">·</span>
-                      样本外最大回撤 {fmtRet(oosMetrics.max_drawdown)}
+                      样本外最大亏损 {fmtRet(oosMetrics.max_drawdown)}
                     </p>
                   )}
                   {bestStrategy?.selection?.confidence_level === "low" && (

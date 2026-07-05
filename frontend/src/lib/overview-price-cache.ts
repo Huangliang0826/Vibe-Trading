@@ -1,4 +1,4 @@
-const PREFIX = "vibe:overview-market-metrics-v1:";
+const PREFIX = "vibe:overview-price:";
 
 type CacheEnvelope<T> = { savedAt: number; value: T };
 

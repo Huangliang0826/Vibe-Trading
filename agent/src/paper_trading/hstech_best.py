@@ -528,7 +528,7 @@ def summarize_best_strategy(
 
     parts = [
         STRATEGY_PRINCIPLES.get(best_strategy_name, f"策略原理：{best_name} 根据历史价格信号动态调整仓位。"),
-        f"{best_name} 在 {display_code} 当前回测区间里综合排名第一，夏普比率为 {best_sharpe:.2f}，总收益为 {_fmt_pct(best_return)}，最大回撤为 {_fmt_pct(best_drawdown)}。",
+        f"{best_name} 在 {display_code} 当前回测区间里综合排名第一，夏普比率为 {best_sharpe:.2f}，总收益为 {_fmt_pct(best_return)}，最大亏损为 {_fmt_pct(best_drawdown)}。",
     ]
     if second and second.get("metrics"):
         second_metrics = second["metrics"]

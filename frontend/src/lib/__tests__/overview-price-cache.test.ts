@@ -27,7 +27,7 @@ describe("overview price cache", () => {
   });
 
   it("ignores malformed cache entries", () => {
-    localStorage.setItem("vibe:overview-market-metrics-v1:broken", "not-json");
+    localStorage.setItem("vibe:overview-price:broken", "not-json");
     expect(readOverviewCache("broken", 1_000)).toBeNull();
   });
 });

@@ -18,10 +18,10 @@ describe("MetricsCard", () => {
 
   it("renders metric labels", () => {
     render(<MetricsCard metrics={sampleMetrics} />);
-    expect(screen.getByText("总收益")).toBeInTheDocument();
-    expect(screen.getByText("夏普比率")).toBeInTheDocument();
-    expect(screen.getByText("最大回撤")).toBeInTheDocument();
-    expect(screen.getByText("交易次数")).toBeInTheDocument();
+    expect(screen.getByText("Total Return")).toBeInTheDocument();
+    expect(screen.getByText("Sharpe")).toBeInTheDocument();
+    expect(screen.getByText("Max DD")).toBeInTheDocument();
+    expect(screen.getByText("Trades")).toBeInTheDocument();
   });
 
   it("renders formatted metric values", () => {
@@ -42,8 +42,8 @@ describe("MetricsCard", () => {
     render(<MetricsCard metrics={manyMetrics} compact />);
 
     // Should show the first 6 labels from DISPLAY_ORDER that exist
-    expect(screen.getByText("总收益")).toBeInTheDocument();
-    expect(screen.getByText("交易次数")).toBeInTheDocument();
+    expect(screen.getByText("Total Return")).toBeInTheDocument();
+    expect(screen.getByText("Trades")).toBeInTheDocument();
     // Should NOT show 7th+ metric
     expect(screen.queryByText("Calmar")).not.toBeInTheDocument();
   });

@@ -17,7 +17,6 @@ from src.config.schema import AgentConfig, IBKR_MCP_SERVER_SEED
 from src.live.order_guard import LiveOrderGuardTool
 from src.live.registry import is_live_broker, wrap_live_broker_tools
 from src.tools.mcp import MCPRemoteTool, build_mcp_tool_wrappers
-from src.live import paths as live_paths
 
 pytestmark = pytest.mark.unit
 
@@ -72,8 +71,7 @@ def test_ibkr_seed_validates_as_readonly_probe() -> None:
     assert server.enabled_tools == ["*"]
 
 
-def test_ibkr_alias_url_resolves_to_live_broker_and_wraps_writes(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(live_paths, "get_runtime_root", lambda: tmp_path)
+def test_ibkr_alias_url_resolves_to_live_broker_and_wraps_writes() -> None:
     cfg = AgentConfig.model_validate({"mcpServers": {"ib": IBKR_MCP_SERVER_SEED}})
     server = cfg.mcp_servers["ib"]
 

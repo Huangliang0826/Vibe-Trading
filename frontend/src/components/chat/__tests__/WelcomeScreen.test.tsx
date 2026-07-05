@@ -9,27 +9,27 @@ describe("WelcomeScreen", () => {
 
   it("renders the title", () => {
     render(<WelcomeScreen onExample={onExample} />);
-    expect(screen.getByText("Alpha Mind 量化之心")).toBeInTheDocument();
+    expect(screen.getByText("Vibe-Trading")).toBeInTheDocument();
   });
 
   it("renders capability chips", () => {
     render(<WelcomeScreen onExample={onExample} />);
-    expect(screen.getByText("金融技能库")).toBeInTheDocument();
-    expect(screen.getAllByText("智能体集群")).toHaveLength(2);
-    expect(screen.getByText("影子账户回测")).toBeInTheDocument();
+    expect(screen.getByText("Finance Skills Library")).toBeInTheDocument();
+    expect(screen.getByText("Swarm Agent Teams")).toBeInTheDocument();
+    expect(screen.getByText("Shadow Account Backtest")).toBeInTheDocument();
   });
 
   it("renders example categories", () => {
     render(<WelcomeScreen onExample={onExample} />);
-    expect(screen.getByText("多市场回测")).toBeInTheDocument();
-    expect(screen.getByText("研究与分析")).toBeInTheDocument();
-    expect(screen.getAllByText("智能体集群")).toHaveLength(2);
+    expect(screen.getByText("Multi-Market Backtest")).toBeInTheDocument();
+    expect(screen.getByText("Research & Analysis")).toBeInTheDocument();
+    expect(screen.getByText("Swarm Teams")).toBeInTheDocument();
   });
 
   it("calls onExample with prompt when an example button is clicked", async () => {
     render(<WelcomeScreen onExample={onExample} />);
     const user = userEvent.setup();
-    await user.click(screen.getByText("跨市场组合"));
+    await user.click(screen.getByText("Cross-Market Portfolio"));
     expect(onExample).toHaveBeenCalledTimes(1);
     expect(onExample).toHaveBeenCalledWith(
       expect.stringContaining("risk-parity portfolio"),
@@ -38,7 +38,7 @@ describe("WelcomeScreen", () => {
 
   it("renders the helper text", () => {
     render(<WelcomeScreen onExample={onExample} />);
-    expect(screen.getByText("描述一个交易策略即可开始。")).toBeInTheDocument();
-    expect(screen.getByText("试试以下示例：")).toBeInTheDocument();
+    expect(screen.getByText("Describe a trading strategy to get started.")).toBeInTheDocument();
+    expect(screen.getByText("Try an example:")).toBeInTheDocument();
   });
 });
