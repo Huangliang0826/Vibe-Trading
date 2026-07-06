@@ -39,6 +39,16 @@ describe("useApiHealth", () => {
     await waitFor(() => expect(result.current.status).toBe("misconfigured"));
   });
 
+  it("classifies a non-success proxy response as backend unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      response("", "text/plain", false),
+    );
+
+    const { result } = renderHook(() => useApiHealth());
+
+    await waitFor(() => expect(result.current.status).toBe("unavailable"));
+  });
+
   it("classifies a network failure as unavailable", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
 

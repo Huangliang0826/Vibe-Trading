@@ -22,13 +22,13 @@ export function useApiHealth(): { status: ApiHealthStatus; retry: () => Promise<
         headers: { Accept: "application/json" },
         signal: controller.signal,
       });
+      if (!response.ok) {
+        setStatus("unavailable");
+        return;
+      }
       const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
       if (!contentType.includes("application/json")) {
         setStatus("misconfigured");
-        return;
-      }
-      if (!response.ok) {
-        setStatus("unavailable");
         return;
       }
       const payload = await response.json() as { status?: unknown };

@@ -189,9 +189,15 @@ ensure_port_available() {
   local service="$1"
   local host="$2"
   local port="$3"
+  local port_variable
+  case "$service" in
+    backend) port_variable="VIBE_BACKEND_PORT" ;;
+    frontend) port_variable="VIBE_FRONTEND_PORT" ;;
+    *) port_variable="VIBE_PORT" ;;
+  esac
   if port_is_listening "$host" "$port"; then
     printf "%s port %s is occupied: %s\n" "$service" "$port" "$(port_owner "$port")" >&2
-    printf "stop that process or set VIBE_%s_PORT explicitly\n" "${service^^}" >&2
+    printf "stop that process or set %s explicitly\n" "$port_variable" >&2
     return 1
   fi
 }
@@ -227,7 +233,11 @@ service_url() {
 }
 
 start_backend() {
-  if ! is_running backend && url_ok "$(service_url backend)"; then
+  if is_running backend; then
+    printf "backend already running (pid %s)\n" "$(cat "$(pid_file backend)")"
+    return
+  fi
+  if url_ok "$(service_url backend)"; then
     rm -f "$(pid_file backend)"
     printf "backend already reachable at %s (external)\n" "$(service_url backend)"
     return
@@ -239,7 +249,11 @@ start_backend() {
 }
 
 start_frontend() {
-  if ! is_running frontend && url_ok "$(service_url frontend)"; then
+  if is_running frontend; then
+    printf "frontend already running (pid %s)\n" "$(cat "$(pid_file frontend)")"
+    return
+  fi
+  if url_ok "$(service_url frontend)"; then
     rm -f "$(pid_file frontend)"
     printf "frontend already reachable at %s (external)\n" "$(service_url frontend)"
     return

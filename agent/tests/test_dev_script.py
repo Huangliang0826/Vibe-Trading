@@ -49,3 +49,9 @@ def test_status_removes_stale_pid_files(tmp_path):
     assert result.returncode == 0
     assert not stale.exists()
     assert "backend  stopped" in result.stdout
+
+
+def test_script_avoids_bash_four_case_conversion():
+    script = SCRIPT.read_text(encoding="utf-8")
+
+    assert "${service^^}" not in script
