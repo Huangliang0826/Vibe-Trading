@@ -129,8 +129,19 @@ def is_backfill_pending(
 
 
 def _strip_suffix(symbol: str) -> str:
-    """Remove the internal US suffix while preserving Yahoo exchange suffixes."""
-    return symbol[:-3] if symbol.upper().endswith(".US") else symbol
+    """Map internal symbols to Yahoo tickers.
+
+    Drops the internal ``.US`` suffix and zero-pads short HK codes —
+    Yahoo only recognises four-digit codes like ``0700.HK``.
+    """
+    upper = symbol.upper()
+    if upper.endswith(".US"):
+        return symbol[:-3]
+    if upper.endswith(".HK"):
+        code = symbol[:-3]
+        if code.isdigit() and len(code) < 4:
+            return f"{code.zfill(4)}.HK"
+    return symbol
 
 
 def _fetch_prices(symbols: list[str], start: str, end: str) -> pd.DataFrame:

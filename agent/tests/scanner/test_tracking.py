@@ -109,6 +109,19 @@ class TestBackfillReturns:
 
         assert seen == ["0700.HK", "AAPL"]
 
+    def test_fetch_prices_zero_pads_short_hk_codes(self, monkeypatch):
+        seen = []
+
+        def fake_download(symbols, **kwargs):
+            seen.extend(symbols)
+            return pd.DataFrame()
+
+        monkeypatch.setattr("src.scanner.tracking.yf.download", fake_download)
+
+        _fetch_prices(["700.HK", "981.HK", "9626.HK"], "2025-06-02", "2025-06-10")
+
+        assert seen == ["0700.HK", "0981.HK", "9626.HK"]
+
     def _make_price_df(self, symbols, n_days=25):
         """Create a fake price DataFrame mimicking yfinance output."""
         dates = pd.bdate_range("2025-06-02", periods=n_days)
