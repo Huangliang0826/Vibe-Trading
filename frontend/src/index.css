@@ -10,8 +10,8 @@
     --card: 0 0% 100%;
     --card-foreground: 220 20% 10%;
 
-    /* Brand accent */
-    --primary: 27 90% 52%;
+    /* Brand accent — deep teal drawn from the dotted-A logo */
+    --primary: 190 60% 37%;
     --primary-foreground: 0 0% 100%;
 
     --muted: 220 14% 92%;
@@ -42,8 +42,9 @@
     --card: 220 20% 8%;             /* surface-1 */
     --card-foreground: 220 10% 92%;
 
-    --primary: 27 90% 52%;
-    --primary-foreground: 0 0% 100%;
+    /* Brighter teal for dark surfaces; dark text keeps buttons readable */
+    --primary: 184 55% 52%;
+    --primary-foreground: 220 25% 10%;
 
     --muted: 220 20% 13%;           /* surface-2 */
     --muted-foreground: 220 10% 55%;
@@ -66,7 +67,27 @@
   }
 
   * { @apply border-border; }
-  body { @apply bg-background text-foreground; }
+  /* Light default weight pairs Chinese (Noto Sans SC 300) with the thin
+     geometric brand style; emphasized text keeps its heavier classes. */
+  body { @apply bg-background text-foreground font-light; }
+
+  /* Thin editorial headings — overrides per-component font-bold utilities
+     so titles match the light geometric brand style; data values in
+     p/span/td keep their heavy weights for scanability. */
+  h1, h2, h3, h4 {
+    font-weight: 300 !important;
+    letter-spacing: 0.02em;
+  }
+
+  /* Brand wordmark — light geometric sans (Futura-like) in deep logo teal */
+  .brand-wordmark {
+    font-family: "Jost", "Futura", "Century Gothic", sans-serif;
+    font-weight: 300;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: hsl(185 100% 19%);
+  }
+  .dark .brand-wordmark { color: hsl(184 55% 52%); }
 
   /* Prose table enhancements */
   .prose table { border-collapse: collapse; width: 100%; }

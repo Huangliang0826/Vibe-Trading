@@ -84,7 +84,7 @@ function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
           ? <TrendingDown className={cn("h-3.5 w-3.5", color)} />
           : null}
       </div>
-      <p className="text-sm font-semibold text-foreground leading-tight">{idx.name}</p>
+      <p className="text-sm font-light text-foreground leading-tight">{idx.name}</p>
       <p className={cn("text-2xl font-bold tabular-nums tracking-tight", color)}>
         {fmtIndexPoints(idx.price)}
       </p>
@@ -153,7 +153,7 @@ function WatchlistRow({
         className="flex flex-col min-w-0 text-left cursor-pointer hover:opacity-70 transition-opacity"
         onClick={() => scrollToChart(market, quote.code)}
       >
-        <span className="text-sm font-medium text-foreground leading-tight truncate">
+        <span className="text-sm font-light text-foreground leading-tight truncate">
           {quote.name !== quote.code ? quote.name : quote.code}
         </span>
         <span className="text-[11px] text-muted-foreground font-mono">{quote.code}</span>
