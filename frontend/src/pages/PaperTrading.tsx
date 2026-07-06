@@ -431,21 +431,18 @@ export function PaperTrading() {
     let cancelled = false;
     const loadQuickQuotes = async () => {
       setQuickLoading(true);
+      // 每个市场独立请求、各自返回各自上屏:港股/A股不用陪美股慢源等待
+      const loadMarket = async (market: "hk" | "us" | "cn") => {
+        const codesRes = await api.getWatchlistCodes(market)
+          .catch(() => ({ codes: loadWatchlistCodes(market) }));
+        const codes = codesRes.codes.length ? codesRes.codes : loadWatchlistCodes(market);
+        const quotes = codes.length
+          ? await api.getWatchlistQuote(codes, market).catch(() => [] as WatchlistQuote[])
+          : [];
+        if (!cancelled) setQuickQuotes((prev) => ({ ...prev, [market]: quotes }));
+      };
       try {
-        const [hkCodesRes, usCodesRes, cnCodesRes] = await Promise.all([
-          api.getWatchlistCodes("hk").catch(() => ({ codes: loadWatchlistCodes("hk") })),
-          api.getWatchlistCodes("us").catch(() => ({ codes: loadWatchlistCodes("us") })),
-          api.getWatchlistCodes("cn").catch(() => ({ codes: loadWatchlistCodes("cn") })),
-        ]);
-        const hkCodes = hkCodesRes.codes.length ? hkCodesRes.codes : loadWatchlistCodes("hk");
-        const usCodes = usCodesRes.codes.length ? usCodesRes.codes : loadWatchlistCodes("us");
-        const cnCodes = cnCodesRes.codes.length ? cnCodesRes.codes : loadWatchlistCodes("cn");
-        const [hkQuotes, usQuotes, cnQuotes] = await Promise.all([
-          hkCodes.length ? api.getWatchlistQuote(hkCodes, "hk").catch(() => [] as WatchlistQuote[]) : Promise.resolve([]),
-          usCodes.length ? api.getWatchlistQuote(usCodes, "us").catch(() => [] as WatchlistQuote[]) : Promise.resolve([]),
-          cnCodes.length ? api.getWatchlistQuote(cnCodes, "cn").catch(() => [] as WatchlistQuote[]) : Promise.resolve([]),
-        ]);
-        if (!cancelled) setQuickQuotes({ hk: hkQuotes, us: usQuotes, cn: cnQuotes });
+        await Promise.all([loadMarket("hk"), loadMarket("us"), loadMarket("cn")]);
       } finally {
         if (!cancelled) setQuickLoading(false);
       }

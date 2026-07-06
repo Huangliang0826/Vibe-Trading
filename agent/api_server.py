@@ -1917,6 +1917,12 @@ async def remove_watchlist_code(
     return {"market": market, "codes": _get_watchlist_store().remove(market, code)}
 
 
+# Short-lived quote cache so 30s frontend polling doesn't re-hit upstream
+# data sources (yfinance especially) with identical requests.
+_WATCHLIST_QUOTE_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_WATCHLIST_QUOTE_TTL = 30.0
+
+
 @app.get("/watchlist/quote")
 async def get_watchlist_quote(
     codes: str = Query(..., description="Comma-separated stock codes"),
@@ -1928,17 +1934,30 @@ async def get_watchlist_quote(
     US equity data via Alpaca latest bars → yfinance fallback.
     """
     import asyncio
+    import time as _time
 
     code_list = [c.strip() for c in codes.split(",") if c.strip()]
     if not code_list:
         return []
     if market not in ("cn", "hk", "us"):
         raise HTTPException(status_code=400, detail="market must be 'cn', 'hk' or 'us'")
+
+    cache_key = f"{market}:{','.join(sorted(c.upper() for c in code_list))}"
+    cached = _WATCHLIST_QUOTE_CACHE.get(cache_key)
+    if cached and _time.time() - cached[0] < _WATCHLIST_QUOTE_TTL:
+        return cached[1]
+
     if market == "cn":
-        return await asyncio.to_thread(_fetch_cn_watchlist_quotes, code_list)
-    if market == "hk":
-        return await asyncio.to_thread(_fetch_hk_watchlist_quotes, code_list)
-    return await asyncio.to_thread(_fetch_us_watchlist_quotes, code_list)
+        result = await asyncio.to_thread(_fetch_cn_watchlist_quotes, code_list)
+    elif market == "hk":
+        result = await asyncio.to_thread(_fetch_hk_watchlist_quotes, code_list)
+    else:
+        result = await asyncio.to_thread(_fetch_us_watchlist_quotes, code_list)
+
+    # Only cache useful answers; a fully failed fetch should retry promptly.
+    if any(q.get("price") for q in result):
+        _WATCHLIST_QUOTE_CACHE[cache_key] = (_time.time(), result)
+    return result
 
 
 def _normalize_hk_code(code: str) -> tuple[str | None, str | None]:
@@ -2054,18 +2073,33 @@ def _fetch_us_watchlist_quotes(codes: list[str]) -> list[dict]:
     except Exception:
         pass
 
-    # --- yfinance fallback ---
+    # --- yfinance fallback: one batched download instead of per-symbol
+    # fast_info calls, which cost seconds each and serialize badly ---
     try:
         import yfinance as yf
     except ImportError:
         return [{"code": s, "name": s, "price": 0.0, "change_pct": 0.0, "prev_close": 0.0, "error": "no_source"} for s in symbols]
 
+    try:
+        df = yf.download(
+            symbols, period="5d", interval="1d",
+            auto_adjust=False, progress=False, group_by="ticker",
+        )
+    except Exception:
+        df = None
+
     out = []
     for sym in symbols:
+        price = prev_close = 0.0
         try:
-            info = yf.Ticker(sym).fast_info
-            price = float(info.last_price or 0)
-            prev_close = float(info.previous_close or 0)
+            closes = (df[sym] if len(symbols) > 1 else df)["Close"].dropna()
+            if len(closes) >= 1:
+                price = float(closes.iloc[-1])
+            if len(closes) >= 2:
+                prev_close = float(closes.iloc[-2])
+        except Exception:
+            pass
+        if price:
             chg = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
             out.append({
                 "code": sym,
@@ -2074,7 +2108,7 @@ def _fetch_us_watchlist_quotes(codes: list[str]) -> list[dict]:
                 "change_pct": round(chg, 2),
                 "prev_close": prev_close,
             })
-        except Exception:
+        else:
             out.append({"code": sym, "name": sym, "price": 0.0, "change_pct": 0.0, "prev_close": 0.0, "error": "fetch_failed"})
     return out
 
