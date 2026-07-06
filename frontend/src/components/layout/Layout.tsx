@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase, Menu, X, Newspaper } from "lucide-react";
+import { Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase, Menu, X, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { useApiHealth } from "@/hooks/useApiHealth";
@@ -104,7 +104,7 @@ export function Layout() {
         {/* Brand */}
         <div className={cn("border-b", compactSidebar ? "p-2 flex justify-center" : "flex items-center gap-2 p-4")}>
           <Link to="/overview" onClick={() => setMobileOpen(false)} className={cn("flex min-w-0 flex-1 items-center font-bold text-base tracking-tight", compactSidebar ? "justify-center" : "gap-2")}>
-            <BarChart3 className="h-5 w-5 text-primary shrink-0" />
+            <img src="/logo.png" alt="Alpha Mind logo" className="h-6 w-6 shrink-0" />
             {!compactSidebar && <span className="truncate">Alpha Mind 量化之心</span>}
           </Link>
           {!compactSidebar && (
@@ -286,7 +286,7 @@ export function Layout() {
             <Menu className="h-5 w-5" />
           </button>
           <Link to="/overview" className="flex min-w-0 items-center gap-2 font-semibold">
-            <BarChart3 className="h-4 w-4 shrink-0 text-primary" />
+            <img src="/logo.png" alt="Alpha Mind logo" className="h-5 w-5 shrink-0" />
             <span className="truncate">Alpha Mind 量化之心</span>
           </Link>
         </div>
