@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { BarChart3, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase, Menu, X, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useApiHealth } from "@/hooks/useApiHealth";
 import { api, type SessionItem } from "@/lib/api";
 import { useAgentStore } from "@/stores/agent";
 import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
@@ -30,6 +31,7 @@ export function Layout() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const sseStatus = useAgentStore(s => s.sseStatus);
   const sseRetryAttempt = useAgentStore(s => s.sseRetryAttempt);
+  const { status: apiStatus, retry: retryApi } = useApiHealth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("qa-sidebar") === "collapsed");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sessionsCollapsed, setSessionsCollapsed] = useState(() => localStorage.getItem("qa-sessions") !== "expanded");
@@ -288,7 +290,12 @@ export function Layout() {
             <span className="truncate">Alpha Mind 量化之心</span>
           </Link>
         </div>
-        <ConnectionBanner status={sseStatus} retryAttempt={sseRetryAttempt} />
+        <ConnectionBanner
+          status={sseStatus}
+          retryAttempt={sseRetryAttempt}
+          apiStatus={apiStatus}
+          onRetryApi={() => void retryApi()}
+        />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
