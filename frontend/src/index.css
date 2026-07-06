@@ -70,6 +70,10 @@
   /* Light default weight pairs Chinese (Noto Sans SC 300) with the thin
      geometric brand style; emphasized text keeps its heavier classes. */
   body { @apply bg-background text-foreground font-light; }
+  /* Only the 300 face of Noto Sans SC is loaded, and synthetic bolding is
+     disabled — so every CJK glyph renders light no matter what font-weight
+     a component requests. Latin/digits (Inter) keep their real bold faces. */
+  html { font-synthesis-weight: none; }
 
   /* Thin editorial headings — overrides per-component font-bold utilities
      so titles match the light geometric brand style; data values in

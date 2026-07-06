@@ -160,7 +160,7 @@ function RecentSignalsPanel({
             <div key={signal.key} className="rounded-lg border bg-background px-3 py-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">
+                  <p className="truncate text-sm font-light text-foreground">
                     {signal.name}
                     <span className="ml-1 font-mono text-xs text-muted-foreground">{signal.code}</span>
                   </p>
@@ -217,7 +217,7 @@ function ForecastWatchlistLinks({
               onClick={() => scrollToForecastCard(item.market, item.code)}
               className="rounded-lg border bg-background px-3 py-2 text-left transition hover:border-foreground/30 hover:bg-muted"
             >
-              <span className="block max-w-36 truncate text-sm font-medium text-foreground">{name}</span>
+              <span className="block max-w-36 truncate text-sm font-light text-foreground">{name}</span>
               <span className="font-mono text-[11px] uppercase text-muted-foreground">{item.code}</span>
             </button>
           );
@@ -278,7 +278,7 @@ function ForecastCard({
     <div id={forecastCardId(market, code)} className="scroll-mt-24 rounded-2xl border bg-card p-4">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-semibold text-foreground">{data?.name && data.name !== code ? data.name : code}</span>
+          <span className="text-sm font-light text-foreground">{data?.name && data.name !== code ? data.name : code}</span>
           <span className="font-mono text-xs text-muted-foreground">{code}</span>
           <span className="text-[10px] uppercase text-muted-foreground/60">{market}</span>
           {data?.context_used != null && (

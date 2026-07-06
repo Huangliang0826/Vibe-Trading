@@ -77,7 +77,7 @@ function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
       "rounded-2xl border bg-card p-4 flex flex-col gap-1 shadow-sm transition-colors duration-700",
       flash && "bg-primary/5 border-primary/20"
     )}>
-      <div className="flex items-center justify-end">
+      <div className="flex h-3.5 items-center justify-end">
         {idx.change_pct > 0
           ? <TrendingUp className={cn("h-3.5 w-3.5", color)} />
           : idx.change_pct < 0
