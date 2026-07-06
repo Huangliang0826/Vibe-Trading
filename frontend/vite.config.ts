@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
       alias: { "@": path.resolve(__dirname, "./src") },
     },
     server: {
+      host: true, // 监听所有网卡,允许手机等局域网设备访问
       port: 5899,
       proxy: {
         ...Object.fromEntries(PROXY_PATHS.map((p) => [p, apiProxy])),
