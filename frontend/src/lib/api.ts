@@ -81,6 +81,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     return JSON.parse(text) as T;
   } catch {
     const preview = text.replace(/\s+/g, " ").slice(0, 160);
+    if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) {
+      throw new ApiError("后端 API 未连接，请运行 scripts/dev doctor 检查服务。", res.status);
+    }
     throw new ApiError(`API returned a non-JSON response: ${preview || "empty response"}`, res.status);
   }
 }
