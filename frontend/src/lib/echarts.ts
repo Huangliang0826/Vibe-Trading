@@ -24,6 +24,19 @@ echarts.use([
 
 export const CHART_GROUP = "quant-charts";
 
+// Canvas text ignores page CSS; register the page font stack as the default
+// theme so chart legends/labels render Chinese in Noto Sans SC like the DOM.
+const BRAND_FONT = 'Inter, "Noto Sans SC", system-ui, sans-serif';
+echarts.registerTheme("alpha-mind", { textStyle: { fontFamily: BRAND_FONT } });
+
+// The ESM namespace is frozen, so expose a patched copy whose init()
+// falls back to the brand theme when the caller doesn't pass one.
+const patchedEcharts = {
+  ...echarts,
+  init: ((dom, theme, opts) =>
+    echarts.init(dom, theme ?? "alpha-mind", opts)) as typeof echarts.init,
+};
+
 let _connected = false;
 
 export function connectCharts() {
@@ -33,4 +46,4 @@ export function connectCharts() {
   }
 }
 
-export { echarts };
+export { patchedEcharts as echarts };

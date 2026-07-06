@@ -454,8 +454,8 @@ export function Scanner() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="min-w-0">
-                        {c.company_name && <div className="truncate font-light">{c.company_name}</div>}
-                        <div className={cn("font-mono", c.company_name ? "text-xs text-muted-foreground" : "font-light")}>{c.symbol}</div>
+                        {c.company_name && <div className="truncate font-normal">{c.company_name}</div>}
+                        <div className={cn("font-mono", c.company_name ? "text-xs text-muted-foreground" : "font-normal")}>{c.symbol}</div>
                       </div>
                       <ProviderBadge providerId={c.provider_id} />
                     </div>

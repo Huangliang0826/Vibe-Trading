@@ -86,7 +86,7 @@ export function Layout() {
   };
 
   return (
-    <div className="relative flex h-screen bg-background">
+    <div className="relative flex h-screen">
       {mobileOpen && (
         <button
           type="button"
@@ -297,7 +297,20 @@ export function Layout() {
           onRetryApi={() => void retryApi()}
         />
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          <div className="flex min-h-full flex-col">
+            <div className="flex-1">
+              <Outlet />
+            </div>
+            <footer className="mt-10 flex flex-col items-center gap-1.5 pb-6">
+              <div className="flex items-center gap-2.5">
+                <img src="/logo.png" alt="Alpha Mind logo" className="h-8 w-8" />
+                <span className="brand-wordmark text-sm">Alpha Mind</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground/70">
+                Copyright © 2026 Liang Huang. All rights reserved.
+              </p>
+            </footer>
+          </div>
         </main>
       </div>
     </div>

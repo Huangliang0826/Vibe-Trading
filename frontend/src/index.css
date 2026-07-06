@@ -4,8 +4,8 @@
 
 @layer base {
   :root {
-    /* Light mode surfaces */
-    --background: 220 20% 98%;
+    /* Light mode surfaces — mist-jade tint drawn from the brand palette */
+    --background: 190 20% 95%;
     --foreground: 220 20% 10%;
     --card: 0 0% 100%;
     --card-foreground: 220 20% 10%;
@@ -36,8 +36,8 @@
   }
 
   .dark {
-    /* Dark mode: 4-level surface system */
-    --background: 220 20% 5%;       /* bg-base */
+    /* Dark mode: 4-level surface system, hue shifted toward brand teal */
+    --background: 200 25% 6%;       /* bg-base */
     --foreground: 220 10% 92%;
     --card: 220 20% 8%;             /* surface-1 */
     --card-foreground: 220 10% 92%;
@@ -67,11 +67,31 @@
   }
 
   * { @apply border-border; }
-  /* Light default weight pairs Chinese (Noto Sans SC 300) with the thin
-     geometric brand style; emphasized text keeps its heavier classes. */
-  body { @apply bg-background text-foreground font-light; }
-  /* Only the 300 face of Noto Sans SC is loaded, and synthetic bolding is
-     disabled — so every CJK glyph renders light no matter what font-weight
+  /* Regular default weight; only the 400 face of Noto Sans SC is loaded
+     (see the synthesis rule below), so all Chinese renders at 400. */
+  body { @apply bg-background text-foreground font-normal; }
+
+  /* Jade-mist canvas: a barely-there gradient that stays put while
+     content scrolls. Cards keep flat light surfaces on top of it. */
+  body {
+    background-image: linear-gradient(
+      135deg,
+      hsl(184 28% 92%) 0%,
+      hsl(192 18% 94%) 45%,
+      hsl(208 12% 95%) 100%
+    );
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-image: linear-gradient(
+      135deg,
+      hsl(197 28% 8%) 0%,
+      hsl(205 24% 6%) 55%,
+      hsl(220 20% 5%) 100%
+    );
+  }
+  /* Only the 400 face of Noto Sans SC is loaded, and synthetic bolding is
+     disabled — so every CJK glyph renders regular no matter what font-weight
      a component requests. Latin/digits (Inter) keep their real bold faces. */
   html { font-synthesis-weight: none; }
 
@@ -79,14 +99,14 @@
      so titles match the light geometric brand style; data values in
      p/span/td keep their heavy weights for scanability. */
   h1, h2, h3, h4 {
-    font-weight: 300 !important;
+    font-weight: 400 !important;
     letter-spacing: 0.02em;
   }
 
   /* Brand wordmark — light geometric sans (Futura-like) in deep logo teal */
   .brand-wordmark {
     font-family: "Jost", "Futura", "Century Gothic", sans-serif;
-    font-weight: 300;
+    font-weight: 400;
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: hsl(185 100% 19%);
