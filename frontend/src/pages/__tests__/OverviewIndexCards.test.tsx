@@ -39,6 +39,22 @@ describe("Overview index cards", () => {
     expect(screen.getByText("缓存上证指数")).toBeInTheDocument();
   });
 
+  it("shows index points as integers without decimals", async () => {
+    apiMock.getMarketIndices.mockResolvedValue([
+      { code: "000001.SS", name: "上证指数", market: "A股", price: 3005.67, change_pct: 1.23, prev_close: 2970 },
+      { code: "^GSPC", name: "标普500", market: "美股", price: 6123.49, change_pct: -0.5, prev_close: 6154 },
+    ]);
+
+    render(<Overview />);
+    await waitFor(() => expect(screen.getByText("上证指数")).toBeInTheDocument());
+
+    expect(screen.getByText("3,006")).toBeInTheDocument();
+    expect(screen.getByText("6,123")).toBeInTheDocument();
+    expect(screen.queryByText("3,005.67")).not.toBeInTheDocument();
+    // 涨跌幅仍保留两位小数
+    expect(screen.getByText("+1.23%")).toBeInTheDocument();
+  });
+
   it("omits market labels and previous close values inside index cards", async () => {
     render(<Overview />);
     await waitFor(() => expect(screen.getByText("上证指数")).toBeInTheDocument());

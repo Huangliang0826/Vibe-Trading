@@ -43,6 +43,12 @@ function fmtPrice(price: number, market: string): string {
     : price.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// 指数点位取整显示,窄屏(手机)上更易读;个股价格仍保留两位小数
+function fmtIndexPoints(price: number): string {
+  if (!price) return "—";
+  return Math.round(price).toLocaleString("en-US");
+}
+
 function fmtPct(pct: number): string {
   const sign = pct > 0 ? "+" : "";
   return `${sign}${pct.toFixed(2)}%`;
@@ -80,7 +86,7 @@ function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
       </div>
       <p className="text-sm font-semibold text-foreground leading-tight">{idx.name}</p>
       <p className={cn("text-2xl font-bold tabular-nums tracking-tight", color)}>
-        {fmtPrice(idx.price, idx.market === "美股" ? "us" : "cn")}
+        {fmtIndexPoints(idx.price)}
       </p>
       <p className={cn("text-sm font-medium tabular-nums", color)}>{fmtPct(idx.change_pct)}</p>
     </div>
