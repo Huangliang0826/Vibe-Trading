@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Radar, AlertTriangle, RefreshCw, Loader2, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { lastClosedTradingDay, type ScanUniverse } from "@/lib/market";
 
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
   factor_rank: { label: "因子", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
@@ -44,12 +45,13 @@ interface CalibrationData {
 }
 
 type RankChange = { delta: number; isNew: boolean };
-type ScanUniverse = "sp500" | "hstech";
 
 const MARKET_OPTIONS: { universe: ScanUniverse; label: string; description: string }[] = [
-  { universe: "sp500", label: "美股", description: "标普 500" },
   { universe: "hstech", label: "港股", description: "恒生科技" },
+  { universe: "sp500", label: "美股", description: "标普 500" },
 ];
+
+const autoRefreshMarkerKey = (universe: ScanUniverse) => `scan-auto-refresh:${universe}`;
 
 function computeRankChanges(
   current: ScanCandidate[],
@@ -102,13 +104,14 @@ function MarketSelector({
 }
 
 export function Scanner() {
-  const [universe, setUniverse] = useState<ScanUniverse>("sp500");
+  const [universe, setUniverse] = useState<ScanUniverse>("hstech");
   const [data, setData] = useState<ScanData | null>(null);
   const [prevData, setPrevData] = useState<ScanData | null>(null);
   const [tracking, setTracking] = useState<Map<string, TrackingRecord>>(new Map());
   const [calibration, setCalibration] = useState<CalibrationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRefreshing, setAutoRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
   const [dates, setDates] = useState<string[]>([]);
@@ -140,6 +143,38 @@ export function Scanner() {
     api.getScanByDate(prevAsof, targetUniverse).then(setPrevData).catch(() => setPrevData(null));
   }, []);
 
+  // 每天首次打开且最新一期落后于最近已收盘交易日时,自动生成当日扫描;
+  // 失败则静默回退到已有的最新一期。
+  const autoRefreshScan = useCallback(async (targetUniverse: ScanUniverse, existingDates: string[]) => {
+    setAutoRefreshing(true);
+    try {
+      const scan = await api.runScan(targetUniverse, 20);
+      setData(scan);
+      setDateIdx(0);
+      const [dateResult, trackingResult, calibrationResult] = await Promise.all([
+        api.getScanDates(targetUniverse),
+        api.getScanTracking(scan.asof, targetUniverse).catch(() => ({ records: [] as TrackingRecord[] })),
+        api.getScanCalibration(targetUniverse).catch(() => null),
+      ]);
+      setDates(dateResult.dates);
+      if (dateResult.dates.length > 1) loadPrevious(targetUniverse, dateResult.dates[1]);
+      const nextTracking = new Map<string, TrackingRecord>();
+      for (const record of trackingResult.records || []) nextTracking.set(record.symbol, record);
+      setTracking(nextTracking);
+      if (calibrationResult) setCalibration(calibrationResult);
+      setLoading(false);
+    } catch {
+      if (existingDates.length > 0) {
+        loadScan(targetUniverse, existingDates[0]);
+        if (existingDates.length > 1) loadPrevious(targetUniverse, existingDates[1]);
+      } else {
+        setLoading(false);
+      }
+    } finally {
+      setAutoRefreshing(false);
+    }
+  }, [loadScan, loadPrevious]);
+
   useEffect(() => {
     setLoading(true);
     setData(null);
@@ -151,6 +186,14 @@ export function Scanner() {
     setError(null);
     api.getScanDates(universe).then((r) => {
       setDates(r.dates);
+      const expected = lastClosedTradingDay(universe);
+      const marker = autoRefreshMarkerKey(universe);
+      const stale = r.dates.length === 0 || r.dates[0] < expected;
+      if (stale && localStorage.getItem(marker) !== expected) {
+        localStorage.setItem(marker, expected);
+        void autoRefreshScan(universe, r.dates);
+        return;
+      }
       if (r.dates.length > 0) {
         loadScan(universe, r.dates[0]);
         if (r.dates.length > 1) loadPrevious(universe, r.dates[1]);
@@ -160,7 +203,7 @@ export function Scanner() {
     }).catch(() => {
       loadScan(universe);
     });
-  }, [universe, loadScan, loadPrevious]);
+  }, [universe, loadScan, loadPrevious, autoRefreshScan]);
 
   const navigateDate = (dir: -1 | 1) => {
     const newIdx = dateIdx + dir;
@@ -206,9 +249,14 @@ export function Scanner() {
     return (
       <div className="mx-auto max-w-4xl px-6 py-8">
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
-        <div className="flex h-[55vh] items-center justify-center text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin mr-2" />
-          加载扫描结果…
+        <div className="flex h-[55vh] flex-col items-center justify-center gap-2 text-muted-foreground">
+          <div className="flex items-center">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" />
+            {autoRefreshing ? "正在生成今日扫描…" : "加载扫描结果…"}
+          </div>
+          {autoRefreshing && (
+            <p className="text-xs text-muted-foreground/60">每天首次打开自动更新,约需一分钟</p>
+          )}
         </div>
       </div>
     );
