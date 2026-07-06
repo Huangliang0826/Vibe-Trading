@@ -8,6 +8,7 @@ from src.scanner.tracking import (
     _fetch_prices,
     backfill_returns,
     calibration_check,
+    is_backfill_pending,
     load_all_tracking,
     load_tracking,
     save_tracking,
@@ -160,6 +161,53 @@ class TestBackfillReturns:
         loaded = load_tracking("2025-06-01", root=tmp_path)
         assert len(loaded) == 1
         assert loaded[0].entry_price is not None
+
+
+class TestIsBackfillPending:
+    ASOF = "2025-06-02"  # a Monday
+
+    def _record(self, **kwargs):
+        return TrackingRecord(symbol="AAPL", score=90.0, asof=self.ASOF, **kwargs)
+
+    def test_empty_records_not_pending(self):
+        assert not is_backfill_pending([], self.ASOF, now="2025-07-01")
+
+    def test_fresh_scan_not_pending(self):
+        # Nothing can be filled on the signal date itself
+        assert not is_backfill_pending([self._record()], self.ASOF, now=self.ASOF)
+
+    def test_pending_when_fwd_1d_overdue(self):
+        assert is_backfill_pending([self._record()], self.ASOF, now="2025-06-09")
+
+    def test_not_pending_when_only_later_horizons_missing(self):
+        rec = self._record(entry_date="2025-06-03", entry_price=100.0, fwd_1d=1.0)
+        assert not is_backfill_pending([rec], self.ASOF, now="2025-06-09")
+
+    def test_pending_when_fwd_5d_overdue(self):
+        rec = self._record(entry_date="2025-06-03", entry_price=100.0, fwd_1d=1.0)
+        assert is_backfill_pending([rec], self.ASOF, now="2025-06-16")
+
+    def test_pending_when_fwd_20d_overdue(self):
+        rec = self._record(entry_date="2025-06-03", entry_price=100.0,
+                           fwd_1d=1.0, fwd_5d=2.0)
+        assert is_backfill_pending([rec], self.ASOF, now="2025-07-10")
+
+    def test_complete_records_not_pending(self):
+        rec = self._record(entry_date="2025-06-03", entry_price=100.0,
+                           fwd_1d=1.0, fwd_5d=2.0, fwd_20d=3.0)
+        assert not is_backfill_pending([rec], self.ASOF, now="2025-07-10")
+
+    def test_not_pending_past_retry_window(self):
+        # Delisted-style record that will never fill: stop retrying
+        assert not is_backfill_pending([self._record()], self.ASOF, now="2025-09-01")
+
+    def test_pending_when_any_record_incomplete(self):
+        complete = self._record(entry_date="2025-06-03", entry_price=100.0,
+                                fwd_1d=1.0, fwd_5d=2.0, fwd_20d=3.0)
+        missing = TrackingRecord(symbol="GOOG", score=80.0, asof=self.ASOF,
+                                 entry_date="2025-06-03", entry_price=100.0,
+                                 fwd_1d=1.0, fwd_5d=2.0)
+        assert is_backfill_pending([complete, missing], self.ASOF, now="2025-07-10")
 
 
 class TestCalibrationCheck:

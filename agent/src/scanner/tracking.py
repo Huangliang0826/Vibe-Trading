@@ -95,6 +95,39 @@ def load_all_tracking(
     return records
 
 
+# Calendar days after asof before each field can plausibly be computed:
+# the trading-day horizon stretched across worst-case weekends/holidays.
+_FIELD_AVAILABILITY_PAD_DAYS = [
+    ("entry_price", 4),
+    ("fwd_1d", 5),
+    ("fwd_5d", 11),
+    ("fwd_20d", 33),
+]
+# Past this age every fillable horizon has long elapsed; records still missing
+# values (e.g. delisted symbols) should not trigger a price fetch on every read.
+_MAX_RETRY_DAYS = 60
+
+
+def is_backfill_pending(
+    records: list[TrackingRecord], asof: str, now: Any = None,
+) -> bool:
+    """Whether stored records are missing returns that should exist by now.
+
+    Returns False for empty ``records`` — callers handle the no-file case
+    separately by running an initial backfill.
+    """
+    if not records:
+        return False
+    now_ts = pd.Timestamp(now) if now is not None else pd.Timestamp.now()
+    age_days = (now_ts - pd.Timestamp(asof)).days
+    if age_days > _MAX_RETRY_DAYS:
+        return False
+    for field, pad in _FIELD_AVAILABILITY_PAD_DAYS:
+        if age_days >= pad and any(getattr(r, field) is None for r in records):
+            return True
+    return False
+
+
 def _strip_suffix(symbol: str) -> str:
     """Remove the internal US suffix while preserving Yahoo exchange suffixes."""
     return symbol[:-3] if symbol.upper().endswith(".US") else symbol

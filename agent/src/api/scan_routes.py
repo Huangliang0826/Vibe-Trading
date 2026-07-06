@@ -13,7 +13,8 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from src.scanner.store import list_scan_dates, load_by_date, load_latest, save_scan
 from src.scanner.tracking import (
-    backfill_returns, calibration_check, load_all_tracking, load_tracking,
+    backfill_returns, calibration_check, is_backfill_pending,
+    load_all_tracking, load_tracking,
 )
 from src.scanner.universe_metadata import attach_company_names
 
@@ -105,22 +106,30 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
 
     @app.get("/scan/tracking/{asof}", dependencies=[Depends(require_auth)])
     async def scan_tracking(asof: str, universe: str = "sp500") -> dict[str, Any]:
-        """Return tracking records for a specific scan date."""
+        """Return tracking records for a specific scan date.
+
+        Backfills forward returns when no records exist yet, and re-backfills
+        when stored records are missing returns whose horizon has elapsed.
+        """
         universe = _validate_scan_universe(universe)
         records = load_tracking(asof, universe=universe)
-        if not records:
+        if not records or is_backfill_pending(records, asof):
             result = load_by_date(asof, universe=universe)
             if result is None:
-                raise HTTPException(status_code=404, detail=f"no scan for {asof}")
-            loop = asyncio.get_running_loop()
-            records = await loop.run_in_executor(
-                None,
-                lambda: backfill_returns(
-                    asof,
-                    [candidate.to_dict() for candidate in result.candidates],
-                    universe=universe,
-                ),
-            )
+                if not records:
+                    raise HTTPException(
+                        status_code=404, detail=f"no scan for {asof}"
+                    )
+            else:
+                loop = asyncio.get_running_loop()
+                records = await loop.run_in_executor(
+                    None,
+                    lambda: backfill_returns(
+                        asof,
+                        [candidate.to_dict() for candidate in result.candidates],
+                        universe=universe,
+                    ),
+                )
         return {"asof": asof, "records": [r.to_dict() for r in records]}
 
     @app.get("/scan/tracking", dependencies=[Depends(require_auth)])

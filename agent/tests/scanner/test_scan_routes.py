@@ -80,6 +80,65 @@ def test_scan_routes_reject_unknown_universe():
     assert "universe" in resp.json()["detail"]
 
 
+def test_scan_tracking_refreshes_stale_records(monkeypatch):
+    from src.api import scan_routes
+    from src.scanner.tracking import TrackingRecord
+
+    result = ScanResult(
+        "sp500", "2026-06-30", ["factor_rank"],
+        [Candidate("AAPL", 92.4, "factor_rank", "top", {})], [],
+    )
+    stale = [TrackingRecord("AAPL", 92.4, "2026-06-30")]
+    monkeypatch.setattr(scan_routes, "load_tracking", lambda *a, **kw: stale)
+    monkeypatch.setattr(scan_routes, "is_backfill_pending", lambda *a, **kw: True)
+    monkeypatch.setattr(scan_routes, "load_by_date", lambda *a, **kw: result)
+    monkeypatch.setattr(
+        scan_routes,
+        "backfill_returns",
+        lambda asof, candidates, universe: [
+            TrackingRecord("AAPL", 92.4, asof, entry_price=190.0, fwd_1d=1.25)
+        ],
+    )
+
+    resp = TestClient(_app()).get("/scan/tracking/2026-06-30")
+
+    assert resp.status_code == 200
+    assert resp.json()["records"][0]["fwd_1d"] == 1.25
+
+
+def test_scan_tracking_skips_backfill_when_records_fresh(monkeypatch):
+    from src.api import scan_routes
+    from src.scanner.tracking import TrackingRecord
+
+    fresh = [TrackingRecord("AAPL", 92.4, "2026-07-06")]
+    monkeypatch.setattr(scan_routes, "load_tracking", lambda *a, **kw: fresh)
+    monkeypatch.setattr(scan_routes, "is_backfill_pending", lambda *a, **kw: False)
+    monkeypatch.setattr(
+        scan_routes, "backfill_returns",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not backfill")),
+    )
+
+    resp = TestClient(_app()).get("/scan/tracking/2026-07-06")
+
+    assert resp.status_code == 200
+    assert resp.json()["records"][0]["symbol"] == "AAPL"
+
+
+def test_scan_tracking_returns_stale_records_when_scan_file_missing(monkeypatch):
+    from src.api import scan_routes
+    from src.scanner.tracking import TrackingRecord
+
+    stale = [TrackingRecord("AAPL", 92.4, "2026-06-30")]
+    monkeypatch.setattr(scan_routes, "load_tracking", lambda *a, **kw: stale)
+    monkeypatch.setattr(scan_routes, "is_backfill_pending", lambda *a, **kw: True)
+    monkeypatch.setattr(scan_routes, "load_by_date", lambda *a, **kw: None)
+
+    resp = TestClient(_app()).get("/scan/tracking/2026-06-30")
+
+    assert resp.status_code == 200
+    assert resp.json()["records"][0]["symbol"] == "AAPL"
+
+
 def test_scan_tracking_backfills_missing_records_from_saved_scan(monkeypatch):
     from src.api import scan_routes
     from src.scanner.tracking import TrackingRecord
