@@ -104,7 +104,7 @@ export function Layout() {
         {/* Brand */}
         <div className={cn("border-b", compactSidebar ? "p-2 flex justify-center" : "flex items-center gap-2 p-4")}>
           <Link to="/overview" onClick={() => setMobileOpen(false)} className={cn("flex min-w-0 flex-1 items-center font-bold text-base tracking-tight", compactSidebar ? "justify-center" : "gap-2")}>
-            <img src="/logo.png" alt="Alpha Mind logo" className="h-6 w-6 shrink-0" />
+            <img src="/logo.png" alt="Alpha Mind logo" className="h-8 w-8 shrink-0" />
             {!compactSidebar && <span className="truncate brand-wordmark">Alpha Mind</span>}
           </Link>
           {!compactSidebar && (
@@ -286,7 +286,7 @@ export function Layout() {
             <Menu className="h-5 w-5" />
           </button>
           <Link to="/overview" className="flex min-w-0 items-center gap-2 font-semibold">
-            <img src="/logo.png" alt="Alpha Mind logo" className="h-5 w-5 shrink-0" />
+            <img src="/logo.png" alt="Alpha Mind logo" className="h-7 w-7 shrink-0" />
             <span className="truncate brand-wordmark">Alpha Mind</span>
           </Link>
         </div>
