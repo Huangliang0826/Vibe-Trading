@@ -48,6 +48,7 @@ export default defineConfig(({ mode }) => {
         "^/alpha(?:/|$)": apiProxy,
         "/market-indices": apiProxy,
         "/watchlist": apiProxy,
+        "^/stock/": apiProxy,
         "/opportunities": apiProxy,
         "/historical-events": apiProxy,
         "^/news-center/": apiProxy,

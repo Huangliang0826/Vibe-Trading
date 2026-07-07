@@ -387,6 +387,9 @@ export const api = {
       `/watchlist/valuation?code=${encodeURIComponent(code)}&market=${market}&metric=${metric}&period=${period}`
     ),
 
+  getStockCapital: (code: string) =>
+    request<StockCapitalResponse>(`/stock/${encodeURIComponent(code)}/capital`),
+
   // 自选股机会中心
   getOpportunities: (filters: OpportunityFilters = {}) => {
     const q = new URLSearchParams();
@@ -532,6 +535,17 @@ export interface ValuationResponse {
   metric: ValuationMetric;
   period: ValuationPeriod;
   points: ValuationPoint[];
+}
+
+export interface StockCapitalResponse {
+  code: string;
+  error?: string;
+  margin: { date: string; rzye: number; rzmre: number; rqye: number; rzrqye: number }[];
+  holders: { date: string; holder_num: number; change_ratio: number; avg_shares: number }[];
+  block_trades: { date: string; price: number; premium_pct: number; amount: number; buyer: string; seller: string }[];
+  dividends: { date: string; bonus_rmb: number; transfer_ratio: number; bonus_ratio: number }[];
+  fund_flow: { date: string; main_net: number; super_net: number }[];
+  fund_flow_20d_main_net: number;
 }
 
 export interface WatchlistQuote {

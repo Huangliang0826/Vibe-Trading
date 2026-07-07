@@ -26,3 +26,7 @@ factual content and not subject to copyright — are reimplemented here.
 The opportunity-center RSS source catalog is adapted from investment-news,
 Copyright (c) 2026 simonlin1212, under the MIT License. See
 agent/src/opportunity_center/THIRD_PARTY_NOTICE.md.
+
+The A-share capital-flow module (agent/src/market_data_astock.py) is ported
+and adapted from a-stock-data, Copyright (c) 2026 Simonlin1212, under the
+Apache License 2.0. See https://github.com/simonlin1212/a-stock-data.

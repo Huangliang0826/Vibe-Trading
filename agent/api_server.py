@@ -2460,6 +2460,35 @@ async def get_watchlist_valuation(
         raise HTTPException(status_code=500, detail=f"Valuation fetch failed: {exc}")
 
 
+_STOCK_CAPITAL_CACHE: dict[str, tuple[float, dict]] = {}
+_STOCK_CAPITAL_TTL = 3600.0  # capital-flow data updates at most daily
+
+
+@app.get("/stock/{code}/capital")
+async def get_stock_capital(code: str, response: Response):
+    """A-share capital-flow panel: 融资融券 / 股东户数 / 大宗交易 / 分红 / 主力资金流.
+
+    A-share only (6-digit codes); other markets get 400. Cached 1h since the
+    underlying data updates at most once per trading day.
+    """
+    import time as _time
+    from src.market_data_astock import fetch_capital_flow, normalize_a_code
+
+    response.headers["Cache-Control"] = "no-store"
+    if normalize_a_code(code) is None:
+        raise HTTPException(status_code=400, detail="capital data is A-share only (6-digit code)")
+
+    cached = _STOCK_CAPITAL_CACHE.get(code)
+    if cached and _time.time() - cached[0] < _STOCK_CAPITAL_TTL:
+        return cached[1]
+
+    result = await asyncio.to_thread(fetch_capital_flow, code)
+    # Cache only when at least one section returned data.
+    if any(result.get(k) for k in ("margin", "holders", "block_trades", "dividends", "fund_flow")):
+        _STOCK_CAPITAL_CACHE[code] = (_time.time(), result)
+    return result
+
+
 # ── Trend forecast + HSTECH smart strategies ────────────────────────────────
 
 _FORECAST_CACHE: dict[str, tuple[float, dict]] = {}
