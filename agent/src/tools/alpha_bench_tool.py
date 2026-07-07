@@ -430,8 +430,8 @@ def _fetch_sp500_constituents() -> list[str]:
             url,
             headers={
                 "User-Agent": (
-                    "Vibe-Trading/0.1 (research bench; "
-                    "https://github.com/HKUDS/Vibe-Trading)"
+                    "Alpha-Mind/0.1 (research bench; "
+                    "https://github.com/Huangliang0826/Vibe-Trading)"
                 )
             },
             timeout=20,

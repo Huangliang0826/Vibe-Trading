@@ -14,10 +14,10 @@ RUN npm run build
 # ============================================================================
 FROM python:3.11-slim AS runtime
 
-LABEL org.opencontainers.image.title="Vibe-Trading" \
-    org.opencontainers.image.description="Natural-language finance research AI agent with backtesting" \
-    org.opencontainers.image.version="0.1.7" \
-    org.opencontainers.image.source="https://github.com/HKUDS/Vibe-Trading" \
+LABEL org.opencontainers.image.title="Alpha Mind" \
+    org.opencontainers.image.description="AI-driven personal quant research and trading assistant" \
+    org.opencontainers.image.version="0.1.9" \
+    org.opencontainers.image.source="https://github.com/Huangliang0826/Vibe-Trading" \
     org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app

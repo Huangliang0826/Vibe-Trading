@@ -1,7 +1,9 @@
-Vibe-Trading
-Copyright 2026 HKUDS contributors.
+Alpha Mind
+Copyright 2026 Liang Huang.
 
-This product includes software developed at HKUDS (https://github.com/HKUDS).
+Alpha Mind is derived from Vibe-Trading, developed at HKUDS
+(https://github.com/HKUDS). This product includes software originally
+developed at HKUDS, used and modified under the MIT License.
 
 This product bundles Microsoft Qlib feature definitions under the Apache 2.0
 license. See agent/src/factors/zoo/qlib158/NOTICE and LICENSE.md for the

@@ -1,12 +1,12 @@
 [project]
-name = "vibe-trading-ai"
+name = "alpha-mind"
 version = "0.1.9"
-description = "Natural-language finance research AI agent with backtesting"
+description = "Alpha Mind — AI-driven personal quant research and trading assistant"
 requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"
 authors = [
-    {name = "HKUDS", email = "hkuds@connect.hku.hk"},
+    {name = "Liang Huang", email = "huangliang19950826@gmail.com"},
 ]
 keywords = ["finance", "trading", "backtesting", "agent", "swarm", "quantitative"]
 classifiers = [
@@ -74,14 +74,12 @@ override-dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://vibetrading.wiki/"
-Documentation = "https://vibetrading.wiki/docs/"
-Repository = "https://github.com/HKUDS/Vibe-Trading"
-Issues = "https://github.com/HKUDS/Vibe-Trading/issues"
+Repository = "https://github.com/Huangliang0826/Vibe-Trading"
+Issues = "https://github.com/Huangliang0826/Vibe-Trading/issues"
 
 [project.scripts]
-vibe-trading = "cli:main"
-vibe-trading-mcp = "mcp_server:main"
+alpha-mind = "cli:main"
+alpha-mind-mcp = "mcp_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "agent"}

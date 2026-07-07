@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Vibe-Trading are documented in this file.
+All notable changes to Alpha Mind are documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
