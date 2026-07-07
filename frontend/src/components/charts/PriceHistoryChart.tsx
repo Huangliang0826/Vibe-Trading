@@ -244,7 +244,9 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           return `<div style="font-size:11px;line-height:1.8">${date}<br/>价格&nbsp;<b>${price !== undefined ? price.toFixed(2) : "—"}</b>&nbsp;<span style="opacity:.7">(${pctStr})</span></div>`;
         },
       },
-      axisPointer: { link: [{ xAxisIndex: "all" }] },
+      // Global axisPointer: link the crosshair across both grids but hide the
+      // dark value/date label boxes on every axis (tooltip already shows them).
+      axisPointer: { link: [{ xAxisIndex: "all" }], label: { show: false } },
     });
 
     const ro = new ResizeObserver(() => chart.resize());
