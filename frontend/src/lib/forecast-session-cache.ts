@@ -5,7 +5,8 @@ export function forecastSessionKey(market: string, code: string, context: number
 }
 
 export function strategySessionKey(market: string, code: string): string {
-  return `strategy:${market}:${code.toUpperCase()}`;
+  // v2: pre-v2 caches stripped `candidates`, which the strategy picker needs.
+  return `strategy:v2:${market}:${code.toUpperCase()}`;
 }
 
 type CacheEnvelope<T> = { savedAt: number; value: T };

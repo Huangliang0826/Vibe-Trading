@@ -331,7 +331,9 @@ function ForecastCard({
             onClick={() => onRefreshBestStrategy(market, code, true)}
             disabled={bestStrategyLoading}
             className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
-            title={bestStrategy?.best?.strategy?.label ? `当前最稳健：${bestStrategy.best.strategy.label}` : "运行多时间段测试，刷新稳健策略"}
+            title={bestStrategy?.best?.strategy?.label
+              ? `${isUserSelected ? "当前手动选择" : "当前最稳健"}：${bestStrategy.best.strategy.label}（点击刷新信号）`
+              : "运行多时间段测试，刷新稳健策略"}
           >
             {bestStrategyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TrendingUp className="h-3.5 w-3.5" />}
             {bestStrategyLoading
@@ -339,7 +341,7 @@ function ForecastCard({
               : bestStrategy?.reliable === false
                 ? "暂无可靠策略"
                 : bestStrategy?.best?.strategy?.label
-                  ? `最稳健：${bestStrategy.best.strategy.label}`
+                  ? `${isUserSelected ? "策略" : "最稳健"}：${bestStrategy.best.strategy.label}`
                   : "最稳健策略"}
           </button>
           {data && !data.model && (
@@ -397,7 +399,7 @@ function ForecastCard({
             <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs font-medium text-foreground">AI 总结 · 多时间段最稳健策略</p>
+                  <p className="text-xs font-medium text-foreground">AI 总结 · {isUserSelected ? "手动选择的策略" : "多时间段最稳健策略"}</p>
                   {bestStrategy?.best?.metrics && (
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {bestStrategy.best.strategy.label || bestStrategy.best.strategy.name}
