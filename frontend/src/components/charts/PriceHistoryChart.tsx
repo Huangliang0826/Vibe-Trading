@@ -231,7 +231,9 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
         backgroundColor: t.tooltipBg,
         borderColor: t.tooltipBorder,
         textStyle: { color: t.tooltipText, fontSize: 11 },
-        axisPointer: { type: "cross", crossStyle: { color: t.axisColor } },
+        // Keep the crosshair guide lines, but hide the dark value/date label
+        // boxes on the axes — the light tooltip already shows price + date.
+        axisPointer: { type: "cross", label: { show: false }, crossStyle: { color: t.axisColor } },
         formatter(params: { axisValue: string; value: number; seriesType: string }[]) {
           if (!params?.length) return "";
           const date = params[0].axisValue;
