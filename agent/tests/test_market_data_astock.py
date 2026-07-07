@@ -43,6 +43,41 @@ class TestParsers:
         assert m.block_trade("600519")[0]["premium_pct"] == 0
 
 
+class TestEvents:
+    def test_lockup_splits_history_and_upcoming(self, monkeypatch):
+        calls = []
+
+        def fake_dc(report, filter_str, page_size, sort_columns, sort_types="-1"):
+            calls.append(filter_str)
+            # upcoming query carries a FREE_DATE>= filter
+            if "FREE_DATE>=" in filter_str:
+                return [{"FREE_DATE": "2026-08-01", "FREE_SHARES_TYPE": "定增", "ABLE_FREE_SHARES": 100.0, "FREE_RATIO": 0.032}]
+            return [{"FREE_DATE": "2025-06-01", "FREE_SHARES_TYPE": "首发", "ABLE_FREE_SHARES": 200.0, "FREE_RATIO": 0.05}]
+
+        monkeypatch.setattr(m, "_datacenter", fake_dc)
+        out = m.lockup_expiry("600519", "2026-07-07")
+        assert out["history"][0]["date"] == "2025-06-01"
+        assert out["upcoming"][0]["date"] == "2026-08-01"
+        assert out["upcoming"][0]["shares"] == 100.0 * 1e4  # 万股 → 股
+        assert out["upcoming"][0]["ratio"] == 3.2           # fraction → %
+
+    def test_dragon_tiger_no_records_skips_seats(self, monkeypatch):
+        monkeypatch.setattr(m, "_datacenter", lambda *a, **k: [])
+        out = m.dragon_tiger_board("600519", "2026-07-07")
+        assert out["records"] == []
+        assert out["seats"] == {"buy": [], "sell": []}
+
+    def test_fetch_events_non_a_share(self):
+        assert m.fetch_events("AAPL") == {"code": "AAPL", "error": "not_a_share"}
+
+    def test_fetch_events_degrades_on_failure(self, monkeypatch):
+        monkeypatch.setattr(m, "lockup_expiry", lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
+        monkeypatch.setattr(m, "dragon_tiger_board", lambda *a, **k: {"records": [{"date": "x"}], "seats": {"buy": [], "sell": []}})
+        out = m.fetch_events("600519", "2026-07-07")
+        assert out["lockup"] == {"history": [], "upcoming": []}
+        assert out["dragon_tiger"]["records"] == [{"date": "x"}]
+
+
 class TestBundleDegradation:
     def test_non_a_share_short_circuits(self):
         assert m.fetch_capital_flow("AAPL") == {"code": "AAPL", "error": "not_a_share"}

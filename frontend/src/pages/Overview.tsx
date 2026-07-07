@@ -4,6 +4,7 @@ import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote,
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { HistoricalEventsView } from "@/components/charts/HistoricalEventsView";
 import { CapitalFlowPanel } from "@/components/charts/CapitalFlowPanel";
+import { StockEventsPanel } from "@/components/charts/StockEventsPanel";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { cn } from "@/lib/utils";
 import { historyCacheKey, quoteCacheKey, readOverviewCache, writeOverviewCache } from "@/lib/overview-price-cache";
@@ -386,7 +387,7 @@ function WatchlistColumn({
 // between the price chart and valuation series (PE / PB / market cap); each
 // view owns its own timeframe selector and data fetch.
 
-type CardView = "price" | "historical_events" | "capital" | ValuationMetric;
+type CardView = "price" | "historical_events" | "capital" | "events" | ValuationMetric;
 
 const VIEW_TABS: { key: CardView; label: string }[] = [
   { key: "price", label: "价格" },
@@ -397,8 +398,11 @@ const VIEW_TABS: { key: CardView; label: string }[] = [
 
 export function stockChartViewTabs(market: WatchlistMarket): { key: CardView; label: string }[] {
   const tabs = [...VIEW_TABS, { key: "historical_events" as CardView, label: "重大历史事件" }];
-  // 资金面(融资融券/股东户数/大宗交易/分红)仅 A 股有数据源
-  if (market === "cn") tabs.push({ key: "capital", label: "资金面" });
+  // 资金面 / 事件(融资融券·股东户数 / 龙虎榜·解禁)仅 A 股有数据源
+  if (market === "cn") {
+    tabs.push({ key: "capital", label: "资金面" });
+    tabs.push({ key: "events", label: "事件" });
+  }
   return tabs;
 }
 
@@ -478,7 +482,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   // Clearing stale points + toggling loading happens here (not in onClick) so
   // loading can never get stuck: the same effect that sets it always clears it.
   useEffect(() => {
-    if (view === "price" || view === "historical_events" || view === "capital") return;
+    if (view === "price" || view === "historical_events" || view === "capital" || view === "events") return;
     let cancelled = false;
     setValLoading(true);
     setValPoints([]);
@@ -543,6 +547,8 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
         />
       ) : view === "capital" ? (
         <CapitalFlowPanel code={code} />
+      ) : view === "events" ? (
+        <StockEventsPanel code={code} />
       ) : (
         <ValuationChart
           points={valPoints}

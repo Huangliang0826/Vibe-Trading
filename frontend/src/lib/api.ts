@@ -390,6 +390,9 @@ export const api = {
   getStockCapital: (code: string) =>
     request<StockCapitalResponse>(`/stock/${encodeURIComponent(code)}/capital`),
 
+  getStockEvents: (code: string) =>
+    request<StockEventsResponse>(`/stock/${encodeURIComponent(code)}/events`),
+
   // 自选股机会中心
   getOpportunities: (filters: OpportunityFilters = {}) => {
     const q = new URLSearchParams();
@@ -546,6 +549,18 @@ export interface StockCapitalResponse {
   dividends: { date: string; bonus_rmb: number; transfer_ratio: number; bonus_ratio: number }[];
   fund_flow: { date: string; main_net: number; super_net: number }[];
   fund_flow_20d_main_net: number;
+}
+
+export interface LockupRow { date: string; type: string; shares: number; ratio: number }
+export interface LhbRecord { date: string; reason: string; net_buy_wan: number; turnover: number }
+export interface LhbSeat { name: string; buy_wan: number; sell_wan: number; net_wan: number }
+
+export interface StockEventsResponse {
+  code: string;
+  error?: string;
+  asof: string;
+  lockup: { history: LockupRow[]; upcoming: LockupRow[] };
+  dragon_tiger: { records: LhbRecord[]; seats: { buy: LhbSeat[]; sell: LhbSeat[] } };
 }
 
 export interface WatchlistQuote {

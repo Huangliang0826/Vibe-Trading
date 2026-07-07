@@ -2489,6 +2489,32 @@ async def get_stock_capital(code: str, response: Response):
     return result
 
 
+_STOCK_EVENTS_CACHE: dict[str, tuple[float, dict]] = {}
+_STOCK_EVENTS_TTL = 3600.0
+
+
+@app.get("/stock/{code}/events")
+async def get_stock_events(code: str, response: Response):
+    """A-share event/risk panel: 限售解禁日历 + 龙虎榜(近 90 日)。A-share only."""
+    import time as _time
+    from src.market_data_astock import fetch_events, normalize_a_code
+
+    response.headers["Cache-Control"] = "no-store"
+    if normalize_a_code(code) is None:
+        raise HTTPException(status_code=400, detail="event data is A-share only (6-digit code)")
+
+    cached = _STOCK_EVENTS_CACHE.get(code)
+    if cached and _time.time() - cached[0] < _STOCK_EVENTS_TTL:
+        return cached[1]
+
+    result = await asyncio.to_thread(fetch_events, code)
+    lockup = result.get("lockup", {})
+    lhb = result.get("dragon_tiger", {})
+    if lockup.get("history") or lockup.get("upcoming") or lhb.get("records"):
+        _STOCK_EVENTS_CACHE[code] = (_time.time(), result)
+    return result
+
+
 # ── Trend forecast + HSTECH smart strategies ────────────────────────────────
 
 _FORECAST_CACHE: dict[str, tuple[float, dict]] = {}

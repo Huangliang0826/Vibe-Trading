@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import random
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -159,6 +160,85 @@ def stock_fund_flow_120d(code: str) -> list[dict]:
                 "super_net": float(p[5]) if p[5] != "-" else 0,
             })
     return rows
+
+
+def _lockup_row(r: dict) -> dict:
+    # RPT_LIFT_STAGE units (verified 2026-07): ABLE_FREE_SHARES in 万股,
+    # FREE_RATIO a fraction of float. Normalise to raw shares + percent.
+    return {
+        "date": str(r.get("FREE_DATE", ""))[:10],
+        "type": r.get("FREE_SHARES_TYPE", ""),
+        "shares": (r.get("ABLE_FREE_SHARES") or 0) * 1e4,
+        "ratio": round((r.get("FREE_RATIO") or 0) * 100, 3),
+    }
+
+
+def lockup_expiry(code: str, trade_date: str, forward_days: int = 90) -> dict[str, Any]:
+    """限售解禁日历:历史解禁 + 未来 ``forward_days`` 天待解禁。"""
+    history = [_lockup_row(r) for r in
+               _datacenter("RPT_LIFT_STAGE", f'(SECURITY_CODE="{code}")', 12, "FREE_DATE")]
+
+    end_str = (datetime.strptime(trade_date, "%Y-%m-%d") + timedelta(days=forward_days)).strftime("%Y-%m-%d")
+    upcoming = [_lockup_row(r) for r in _datacenter(
+        "RPT_LIFT_STAGE",
+        f'(SECURITY_CODE="{code}")(FREE_DATE>=\'{trade_date}\')(FREE_DATE<=\'{end_str}\')',
+        20, "FREE_DATE", "1")]
+
+    return {"history": history, "upcoming": upcoming}
+
+
+def dragon_tiger_board(code: str, trade_date: str, look_back: int = 90) -> dict[str, Any]:
+    """龙虎榜:近 ``look_back`` 日上榜记录 + 最近一次买/卖席位 TOP5。"""
+    start_str = (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=look_back)).strftime("%Y-%m-%d")
+    records = [{
+        "date": str(r.get("TRADE_DATE", ""))[:10],
+        "reason": r.get("EXPLANATION", ""),
+        "net_buy_wan": round((r.get("BILLBOARD_NET_AMT") or 0) / 1e4, 1),  # 万元
+        "turnover": round(float(r.get("TURNOVERRATE") or 0), 2),
+    } for r in _datacenter(
+        "RPT_DAILYBILLBOARD_DETAILSNEW",
+        f'(TRADE_DATE>=\'{start_str}\')(TRADE_DATE<=\'{trade_date}\')(SECURITY_CODE="{code}")',
+        50, "TRADE_DATE")]
+
+    seats: dict[str, list] = {"buy": [], "sell": []}
+    if records:
+        latest = records[0]["date"]
+        for side, report, sort_col in [
+            ("buy", "RPT_BILLBOARD_DAILYDETAILSBUY", "BUY"),
+            ("sell", "RPT_BILLBOARD_DAILYDETAILSSELL", "SELL"),
+        ]:
+            rows = _datacenter(
+                report, f'(TRADE_DATE=\'{latest}\')(SECURITY_CODE="{code}")', 10, sort_col)
+            for r in rows[:5]:
+                seats[side].append({
+                    "name": r.get("OPERATEDEPT_NAME", ""),
+                    "buy_wan": round((r.get("BUY") or 0) / 1e4, 1),
+                    "sell_wan": round((r.get("SELL") or 0) / 1e4, 1),
+                    "net_wan": round((r.get("NET") or 0) / 1e4, 1),
+                })
+    return {"records": records, "seats": seats}
+
+
+def fetch_events(code: str, trade_date: str | None = None) -> dict[str, Any]:
+    """Bundle A-share event/risk data: 限售解禁 + 龙虎榜.
+
+    Each section is independent; a failing/throttled one degrades to empty.
+    """
+    norm = normalize_a_code(code)
+    if norm is None:
+        return {"code": code, "error": "not_a_share"}
+    asof = trade_date or datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        lockup = lockup_expiry(norm, asof)
+    except Exception:
+        lockup = {"history": [], "upcoming": []}
+    try:
+        lhb = dragon_tiger_board(norm, asof)
+    except Exception:
+        lhb = {"records": [], "seats": {"buy": [], "sell": []}}
+
+    return {"code": norm, "asof": asof, "lockup": lockup, "dragon_tiger": lhb}
 
 
 def fetch_capital_flow(code: str) -> dict[str, Any]:
