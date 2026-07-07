@@ -38,13 +38,11 @@ frontend/tsconfig.tsbuildinfo
 # Tests & docs (not needed in production image)
 agent/tests/
 docs/
-assets/
 build/
 dist/
 
 # Project docs
 CLAUDE.md
-CONTRIBUTING.md
 *.md
 !README.md
 !LICENSE
