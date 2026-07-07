@@ -51,12 +51,9 @@ data/.duckdb_tmp/
 data/parquet/
 data/backup/
 
-# Internal docs (plans, specs)
-docs/
-!wiki/docs/
-!wiki/docs/**
-docs/screenshots/agent-run.png
-docs/screenshots/boot.png
+# Internal docs (plans, specs) — but keep README screenshots tracked
+docs/*
+!docs/screenshots/
 data/minutes/
 data/overnight*.log
 data/*.log
