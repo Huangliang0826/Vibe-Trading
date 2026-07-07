@@ -287,8 +287,8 @@ export const api = {
     request<SmartTResponse>(`/hstech/smart-t?period=${period}${refresh ? "&refresh=true" : ""}`),
   getHSTechBestPaperStrategy: (refresh = false, startDate = "2020-01-01") =>
     request<HSTechBestStrategyResponse>(`/hstech/best-paper-strategy?start_date=${startDate}${refresh ? "&refresh=true" : ""}`),
-  getForecastBestPaperStrategy: (market: string, code: string, refresh = false, startDate = "2020-01-01") =>
-    request<HSTechBestStrategyResponse>(`/forecast/${market}/${encodeURIComponent(code)}/best-paper-strategy?start_date=${startDate}${refresh ? "&refresh=true" : ""}`),
+  getForecastBestPaperStrategy: (market: string, code: string, refresh = false, startDate = "2020-01-01", strategy = "") =>
+    request<HSTechBestStrategyResponse>(`/forecast/${market}/${encodeURIComponent(code)}/best-paper-strategy?start_date=${startDate}${refresh ? "&refresh=true" : ""}${strategy ? `&strategy=${encodeURIComponent(strategy)}` : ""}`),
 
   // Alpha Zoo API
   listAlphas: (params: AlphaListParams = {}) => {
@@ -1014,6 +1014,8 @@ export interface HSTechBestStrategyResponse {
   signal_as_of?: string;
   selection_cached?: boolean;
   signal_cached?: boolean;
+  robust_recommended?: string;  // the validated pick, even when overridden
+  user_selected?: boolean;       // true when a manual strategy override is active
   selection?: {
     selected_strategy: string;
     selected_at?: string;

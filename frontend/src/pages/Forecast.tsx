@@ -40,6 +40,21 @@ function stockKey(market: WatchlistMarket, code: string): string {
   return `${market}:${code.toUpperCase()}`;
 }
 
+// Per-stock manual strategy override, saved as the default for next time.
+// Empty = follow the validated robust pick.
+function strategyOverrideKey(market: WatchlistMarket, code: string): string {
+  return `forecast-strategy:${stockKey(market, code)}`;
+}
+function savedStrategyOverride(market: WatchlistMarket, code: string): string {
+  try { return localStorage.getItem(strategyOverrideKey(market, code)) || ""; } catch { return ""; }
+}
+function saveStrategyOverride(market: WatchlistMarket, code: string, strategy: string) {
+  try {
+    if (strategy) localStorage.setItem(strategyOverrideKey(market, code), strategy);
+    else localStorage.removeItem(strategyOverrideKey(market, code));
+  } catch { /* ignore */ }
+}
+
 function forecastCardId(market: WatchlistMarket, code: string): string {
   return `forecast-card-${market}-${code.toUpperCase()}`;
 }
@@ -242,7 +257,7 @@ function ForecastCard({
   context: number;
   displayHistory: number;
   bestStrategyState?: BestStrategyState;
-  onRefreshBestStrategy: (market: WatchlistMarket, code: string, refresh?: boolean) => void;
+  onRefreshBestStrategy: (market: WatchlistMarket, code: string, refresh?: boolean, strategy?: string) => void;
 }) {
   const cacheKey = forecastSessionKey(market, code, context, displayHistory);
   const initialCached = useRef(readSessionCache<ForecastResponse>(cacheKey, FORECAST_SESSION_TTL));
@@ -257,6 +272,19 @@ function ForecastCard({
   const historyDuration = bestStrategy
     ? formatHistoryDuration(bestStrategy.start_date, bestStrategy.end_date)
     : "";
+
+  // Strategy picker: robust pick vs the user's saved override, plus the menu.
+  const robustRecommended = bestStrategy?.robust_recommended || bestStrategy?.best?.strategy?.name || "";
+  const isUserSelected = !!bestStrategy?.user_selected;
+  const activeStrategy = bestStrategy?.best?.strategy?.name || "";
+  const sortedCandidates = (bestStrategy?.candidates || [])
+    .filter((c) => c.status === "completed" && c.metrics)
+    .sort((a, b) => (b.metrics?.total_return ?? -Infinity) - (a.metrics?.total_return ?? -Infinity));
+  const pickStrategy = (name: string) => {
+    const override = name === robustRecommended ? "" : name;
+    saveStrategyOverride(market, code, override);
+    onRefreshBestStrategy(market, code, false, override);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -333,6 +361,38 @@ function ForecastCard({
       ) : data ? (
         <>
           <ForecastChart data={data} trades={trades.length > 0 ? trades : undefined} />
+          {sortedCandidates.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">策略</span>
+              <select
+                value={activeStrategy}
+                onChange={(e) => pickStrategy(e.target.value)}
+                disabled={bestStrategyLoading}
+                className="max-w-[16rem] rounded-lg border bg-background px-2 py-1 text-xs disabled:opacity-50"
+              >
+                {sortedCandidates.map((c) => (
+                  <option key={c.strategy.name} value={c.strategy.name}>
+                    {(c.strategy.label || c.strategy.name)}
+                    {c.strategy.name === robustRecommended ? " · 稳健推荐" : ""}
+                  </option>
+                ))}
+              </select>
+              {isUserSelected ? (
+                <>
+                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">手动选择 · 已存为默认</span>
+                  <button
+                    onClick={() => pickStrategy(robustRecommended)}
+                    className="text-[11px] text-primary hover:underline"
+                  >
+                    恢复稳健推荐
+                  </button>
+                </>
+              ) : (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">稳健推荐</span>
+              )}
+              {bestStrategyLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            </div>
+          )}
           {(bestStrategy || bestStrategyError || bestStrategyLoading) && (
             <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -426,9 +486,15 @@ export function Forecast() {
     ...hk.map((code) => ({ market: "hk" as const, code: code.toUpperCase() })),
     ...us.map((code) => ({ market: "us" as const, code: code.toUpperCase() })),
   ], [hk, us, cnList]);
-  const loadBestStrategy = useCallback(async (market: WatchlistMarket, code: string, refresh = false) => {
+  const loadBestStrategy = useCallback(async (
+    market: WatchlistMarket, code: string, refresh = false, strategyArg?: string,
+  ) => {
     const key = stockKey(market, code);
-    const sessionKey = strategySessionKey(market, code);
+    // explicit arg (incl. "" to restore robust) wins; otherwise use saved default
+    const strat = strategyArg !== undefined ? strategyArg : savedStrategyOverride(market, code);
+    // strategy-specific session cache so switching doesn't return the wrong run
+    const sessionKey = strategySessionKey(market, code) + (strat ? `:${strat}` : "");
+    const reqKey = key + (strat ? `:${strat}` : "");
     const cached = refresh
       ? null
       : readSessionCache<HSTechBestStrategyResponse>(sessionKey, STRATEGY_SESSION_TTL);
@@ -439,13 +505,13 @@ export function Forecast() {
       }));
       return;
     }
-    const pending = bestRequestsRef.current.get(key);
+    const pending = bestRequestsRef.current.get(reqKey);
     if (pending) return pending;
     setBestByKey((prev) => ({
       ...prev,
       [key]: { data: prev[key]?.data || null, loading: true, error: null },
     }));
-    const request = api.getForecastBestPaperStrategy(market, code, refresh)
+    const request = api.getForecastBestPaperStrategy(market, code, refresh, "2020-01-01", strat)
       .then((data) => {
         writeSessionCache(sessionKey, compactStrategyResponse(data));
         setBestByKey((prev) => ({ ...prev, [key]: { data, loading: false, error: null } }));
@@ -461,9 +527,9 @@ export function Forecast() {
         }));
       })
       .finally(() => {
-        bestRequestsRef.current.delete(key);
+        bestRequestsRef.current.delete(reqKey);
       });
-    bestRequestsRef.current.set(key, request);
+    bestRequestsRef.current.set(reqKey, request);
     return request;
   }, []);
 

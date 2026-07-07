@@ -2855,10 +2855,17 @@ async def get_forecast_best_paper_strategy(
     start_date: str = Query("2020-01-01", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     end_date: str = Query("", pattern=r"^$|^\d{4}-\d{2}-\d{2}$"),
     refresh: bool = Query(False),
+    strategy: str = Query("", description="override the robust pick with a chosen strategy"),
 ):
-    """Use annual robust selection and refresh only its current signal daily."""
+    """Use annual robust selection and refresh only its current signal daily.
+
+    ``strategy`` overrides the robust pick: it runs that specific strategy over
+    full history instead of the validated one. The response's
+    ``robust_recommended`` still names the validated pick so the UI can badge it.
+    """
     from src.paper_trading.hstech_best import (
         ROBUST_SELECTION_VERSION,
+        STRATEGY_NAMES,
         default_end_date,
         normalize_best_strategy_symbol,
         run_selected_single_symbol_strategy,
@@ -2910,16 +2917,23 @@ async def get_forecast_best_paper_strategy(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"robust strategy selection failed: {exc}") from exc
 
+    robust_recommended = str(selection["selected_strategy"])
+    override = strategy if strategy in STRATEGY_NAMES else ""
+    if override:
+        selection = {**selection, "selected_strategy": override}
     strategy_name = str(selection["selected_strategy"])
+    # cache key includes strategy_name, so each chosen strategy caches separately
     key = f"forecast-robust-signal:{mk}:{display_code}:{effective_end}:{strategy_name}:{ROBUST_SELECTION_VERSION}"
     cached = _HSTECH_BEST_STRATEGY_CACHE.get(key)
     if not refresh and cached and (time.time() - cached[0]) < _HSTECH_BEST_STRATEGY_TTL:
-        return {**cached[1], "cached": True, "selection_cached": True, "signal_cached": True}
+        return {**cached[1], "cached": True, "selection_cached": True, "signal_cached": True,
+                "robust_recommended": robust_recommended, "user_selected": bool(override)}
     if not refresh:
         disk_cached = _read_best_strategy_disk_cache(key)
         if disk_cached is not None:
             _HSTECH_BEST_STRATEGY_CACHE[key] = (time.time(), disk_cached)
-            return {**disk_cached, "cached": True, "selection_cached": selection_cached, "signal_cached": True}
+            return {**disk_cached, "cached": True, "selection_cached": selection_cached, "signal_cached": True,
+                    "robust_recommended": robust_recommended, "user_selected": bool(override)}
     try:
         payload = await asyncio.to_thread(
             run_selected_single_symbol_strategy,
@@ -2941,6 +2955,8 @@ async def get_forecast_best_paper_strategy(
         "cached": False,
         "selection_cached": selection_cached,
         "signal_cached": False,
+        "robust_recommended": robust_recommended,
+        "user_selected": bool(override),
     }
 
 

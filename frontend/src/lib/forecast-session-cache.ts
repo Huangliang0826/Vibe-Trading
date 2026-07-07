@@ -40,7 +40,8 @@ export function compactStrategyResponse<T extends object>(value: T): T {
   const { robust_result: _robustResult, ...compactSelection } = selection;
   return {
     ...record,
-    candidates: [],
+    // candidates carry only strategy label + summary metrics (no trades /
+    // equity), so keep them — the strategy picker renders from this list.
     best: { ...best, equity_curve: [] },
     selection: compactSelection,
   } as T;
