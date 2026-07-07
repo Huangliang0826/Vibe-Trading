@@ -388,7 +388,6 @@ export function PaperTrading() {
   const [startDate, setStartDate] = useState("2020-01-01");
   const [endDate, setEndDate] = useState(() => todayInputValue());
   const [initialUsd, setInitialUsd] = useState(100000);
-  const [initialHkd, setInitialHkd] = useState(1000000);
 
   // ── Run state ──
   const [runs, setRuns] = useState<PaperTradingRun[]>([]);
@@ -595,7 +594,7 @@ export function PaperTrading() {
         start_date: startDate,
         end_date: endDate,
         initial_usd: initialUsd,
-        initial_hkd: initialHkd,
+        initial_hkd: 0,
       });
       setActiveRun(run);
       pollRun(run.run_id);
@@ -632,7 +631,7 @@ export function PaperTrading() {
           start_date: startDate,
           end_date: endDate,
           initial_usd: initialUsd,
-          initial_hkd: initialHkd,
+          initial_hkd: 0,
         })),
       );
 
@@ -715,7 +714,7 @@ export function PaperTrading() {
         })),
         end_date: endDate,
         initial_usd: initialUsd,
-        initial_hkd: initialHkd,
+        initial_hkd: 0,
         window_years: 3,
         step_years: 1,
       });
@@ -730,7 +729,7 @@ export function PaperTrading() {
         startDate,
         endDate,
         initialUsd,
-        initialHkd,
+        initialHkd: 0,
       }));
       setActiveRun(run);
       setRobustAutoRunning(true);
@@ -988,22 +987,9 @@ export function PaperTrading() {
               className="mt-1 w-full rounded-lg border bg-background px-2 py-1.5 text-sm tabular-nums"
             />
           </div>
-          <div>
-            <label className="text-xs text-muted-foreground">港币资金 (HKD)</label>
-            <input
-              type="number"
-              min={0}
-              value={initialHkd}
-              onChange={(e) => setInitialHkd(parseFloat(e.target.value) || 0)}
-              className="mt-1 w-full rounded-lg border bg-background px-2 py-1.5 text-sm tabular-nums"
-            />
-          </div>
         </div>
 
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            总资金 ≈ ${(initialUsd + initialHkd / 7.8).toLocaleString(undefined, { maximumFractionDigits: 0 })} USD
-          </p>
+        <div className="flex items-center justify-end">
           <div className="flex items-center gap-2">
             <button
               onClick={handleOptimizeStrategies}
