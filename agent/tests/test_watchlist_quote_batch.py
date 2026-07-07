@@ -51,6 +51,19 @@ class TestUsQuotesYfinanceFallback:
         assert out[0]["price"] == 51.0
         assert out[0]["prev_close"] == 50.0
 
+    def test_single_symbol_multiindex_frame(self, monkeypatch):
+        # yfinance(group_by="ticker") returns (sym, field) columns even for
+        # one symbol — the shape that broke adding a single US stock.
+        monkeypatch.setattr(
+            "yfinance.download", lambda *a, **kw: _fake_batch_df(["AAPL"])
+        )
+
+        out = api_server._fetch_us_watchlist_quotes(["AAPL"])
+
+        assert out[0]["price"] == 102.0
+        assert out[0]["prev_close"] == 101.0
+        assert "error" not in out[0]
+
     def test_failed_download_marks_symbols(self, monkeypatch):
         def boom(*a, **kw):
             raise RuntimeError("network down")

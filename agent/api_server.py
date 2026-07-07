@@ -2088,11 +2088,20 @@ def _fetch_us_watchlist_quotes(codes: list[str]) -> list[dict]:
     except Exception:
         df = None
 
+    import pandas as pd
+
     out = []
     for sym in symbols:
         price = prev_close = 0.0
         try:
-            closes = (df[sym] if len(symbols) > 1 else df)["Close"].dropna()
+            # group_by="ticker" yields (sym, field) columns even for a single
+            # symbol; tolerate a flat single-symbol frame too.
+            if df is not None and isinstance(df.columns, pd.MultiIndex) \
+                    and sym in df.columns.get_level_values(0):
+                sub = df[sym]
+            else:
+                sub = df
+            closes = sub["Close"].dropna()
             if len(closes) >= 1:
                 price = float(closes.iloc[-1])
             if len(closes) >= 2:
