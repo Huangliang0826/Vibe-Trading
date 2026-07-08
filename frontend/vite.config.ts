@@ -35,6 +35,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: true, // 监听所有网卡,允许手机等局域网设备访问
+      // 允许通过稳定的 Bonjour 主机名访问(如 Liangs-MacBook-Air.local),
+      // 否则 Vite 的 host 校验会对 .local 域名返回 403
+      allowedHosts: [".local"],
       port: 5899,
       proxy: {
         ...Object.fromEntries(PROXY_PATHS.map((p) => [p, apiProxy])),
