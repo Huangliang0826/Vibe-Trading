@@ -192,6 +192,13 @@ class TestIsBackfillPending:
     def test_pending_when_fwd_1d_overdue(self):
         assert is_backfill_pending([self._record()], self.ASOF, now="2025-06-09")
 
+    def test_pending_promptly_for_recent_missing_entry(self):
+        # A 2-day-old scan whose entry/fwd_1d are still empty must be pending —
+        # by T+2 the entry open and first close already exist (regression guard
+        # against over-conservative pads that left recent dates unfilled).
+        two_days = "2025-06-04"  # ASOF (Mon 06-02) + 2 calendar days
+        assert is_backfill_pending([self._record()], self.ASOF, now=two_days)
+
     def test_not_pending_when_only_later_horizons_missing(self):
         rec = self._record(entry_date="2025-06-03", entry_price=100.0, fwd_1d=1.0)
         assert not is_backfill_pending([rec], self.ASOF, now="2025-06-09")

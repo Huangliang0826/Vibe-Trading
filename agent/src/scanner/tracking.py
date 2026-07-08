@@ -95,13 +95,16 @@ def load_all_tracking(
     return records
 
 
-# Calendar days after asof before each field can plausibly be computed:
-# the trading-day horizon stretched across worst-case weekends/holidays.
+# Earliest calendar-day age at which each field can appear (best case, no
+# intervening weekend). We bias toward the *earliest* rather than worst case so
+# returns fill promptly; if the bar isn't out yet the fetch simply fills nothing
+# and the next daily run retries. Entry is T+1 open; fwd_Nd is the close N bars
+# after entry, i.e. bar index N (T+1+N).
 _FIELD_AVAILABILITY_PAD_DAYS = [
-    ("entry_price", 4),
-    ("fwd_1d", 5),
-    ("fwd_5d", 11),
-    ("fwd_20d", 33),
+    ("entry_price", 1),   # T+1 open
+    ("fwd_1d", 2),        # T+2 close
+    ("fwd_5d", 8),        # ~6 trading days out
+    ("fwd_20d", 28),      # ~21 trading days out
 ]
 # Past this age every fillable horizon has long elapsed; records still missing
 # values (e.g. delisted symbols) should not trigger a price fetch on every read.
