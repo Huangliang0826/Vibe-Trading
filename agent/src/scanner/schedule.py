@@ -61,14 +61,26 @@ def backfill_universe(
     return processed
 
 
+def refresh_news() -> dict[str, Any]:
+    """Ingest the news-center RSS feeds so the digest is fresh without a manual
+    click. Runs every day (news happens on weekends too)."""
+    from src.news_center.service import NewsCenterService
+
+    result = NewsCenterService().refresh()
+    log.info("news refresh: fetched %d, total %d, latest %s",
+             result.fetched, result.total, result.latest_date)
+    return {"fetched": result.fetched, "total": result.total,
+            "latest_date": result.latest_date}
+
+
 def run_daily(
     scan_universes: tuple[str, ...] | list[str],
     backfill_universes: tuple[str, ...] | list[str] = DEFAULT_UNIVERSES,
     top: int = DEFAULT_TOP,
 ) -> list[dict[str, Any]]:
-    """Scan the given universes, then backfill tracking for all of them.
+    """Scan the given universes, backfill tracking, and refresh news.
 
-    Failures are logged per universe and never abort the rest of the run.
+    Failures are logged per section and never abort the rest of the run.
     """
     results: list[dict[str, Any]] = []
     if dt.date.today().weekday() >= 5:
@@ -92,4 +104,13 @@ def run_daily(
             log.exception("backfill failed for %s", universe)
             entry["error"] = str(exc)
         results.append(entry)
+
+    news_entry: dict[str, Any] = {"action": "news"}
+    try:
+        news_entry.update(refresh_news())
+    except Exception as exc:  # noqa: BLE001
+        log.exception("news refresh failed")
+        news_entry["error"] = str(exc)
+    results.append(news_entry)
+
     return results

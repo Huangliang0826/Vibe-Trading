@@ -3,6 +3,8 @@ import { ExternalLink, Loader2, Newspaper, RefreshCw, Search } from "lucide-reac
 import { api, type NewsCenterArticle, type NewsCenterDigest, type NewsCenterList } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+const NEWS_AUTO_REFRESH_KEY = "news-auto-refresh";
+
 const SECTOR_LABELS: Record<string, string> = {
   ai: "AI / 大模型", semi: "半导体", robot: "机器人", auto: "汽车 / 新能源车",
   energy: "能源", bio: "医药健康", space: "航天", security: "网络安全",
@@ -21,6 +23,7 @@ export function NewsCenter() {
   const [digest, setDigest] = useState<NewsCenterDigest | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoRefreshing, setAutoRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (selectedDate: string) => {
@@ -48,8 +51,20 @@ export function NewsCenter() {
   useEffect(() => {
     api.getNewsCenterDates().then((items) => {
       setDates(items);
-      setDate((current) => current || items[0] || new Date().toISOString().slice(0, 10));
+      const today = new Date().toISOString().slice(0, 10);
+      const latest = items[0] || "";
+      // 每天首次打开且今天还没抓过新闻时,自动抓一次(每设备每天一次)
+      const stale = latest < today;
+      const marker = localStorage.getItem(NEWS_AUTO_REFRESH_KEY);
+      if (stale && marker !== today) {
+        localStorage.setItem(NEWS_AUTO_REFRESH_KEY, today);
+        setAutoRefreshing(true);
+        void refresh().finally(() => setAutoRefreshing(false));
+        return;
+      }
+      setDate((current) => current || latest || today);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "日期加载失败"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { void load(date); }, [date, load]);
 
@@ -110,7 +125,7 @@ export function NewsCenter() {
 
       <section className="border-b py-6">
         <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">今日投资简报</h2><span className="text-xs text-muted-foreground">{digest?.article_count ?? 0} 条新闻</span></div>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground">{digest?.summary || (loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。")}</p>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground">{digest?.summary || (autoRefreshing ? "正在获取今日新闻…(每天首次打开自动更新)" : loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。")}</p>
         {digest && <div className="mt-3 flex gap-4 text-xs text-muted-foreground"><span>自选股 {digest.watchlist_count}</span><span className="text-red-500">利好 {digest.positive_count}</span><span className="text-emerald-600">利空 {digest.negative_count}</span></div>}
       </section>
 

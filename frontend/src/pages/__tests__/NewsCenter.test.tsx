@@ -10,7 +10,15 @@ vi.mock("@/lib/api", async (original) => ({ ...(await original<object>()), api: 
 
 import { NewsCenter } from "../NewsCenter";
 
+const TODAY = new Date().toISOString().slice(0, 10);
+
 beforeEach(() => {
+  vi.clearAllMocks();
+  localStorage.clear();
+  // Mark today as already auto-refreshed so the digest-render tests don't
+  // trigger the first-open auto-refresh (covered by its own test below).
+  localStorage.setItem("news-auto-refresh", TODAY);
+  apiMock.refreshNewsCenter.mockResolvedValue({ fetched: 0, total: 1, latest_date: "2026-07-01" });
   apiMock.getNewsCenterDates.mockResolvedValue(["2026-07-01"]);
   apiMock.getNewsCenterArticles.mockResolvedValue({
     items: [{
@@ -36,6 +44,27 @@ it("renders the daily digest and traceable news article", async () => {
   expect(screen.getByRole("tab", { name: "中文新闻" })).toHaveAttribute("aria-selected", "true");
   expect(apiMock.getNewsCenterArticles).toHaveBeenCalledWith(expect.objectContaining({ language: "zh" }));
   expect(apiMock.getNewsCenterDigest).toHaveBeenCalledWith("2026-07-01", "zh");
+});
+
+it("auto-refreshes on first daily open when today's news is missing", async () => {
+  localStorage.clear(); // no marker → first open today
+  render(<NewsCenter />);
+
+  await waitFor(() => expect(apiMock.refreshNewsCenter).toHaveBeenCalled());
+  expect(localStorage.getItem("news-auto-refresh")).toBe(TODAY);
+});
+
+it("does not auto-refresh when today's news already exists", async () => {
+  localStorage.clear();
+  apiMock.getNewsCenterDates.mockResolvedValue([TODAY]); // latest == today, not stale
+  apiMock.getNewsCenterDigest.mockResolvedValue({
+    date: TODAY, article_count: 1, watchlist_count: 0,
+    positive_count: 0, negative_count: 0, summary: "今日无重点。", major_items: [],
+  });
+  render(<NewsCenter />);
+
+  await screen.findByText("今日无重点。");
+  expect(apiMock.refreshNewsCenter).not.toHaveBeenCalled();
 });
 
 it("switches the article list and digest to English", async () => {
