@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from src.scanner.store import list_scan_dates, load_by_date, load_latest, save_scan
 from src.scanner.tracking import (
-    backfill_returns, calibration_check, is_backfill_pending,
+    backfill_returns, calibration_check, compute_accuracy, is_backfill_pending,
     load_all_tracking, load_tracking,
 )
 from src.scanner.universe_metadata import attach_company_names
@@ -308,6 +308,13 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
             return _cache_set(cache_key, result)
         except (FileNotFoundError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.get("/scan/accuracy", dependencies=[Depends(require_auth)])
+    async def scan_accuracy(universe: str = "sp500") -> dict[str, Any]:
+        """Self-verification stats: forward-return means, hit rates, score
+        quintile spread and IC per horizon, plus a per-date mean series."""
+        records = load_all_tracking(universe=_validate_scan_universe(universe))
+        return {"universe": universe, **compute_accuracy(records)}
 
     @app.get("/scan/calibration", dependencies=[Depends(require_auth)])
     async def scan_calibration(universe: str = "sp500") -> dict[str, Any]:

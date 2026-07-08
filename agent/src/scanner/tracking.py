@@ -327,3 +327,64 @@ def calibration_check(
         ))
 
     return alerts
+
+
+def _spearman_ic(scores: list[float], returns: list[float]) -> float:
+    """Rank correlation between scanner scores and realized returns.
+
+    A positive IC means higher-scored picks tended to outperform. Returns 0
+    when it can't be computed (constant scores, <2 samples).
+    """
+    if len(scores) < 2:
+        return 0.0
+    ic = pd.Series(scores).corr(pd.Series(returns), method="spearman")
+    return 0.0 if pd.isna(ic) else float(ic)
+
+
+def compute_accuracy(records: list[TrackingRecord]) -> dict[str, Any]:
+    """Self-verification stats over all tracked picks.
+
+    For each horizon: sample count, mean forward return, hit rate (% positive),
+    the score top-vs-bottom-quintile spread, and rank IC. Plus a per-date mean
+    series. Horizons with no filled data report ``{"n": 0}``.
+    """
+    horizons: dict[str, Any] = {}
+    for attr in ("fwd_1d", "fwd_5d", "fwd_20d"):
+        filled = [r for r in records if getattr(r, attr) is not None]
+        n = len(filled)
+        if n == 0:
+            horizons[attr] = {"n": 0}
+            continue
+        rets = [float(getattr(r, attr)) for r in filled]
+        mean = sum(rets) / n
+        hit = sum(1 for x in rets if x > 0) / n * 100
+        by_score = sorted(filled, key=lambda r: r.score)
+        q = max(1, n // 5)
+        bottom = by_score[:q]
+        top = by_score[-q:]
+        top_mean = sum(float(getattr(r, attr)) for r in top) / len(top)
+        bot_mean = sum(float(getattr(r, attr)) for r in bottom) / len(bottom)
+        horizons[attr] = {
+            "n": n,
+            "mean": round(mean, 3),
+            "hit_rate": round(hit, 1),
+            "top_q_mean": round(top_mean, 3),
+            "bottom_q_mean": round(bot_mean, 3),
+            "spread": round(top_mean - bot_mean, 3),
+            "ic": round(_spearman_ic([r.score for r in filled], rets), 3),
+        }
+
+    by_date: dict[str, list[float]] = {}
+    for r in records:
+        if r.fwd_1d is not None:
+            by_date.setdefault(r.asof, []).append(float(r.fwd_1d))
+    timeseries = [
+        {"date": d, "n": len(v), "mean_1d": round(sum(v) / len(v), 3)}
+        for d, v in sorted(by_date.items())
+    ]
+
+    return {
+        "total_tracked": len(records),
+        "horizons": horizons,
+        "timeseries": timeseries,
+    }

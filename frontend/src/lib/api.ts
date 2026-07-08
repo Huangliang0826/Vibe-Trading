@@ -235,6 +235,8 @@ export const api = {
     request<any>(`/scan/tracking/${asof}?universe=${encodeURIComponent(universe)}`),
   getScanCalibration: (universe = "sp500") =>
     request<any>(`/scan/calibration?universe=${encodeURIComponent(universe)}`),
+  getScanAccuracy: (universe = "sp500") =>
+    request<ScanAccuracy>(`/scan/accuracy?universe=${encodeURIComponent(universe)}`),
   getScanQuintile: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30, refined = false) =>
     request<QuintileResponse>(`/scan/quintile?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}&refined=${refined}`),
   getScanWalkforward: (universe = "hstech", period = "2022-2025", rebalDays = 21, costBps = 30) =>
@@ -683,6 +685,22 @@ export interface FactorScreening {
   mono: number;
   q_means: number[];
   kept: boolean;
+}
+
+export interface ScanAccuracyHorizon {
+  n: number;
+  mean?: number;
+  hit_rate?: number;
+  top_q_mean?: number;
+  bottom_q_mean?: number;
+  spread?: number;
+  ic?: number;
+}
+export interface ScanAccuracy {
+  universe: string;
+  total_tracked: number;
+  horizons: { fwd_1d: ScanAccuracyHorizon; fwd_5d: ScanAccuracyHorizon; fwd_20d: ScanAccuracyHorizon };
+  timeseries: { date: string; n: number; mean_1d: number }[];
 }
 
 export interface QuintileResponse {

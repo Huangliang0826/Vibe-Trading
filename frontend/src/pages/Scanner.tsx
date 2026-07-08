@@ -3,6 +3,7 @@ import { Radar, AlertTriangle, RefreshCw, Loader2, ChevronLeft, ChevronRight, Ca
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { lastClosedTradingDay, type ScanUniverse } from "@/lib/market";
+import { ScanAccuracyPanel } from "@/components/charts/ScanAccuracyPanel";
 
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
   factor_rank: { label: "因子", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
@@ -116,6 +117,7 @@ export function Scanner() {
   const [filter, setFilter] = useState<string | null>(null);
   const [dates, setDates] = useState<string[]>([]);
   const [dateIdx, setDateIdx] = useState(0);
+  const [view, setView] = useState<"leaderboard" | "accuracy">("leaderboard");
 
   const loadScan = useCallback((targetUniverse: ScanUniverse, asof?: string) => {
     setLoading(true);
@@ -296,8 +298,24 @@ export function Scanner() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
-      <div className="mb-5">
+      <div className="mb-5 flex items-center justify-between gap-3">
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
+        <div className="inline-flex rounded-md border bg-muted/30 p-0.5" aria-label="视图切换">
+          {([["leaderboard", "排行榜"], ["accuracy", "准确率"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={view === key}
+              onClick={() => setView(key)}
+              className={cn(
+                "h-8 px-4 text-xs font-medium transition-colors",
+                view === key ? "rounded bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
@@ -352,6 +370,10 @@ export function Scanner() {
         </div>
       </div>
 
+      {view === "accuracy" ? (
+        <ScanAccuracyPanel universe={universe} />
+      ) : (
+      <>
       {/* Non-latest banner */}
       {!isLatest && (
         <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-2 flex items-center justify-between">
@@ -508,6 +530,8 @@ export function Scanner() {
         {calibration && ` · 已跟踪 ${calibration.filled}/${calibration.total_tracked} 样本`}
         {dates.length > 1 && ` · ${dates.length} 期历史`}
       </p>
+      </>
+      )}
     </div>
   );
 }

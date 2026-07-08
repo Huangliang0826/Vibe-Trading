@@ -8,6 +8,7 @@ from src.scanner.tracking import (
     _fetch_prices,
     backfill_returns,
     calibration_check,
+    compute_accuracy,
     is_backfill_pending,
     load_all_tracking,
     load_tracking,
@@ -275,3 +276,40 @@ class TestCalibrationCheck:
         )
         alerts = calibration_check(records, threshold_pp=8.0, min_samples=100)
         assert any(a.metric == "overall_mean_5d" for a in alerts)
+
+
+class TestComputeAccuracy:
+    def _recs(self):
+        # scores 10..100; higher score → higher fwd_1d (positive IC/spread)
+        return [
+            TrackingRecord(symbol=f"S{i}", score=float(i * 10), asof="2025-06-02",
+                           entry_price=100.0, fwd_1d=float(i - 3), fwd_5d=float(i))
+            for i in range(1, 11)
+        ]
+
+    def test_empty(self):
+        acc = compute_accuracy([])
+        assert acc["total_tracked"] == 0
+        assert acc["horizons"]["fwd_1d"] == {"n": 0}
+        assert acc["timeseries"] == []
+
+    def test_stats_and_positive_spread(self):
+        acc = compute_accuracy(self._recs())
+        h = acc["horizons"]["fwd_1d"]
+        assert h["n"] == 10
+        assert h["hit_rate"] == 70.0            # fwd_1d = i-3 > 0 for i=4..10
+        assert h["spread"] > 0                  # top score quintile beats bottom
+        assert h["ic"] > 0.9                     # monotonic score→return
+        assert acc["horizons"]["fwd_20d"] == {"n": 0}
+
+    def test_timeseries_grouped_by_date(self):
+        recs = [
+            TrackingRecord(symbol="A", score=50, asof="2025-06-02", fwd_1d=1.0),
+            TrackingRecord(symbol="B", score=60, asof="2025-06-02", fwd_1d=3.0),
+            TrackingRecord(symbol="C", score=70, asof="2025-06-03", fwd_1d=-2.0),
+        ]
+        ts = compute_accuracy(recs)["timeseries"]
+        assert ts == [
+            {"date": "2025-06-02", "n": 2, "mean_1d": 2.0},
+            {"date": "2025-06-03", "n": 1, "mean_1d": -2.0},
+        ]
