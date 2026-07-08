@@ -14,7 +14,7 @@ from backtest.loaders.yfinance_loader import DataLoader as YFinanceLoader
 from backtest.metrics import calc_metrics
 from backtest.models import TradeRecord
 from src.opportunity_center.models import StrategyAction, StrategyContext
-from src.paper_trading.executor import _run_dca, _smart_dca_multiplier
+from src.paper_trading.executor import _run_dca, _smart_dca_multiplier, evaluate_strategy
 from src.paper_trading.hstech_best import (
     STRATEGY_LABELS,
     STRATEGY_NAMES,
@@ -32,6 +32,33 @@ _DCA_FREQ_MAP = {
 }
 _INITIAL_CASH = 100_000.0
 _ACTION_TOLERANCE = 1e-9
+
+# Strategies whose real behaviour (tranche deployment / drawdown-triggered
+# accumulation and profit-taking) is simulated bar-by-bar in the executor
+# rather than expressible as a plain target-weight signal. ``generate_signals``
+# does not handle them, so we route their metrics through the executor's
+# ``evaluate_strategy`` core and approximate the action signal with a deployment
+# ramp — mirroring how ``dca``/``smart_dca`` take metrics from ``_run_dca`` while
+# their action signal comes from a ramp.
+_EXECUTOR_SIMULATED = {
+    "dca_then_hold",
+    "dca_two_year_then_hold",
+    "dca_one_year_then_hold",
+    "accelerated_dca_entry",
+    "deep_drawdown_recovery",
+}
+
+# Number of monthly tranches over which each executor-simulated strategy ramps
+# to full allocation, used only to build the approximate action signal.
+_DEPLOY_RAMP_STEPS = {
+    "dca_then_hold": 36,
+    "dca_two_year_then_hold": 24,
+    "dca_one_year_then_hold": 12,
+    "accelerated_dca_entry": 12,
+    # deep_drawdown_recovery deploys on drawdowns and takes profit on the way
+    # up, so no fixed window fits; a one-year ramp is a coarse action proxy.
+    "deep_drawdown_recovery": 12,
+}
 
 
 @dataclass(frozen=True)
@@ -163,7 +190,33 @@ def _strategy_signal_series(
         return _generate_smart_dca_weights(holding, frame, params)
     if strategy_name == "dca":
         return generate_dca([holding], data_map, params)[code]
+    if strategy_name in _EXECUTOR_SIMULATED:
+        return _generate_deploy_ramp_weights(holding, frame, strategy_name)
     return generate_signals([holding], data_map, strategy_name, params)[code]
+
+
+def _generate_deploy_ramp_weights(
+    holding: PaperHolding,
+    frame: pd.DataFrame,
+    strategy_name: str,
+) -> pd.Series:
+    """Monotone ramp to full allocation over the strategy's deployment window.
+
+    Used only for the action signal of executor-simulated strategies (their
+    equity/metrics come from ``evaluate_strategy``). Weight climbs one equal step
+    per month until fully deployed, then holds — so the action reads as ``buy``
+    while accumulating and ``hold`` once fully invested.
+    """
+    steps_to_full = max(int(_DEPLOY_RAMP_STEPS.get(strategy_name, 12)), 1)
+    target_weight = holding.allocation_pct / 100.0
+    step = target_weight / steps_to_full
+    weights = pd.Series(0.0, index=frame.index, dtype=float)
+    ramp_dates = pd.date_range(start=frame.index[0], periods=steps_to_full, freq="MS")
+    current_weight = 0.0
+    for ramp_date in ramp_dates:
+        current_weight = min(current_weight + step, target_weight)
+        weights.loc[weights.index >= ramp_date] = current_weight
+    return weights
 
 
 def _generate_smart_dca_weights(
@@ -220,6 +273,11 @@ def _backtest_strategy(
             data_map,
             params,
             smart=strategy_name == "smart_dca",
+        )
+        return equity_curve.astype(float), trades
+    if strategy_name in _EXECUTOR_SIMULATED:
+        equity_curve, trades = evaluate_strategy(
+            [holding], data_map, strategy_name, params, _INITIAL_CASH,
         )
         return equity_curve.astype(float), trades
     signal = _strategy_signal_series(strategy_name, frame, holding, params)

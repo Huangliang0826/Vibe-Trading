@@ -63,6 +63,43 @@ def test_strategy_context_ignores_rows_after_as_of():
     assert second.data_as_of == first.data_as_of == as_of.isoformat()
 
 
+@pytest.mark.parametrize(
+    "strategy_name",
+    [
+        "dca_then_hold",
+        "dca_two_year_then_hold",
+        "dca_one_year_then_hold",
+        "accelerated_dca_entry",
+        "deep_drawdown_recovery",
+    ],
+)
+def test_evaluate_frame_handles_executor_simulated_strategies(strategy_name: str):
+    # These strategies are simulated bar-by-bar in the executor and are NOT
+    # handled by generate_signals; routing them there previously raised
+    # "Unknown strategy". They must evaluate without crashing.
+    holding = PaperHolding(symbol="0700", market="hk", allocation_pct=100)
+    frame = make_ohlcv("2020-01-01", periods=1700)
+
+    result = evaluate_frame(
+        frame, holding=holding, as_of=frame.index[-1].date(), strategy_names=(strategy_name,)
+    )
+
+    assert result.selected_strategy == strategy_name
+    assert 0.0 <= result.current_weight <= 100.0
+    assert result.signal_date == frame.index[-1].date().isoformat()
+
+
+def test_evaluate_frame_runs_over_all_default_strategies():
+    from src.opportunity_center.strategy_context import STRATEGY_NAMES
+
+    holding = PaperHolding(symbol="0700", market="hk", allocation_pct=100)
+    frame = make_ohlcv("2020-01-01", periods=1700)
+
+    result = evaluate_frame(frame, holding=holding, as_of=frame.index[-1].date())
+
+    assert result.selected_strategy in STRATEGY_NAMES
+
+
 def test_evaluate_frame_selects_strategy_on_training_only(monkeypatch: pytest.MonkeyPatch):
     holding = PaperHolding(symbol="0700", market="hk", allocation_pct=100)
     training = np.linspace(100.0, 200.0, 252)

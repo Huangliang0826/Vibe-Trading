@@ -124,6 +124,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["agent/tests"]
 pythonpath = ["agent"]
+# importlib mode lets duplicate test basenames (test_routes.py, test_service.py,
+# ...) coexist across subpackages without the legacy "prepend" collection clash.
+addopts = "--import-mode=importlib"
 markers = [
     "unit: Unit tests (fast, no network)",
     "integration: Integration tests (may need network)",

@@ -118,9 +118,18 @@ def test_market_trigger_rejects_unknown_market() -> None:
 
 
 def test_market_trigger_without_market_raises() -> None:
-    bad = Trigger(kind=TriggerKind.MARKET, market=None)
+    bad = Trigger(kind=TriggerKind.MARKET, market_key=None)
     with pytest.raises(ValueError):
         due_now(bad, 0)
+
+
+def test_non_market_triggers_default_market_key_to_none() -> None:
+    # Regression: the field was named ``market``, colliding with the ``market``
+    # factory classmethod, so its default became the bound method instead of
+    # None — leaving every interval/event trigger with a bogus market_key.
+    assert Trigger.interval(1_000).market_key is None
+    assert Trigger.event(lambda _state: True).market_key is None
+    assert Trigger.market("us_equity").market_key == "us_equity"
 
 
 # --------------------------------------------------------------------------- #
