@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 MAX_LOSS_PENALTY = 2.0  # mirrors the frontend balanceScore weight
 _MAX_WINDOWS = 20        # full 20-year span: up to 18 three-year windows + full history
 _MAX_HISTORY_YEARS = 20
+_BASELINE_STRATEGY = "buy_and_hold"  # honest yardstick every strategy must beat
+_ENSEMBLE_SIZE = 3       # top-k blend to dampen single-winner selection luck
 
 
 def _balance_score(metrics: Dict[str, Any]) -> float:
@@ -118,6 +120,97 @@ def _build_windows(
     return out
 
 
+def _mean_excess_vs_cells(
+    row: List[Optional[Dict[str, Any]]],
+    bh_row: List[Optional[Dict[str, Any]]],
+) -> Optional[float]:
+    """Mean per-window return difference vs buy & hold (paired windows only)."""
+    diffs = [
+        c["total_return"] - b["total_return"]
+        for c, b in zip(row, bh_row)
+        if c and b and c.get("status") == "ok" and b.get("status") == "ok"
+    ]
+    return round(float(np.mean(diffs)), 6) if diffs else None
+
+
+def _windows_beating(
+    row: List[Optional[Dict[str, Any]]],
+    bh_row: List[Optional[Dict[str, Any]]],
+) -> Optional[Dict[str, int]]:
+    """Count windows where the strategy's balance score beats buy & hold's."""
+    paired = [
+        (c, b)
+        for c, b in zip(row, bh_row)
+        if c and b and c.get("status") == "ok" and b.get("status") == "ok"
+    ]
+    if not paired:
+        return None
+    beating = sum(1 for c, b in paired if c["score"] > b["score"])
+    return {"beating": beating, "total": len(paired)}
+
+
+def _build_ensemble(
+    strategies: List[Dict[str, Any]],
+    cells: Dict[str, List[Optional[Dict[str, Any]]]],
+    curves: Dict[tuple, pd.Series],
+    windows: List[Dict[str, Any]],
+    initial_cash: float,
+    bh_cells: Optional[List[Optional[Dict[str, Any]]]],
+) -> Optional[Dict[str, Any]]:
+    """Equal-capital blend of the top-k mean-rank strategies.
+
+    Per window, each member's equity curve (run with the full ``initial_cash``)
+    is scaled by 1/k and summed — equivalent to splitting the capital, since
+    both engines charge percentage-based costs and allow fractional sizing.
+    Windows where any member failed are marked failed for the blend.
+    """
+    members = [s["name"] for s in strategies[:_ENSEMBLE_SIZE] if s["ok_count"] > 0]
+    if len(members) < 2:
+        return None
+
+    k = len(members)
+    ens_cells: List[Optional[Dict[str, Any]]] = []
+    for wi in range(len(windows)):
+        member_curves = [curves.get((name, wi)) for name in members]
+        if any(c is None or len(c) < 2 for c in member_curves):
+            ens_cells.append({"status": "failed"})
+            continue
+        union_index = member_curves[0].index
+        for c in member_curves[1:]:
+            union_index = union_index.union(c.index)
+        combined = sum(
+            c.reindex(union_index).ffill().fillna(initial_cash) for c in member_curves
+        ) / k
+        m = calc_metrics(combined, [], initial_cash, bars_per_year=None)
+        ens_cells.append({
+            "score": round(_balance_score(m), 6),
+            "total_return": round(float(m["total_return"]), 6),
+            "max_loss": round(float(m["max_loss"]), 6),
+            "status": "ok",
+        })
+
+    ok_cells = [c for c in ens_cells if c and c.get("status") == "ok"]
+    if not ok_cells:
+        return None
+    mean_score = round(float(np.mean([c["score"] for c in ok_cells])), 6)
+    winner_score = strategies[0].get("mean_score")
+    return {
+        "members": members,
+        "cells": ens_cells,
+        "ok_count": len(ok_cells),
+        "mean_score": mean_score,
+        "mean_return": round(float(np.mean([c["total_return"] for c in ok_cells])), 6),
+        "mean_max_loss": round(float(np.mean([c["max_loss"] for c in ok_cells])), 6),
+        "beats_winner": bool(winner_score is not None and mean_score > winner_score),
+        "mean_excess_vs_hold": (
+            _mean_excess_vs_cells(ens_cells, bh_cells) if bh_cells is not None else None
+        ),
+        "windows_beating_hold": (
+            _windows_beating(ens_cells, bh_cells) if bh_cells is not None else None
+        ),
+    }
+
+
 def run_robust_optimize(
     holdings: List[PaperHolding],
     start_date: str | None,
@@ -153,6 +246,9 @@ def run_robust_optimize(
     cells: Dict[str, List[Optional[Dict[str, Any]]]] = {
         spec["name"]: [None] * len(windows) for spec in strategy_specs
     }
+    # Equity curves kept per (strategy, window) so the top-k ensemble can be
+    # built by summing scaled curves instead of re-running the backtests.
+    curves: Dict[tuple, pd.Series] = {}
 
     for wi, w in enumerate(windows):
         sliced = {
@@ -177,6 +273,7 @@ def run_robust_optimize(
                     "max_loss": round(float(m["max_loss"]), 6),
                     "status": "ok",
                 }
+                curves[(name, wi)] = equity_series.astype(float)
             except Exception as exc:  # noqa: BLE001 — a strategy may not fit a window
                 logger.debug("robust: %s failed on window %s: %s", name, w["label"], exc)
                 cells[name][wi] = {"status": "failed"}
@@ -233,6 +330,36 @@ def run_robust_optimize(
     strategies.sort(key=sort_key)
     best_name = strategies[0]["name"] if strategies else None
 
+    # ── Buy & hold baseline (direction: honest yardstick) ──────────────────
+    # Every strategy row gains its mean excess return over buy & hold and the
+    # number of windows in which it actually beat holding, so a "winner" that
+    # merely rode the underlying's rise is visible as such.
+    bh_cells = cells.get(_BASELINE_STRATEGY)
+    baseline = None
+    if bh_cells is not None:
+        bh_row = next((s for s in strategies if s["name"] == _BASELINE_STRATEGY), None)
+        if bh_row is not None:
+            baseline = {
+                "name": _BASELINE_STRATEGY,
+                "mean_rank": bh_row["mean_rank"],
+                "mean_return": bh_row["mean_return"],
+                "mean_max_loss": bh_row["mean_max_loss"],
+                "mean_score": bh_row["mean_score"],
+            }
+        for s in strategies:
+            s["mean_excess_vs_hold"] = _mean_excess_vs_cells(cells[s["name"]], bh_cells)
+            s["windows_beating_hold"] = _windows_beating(cells[s["name"]], bh_cells)
+
+    # ── Top-k equal-capital ensemble (direction: dampen selection luck) ────
+    # Picking the argmax of ~30 candidates on shared data overstates the
+    # winner. Splitting capital equally across the top-k mean-rank strategies
+    # trades a little peak performance for much lower selection variance. The
+    # blend is the scaled sum of member equity curves — engines cost
+    # percentage-wise, so curves are linear in starting cash.
+    ensemble = _build_ensemble(
+        strategies, cells, curves, windows, initial_cash, bh_cells,
+    )
+
     return {
         "windows": [
             {"label": w["label"], "start": w["start"].strftime("%Y-%m-%d"),
@@ -241,6 +368,8 @@ def run_robust_optimize(
         ],
         "strategies": strategies,
         "best_strategy": best_name,
+        "baseline": baseline,
+        "ensemble": ensemble,
         "window_years": window_years,
         "step_years": step_years,
         "data_start": span_start.strftime("%Y-%m-%d"),

@@ -929,6 +929,11 @@ export interface RobustCell {
   max_loss?: number;
 }
 
+export interface RobustBeatCount {
+  beating: number;
+  total: number;
+}
+
 export interface RobustStrategyRow {
   name: string;
   cells: RobustCell[];
@@ -939,12 +944,36 @@ export interface RobustStrategyRow {
   mean_score: number | null;
   mean_return: number;
   mean_max_loss: number;
+  mean_excess_vs_hold?: number | null;
+  windows_beating_hold?: RobustBeatCount | null;
+}
+
+export interface RobustBaseline {
+  name: string;
+  mean_rank: number;
+  mean_return: number;
+  mean_max_loss: number;
+  mean_score: number | null;
+}
+
+export interface RobustEnsemble {
+  members: string[];
+  cells: RobustCell[];
+  ok_count: number;
+  mean_score: number;
+  mean_return: number;
+  mean_max_loss: number;
+  beats_winner: boolean;
+  mean_excess_vs_hold: number | null;
+  windows_beating_hold: RobustBeatCount | null;
 }
 
 export interface RobustOptimizeResult {
   windows: RobustWindow[];
   strategies: RobustStrategyRow[];
   best_strategy: string | null;
+  baseline?: RobustBaseline | null;
+  ensemble?: RobustEnsemble | null;
   window_years: number;
   step_years: number;
   data_start: string;

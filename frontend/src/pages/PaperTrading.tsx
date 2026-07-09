@@ -1136,6 +1136,46 @@ export function PaperTrading() {
               })()}
             </div>
           )}
+          {(robustResult.baseline || robustResult.ensemble) && (
+            <div className="mb-3 grid gap-2 sm:grid-cols-2">
+              {robustResult.baseline && (() => {
+                const winner = robustResult.strategies.find((s) => s.name === robustResult.best_strategy);
+                const beat = winner?.windows_beating_hold;
+                const excess = winner?.mean_excess_vs_hold;
+                const winnerBeatsHold = beat != null && beat.beating > beat.total / 2;
+                return (
+                  <div className="rounded-lg border px-3 py-2 text-xs leading-5">
+                    <span className="font-medium">对照基准 · 买入持有</span>
+                    <span className="ml-2 text-muted-foreground">平均收益 <span className="font-semibold tabular-nums text-foreground">{pct(robustResult.baseline.mean_return)}</span> · 平均排名 {robustResult.baseline.mean_rank}</span>
+                    {winner && beat != null && (
+                      <div className={cn("mt-0.5", winnerBeatsHold ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-400")}>
+                        最稳健策略跑赢持有 <span className="font-semibold tabular-nums">{beat.beating}/{beat.total}</span> 个窗口
+                        {excess != null && <>，窗口平均超额 <span className="font-semibold tabular-nums">{pct(excess)}</span></>}
+                        {!winnerBeatsHold && "——策略优势不明显，直接持有可能更省心"}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {robustResult.ensemble && (
+                <div className="rounded-lg border px-3 py-2 text-xs leading-5">
+                  <span className="font-medium">前 {robustResult.ensemble.members.length} 名等资金组合</span>
+                  <span className="ml-2 text-muted-foreground">
+                    {robustResult.ensemble.members.map((m) => STRATEGY_LABELS[m as StrategyName] || m).join(" + ")}
+                  </span>
+                  <div className="mt-0.5 text-muted-foreground">
+                    窗口平均收益 <span className="font-semibold tabular-nums text-foreground">{pct(robustResult.ensemble.mean_return)}</span>
+                    {robustResult.ensemble.windows_beating_hold && (
+                      <>，跑赢持有 <span className="font-semibold tabular-nums text-foreground">{robustResult.ensemble.windows_beating_hold.beating}/{robustResult.ensemble.windows_beating_hold.total}</span> 窗口</>
+                    )}
+                    {robustResult.ensemble.beats_winner
+                      ? <span className="ml-1 text-emerald-700 dark:text-emerald-300">平衡得分优于单一冠军，分散更稳</span>
+                      : <span className="ml-1">得分略低于冠军，但降低了押错单一策略的风险</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-xs">
               <thead>
@@ -1147,6 +1187,12 @@ export function PaperTrading() {
                   <th className="px-2 py-2 text-right font-medium whitespace-nowrap">平均排名</th>
                   <th className="px-2 py-2 text-right font-medium whitespace-nowrap">最差</th>
                   <th className="px-2 py-2 text-right font-medium whitespace-nowrap">波动</th>
+                  {robustResult.baseline && (
+                    <>
+                      <th className="px-2 py-2 text-right font-medium whitespace-nowrap">超额vs持有</th>
+                      <th className="px-2 py-2 text-right font-medium whitespace-nowrap">赢持有</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -1177,6 +1223,21 @@ export function PaperTrading() {
                       <td className="px-2 py-2 text-right font-semibold tabular-nums">{s.mean_rank}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.worst_rank}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.rank_std}</td>
+                      {robustResult.baseline && (
+                        <>
+                          <td className={cn(
+                            "px-2 py-2 text-right tabular-nums",
+                            s.mean_excess_vs_hold == null ? "text-muted-foreground/50"
+                              : s.mean_excess_vs_hold > 0 ? "text-emerald-700 dark:text-emerald-300"
+                              : "text-red-600 dark:text-red-400",
+                          )}>
+                            {s.mean_excess_vs_hold != null ? pct(s.mean_excess_vs_hold) : "—"}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">
+                            {s.windows_beating_hold ? `${s.windows_beating_hold.beating}/${s.windows_beating_hold.total}` : "—"}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -1185,6 +1246,7 @@ export function PaperTrading() {
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground/80">
             单元格为该策略在对应窗口内的排名（1=最佳，绿色越深越靠前；“—”=该窗口数据不足或回测失败）。平均排名越低越稳健；最差/波动反映一致性。
+            超额vs持有 = 各窗口收益减去买入持有的平均值；赢持有 = 平衡得分胜过买入持有的窗口数——跑不赢持有的策略，复杂度本身就是成本。
           </p>
         </div>
       )}
