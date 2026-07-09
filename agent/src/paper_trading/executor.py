@@ -106,6 +106,11 @@ def evaluate_strategy(
             initial_cash, equity_holdings, data_map, params,
         )
 
+    if strategy_name == "value_averaging":
+        return _run_value_averaging(
+            initial_cash, equity_holdings, data_map, params,
+        )
+
     if strategy_name in {"dca", "smart_dca", "dca_then_hold", "dca_one_year_then_hold", "dca_two_year_then_hold"}:
         deploy_years = None
         if strategy_name in {"dca_then_hold", "dca_one_year_then_hold", "dca_two_year_then_hold"}:
@@ -273,6 +278,133 @@ def _run_dca(
             holding_bars=(last_ts - b["time"]).days,
             commission=0.0,
         ))
+
+    return equity_series, trades
+
+
+def _run_value_averaging(
+    initial_cash: float,
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> tuple:
+    """Edleson value averaging: steer market value onto a linear target path.
+
+    Instead of investing a fixed amount per period (DCA), each holding's
+    market value is pulled back onto a target path that rises linearly from 0
+    to its full allocation across the backtest window in monthly steps. Below
+    the path we buy the shortfall (bounded by cash) — mechanically buying more
+    after drops; above it we sell the surplus back to the path, harvesting
+    rally gains into cash that funds later buys. Sells realise PnL FIFO
+    against open buy lots.
+    """
+    frequency = params.get("frequency", "monthly")
+    freq = _FREQ_MAP.get(frequency, "MS")
+
+    code_map = {_to_code(h): h for h in holdings}
+    valid_codes = sorted(c for c in code_map if c in data_map)
+    if not valid_codes:
+        raise ValueError("No valid codes with data for value averaging")
+
+    all_dates = sorted(set().union(*(data_map[c].index for c in valid_codes)))
+    if not all_dates:
+        raise ValueError("No trading dates")
+
+    trading_idx = pd.DatetimeIndex(all_dates)
+    calendar_va = pd.date_range(start=all_dates[0], end=all_dates[-1], freq=freq)
+    va_dates: list = [trading_idx[0]]
+    for d in calendar_va:
+        future = trading_idx[trading_idx >= d]
+        if len(future) > 0 and future[0] not in va_dates:
+            va_dates.append(future[0])
+    va_dates.sort()
+    step_index = {ts: i + 1 for i, ts in enumerate(va_dates)}
+    n_steps = len(va_dates)
+
+    target_alloc = {
+        c: initial_cash * (code_map[c].allocation_pct / 100.0) for c in valid_codes
+    }
+    shares: Dict[str, float] = {c: 0.0 for c in valid_codes}
+    open_buys: Dict[str, List[Dict[str, Any]]] = {c: [] for c in valid_codes}
+    cash = initial_cash
+
+    equity_points: List[tuple] = []
+    trades: List[TradeRecord] = []
+
+    for ts in all_dates:
+        step = step_index.get(ts)
+        if step is not None:
+            for c in valid_codes:
+                if ts not in data_map[c].index:
+                    continue
+                price = float(data_map[c].loc[ts, "open"])
+                if price <= 0:
+                    continue
+                target_value = target_alloc[c] * (step / n_steps)
+                diff = target_value - shares[c] * price
+                if diff > 0 and cash > 0:
+                    amount = min(diff, cash)
+                    bought = amount / price
+                    shares[c] += bought
+                    cash -= amount
+                    open_buys[c].append({"time": ts, "price": price, "shares": bought})
+                elif diff < 0 and shares[c] > 1e-10:
+                    quantity = min(-diff / price, shares[c])
+                    remaining = quantity
+                    while remaining > 1e-10 and open_buys[c]:
+                        entry = open_buys[c][0]
+                        sold = min(remaining, entry["shares"])
+                        pnl = sold * (price - entry["price"])
+                        trades.append(TradeRecord(
+                            symbol=c, direction=1,
+                            entry_price=round(entry["price"], 4), exit_price=round(price, 4),
+                            entry_time=entry["time"], exit_time=ts,
+                            size=round(sold, 4), leverage=1.0,
+                            pnl=round(pnl, 2),
+                            pnl_pct=round((price / entry["price"] - 1) * 100, 4),
+                            exit_reason="value_path_harvest",
+                            holding_bars=(ts - entry["time"]).days,
+                            commission=0.0,
+                        ))
+                        entry["shares"] -= sold
+                        remaining -= sold
+                        if entry["shares"] <= 1e-10:
+                            open_buys[c].pop(0)
+                    executed = quantity - remaining
+                    shares[c] -= executed
+                    cash += executed * price
+
+        portfolio_value = cash
+        for c in valid_codes:
+            if ts in data_map[c].index:
+                portfolio_value += shares[c] * float(data_map[c].loc[ts, "close"])
+            elif shares[c] > 0 and equity_points:
+                portfolio_value += shares[c] * _last_close(c, data_map, ts)
+        equity_points.append((ts, portfolio_value))
+
+    equity_series = pd.Series(
+        [e for _, e in equity_points],
+        index=pd.DatetimeIndex([t for t, _ in equity_points]),
+    )
+
+    last_ts = all_dates[-1]
+    for c in valid_codes:
+        exit_price = _last_close(c, data_map, last_ts)
+        for entry in open_buys[c]:
+            if entry["shares"] <= 1e-10 or exit_price <= 0:
+                continue
+            pnl = entry["shares"] * (exit_price - entry["price"])
+            trades.append(TradeRecord(
+                symbol=c, direction=1,
+                entry_price=round(entry["price"], 4), exit_price=round(exit_price, 4),
+                entry_time=entry["time"], exit_time=last_ts,
+                size=round(entry["shares"], 4), leverage=1.0,
+                pnl=round(pnl, 2),
+                pnl_pct=round((exit_price / entry["price"] - 1) * 100, 4),
+                exit_reason="end_of_backtest",
+                holding_bars=(last_ts - entry["time"]).days,
+                commission=0.0,
+            ))
 
     return equity_series, trades
 

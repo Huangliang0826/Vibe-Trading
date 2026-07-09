@@ -179,7 +179,7 @@ def test_forecast_catalog_matches_paper_trading_options():
         "dual_momentum", "atr_trend_stop", "mean_reversion_scaleout",
         "enhanced_dca_trend", "breakout_pullback", "quality_momentum",
         "low_volatility_rotation", "volatility_squeeze_breakout", "risk_parity",
-        "price_volume_efficiency",
+        "price_volume_efficiency", "ma200_timing", "value_averaging",
     )
 
 

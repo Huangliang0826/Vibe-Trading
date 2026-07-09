@@ -53,6 +53,8 @@ STRATEGY_LABELS: dict[str, str] = {
     "volatility_squeeze_breakout": "波动压缩突破",
     "risk_parity": "组合风险平价",
     "price_volume_efficiency": "量价效率轮动",
+    "ma200_timing": "200日均线择时",
+    "value_averaging": "价值平均定投",
 }
 
 STRATEGY_PRINCIPLES: dict[str, str] = {
@@ -85,6 +87,8 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "volatility_squeeze_breakout": "策略原理：先等待布林带宽度/波动率降到历史低分位，随后只有价格向上突破且成交量确认时买入，捕捉压缩后的趋势释放。",
     "risk_parity": "策略原理：按近期波动率反向分配组合权重，波动大的标的少配，波动小的标的多配，让组合风险贡献更均衡。",
     "price_volume_efficiency": "策略原理：把价格行为切成上涨效率和下跌效率，再看成交量是否配合；上涨高效且放量确认加分，下跌高效且放量确认扣分，最后按综合 rank 轮动持有前几名。",
+    "ma200_timing": "策略原理：收盘价站上 200 日均线时满仓持有，跌破则清仓持币等待，用最简单的长期趋势过滤避开深度熊市。",
+    "value_averaging": "策略原理：让持仓市值沿预定路径逐月增长——低于路径补足缺口（跌得越多买得越多），高于路径卖出盈余落袋，比普通定投更贴近低买高卖。",
 }
 
 STRATEGY_NAMES: tuple[str, ...] = tuple(STRATEGY_LABELS)
@@ -375,8 +379,10 @@ def _robust_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def strategy_params(strategy_name: str) -> dict[str, Any]:
-    if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend", "dca_then_hold", "dca_two_year_then_hold"}:
+    if strategy_name in {"dca", "smart_dca", "enhanced_dca_trend", "dca_then_hold", "dca_two_year_then_hold", "value_averaging"}:
         return {"frequency": "monthly"}
+    if strategy_name == "ma200_timing":
+        return {"window": 200}
     if strategy_name == "grid":
         return {"grid_count": 5}
     if strategy_name == "accelerated_dca_entry":

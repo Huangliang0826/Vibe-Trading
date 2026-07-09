@@ -90,7 +90,9 @@ type StrategyName =
   | "risk_parity"
   | "price_volume_efficiency"
   | "accelerated_dca_entry"
-  | "deep_drawdown_recovery";
+  | "deep_drawdown_recovery"
+  | "ma200_timing"
+  | "value_averaging";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -122,6 +124,8 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "volatility_squeeze_breakout", label: "波动压缩突破", desc: "低波动压缩后向上突破且放量时买入" },
   { value: "risk_parity", label: "组合风险平价", desc: "按近期波动反向分配仓位，让高波动标的少配" },
   { value: "price_volume_efficiency", label: "量价效率轮动", desc: "买上涨高效且放量确认、下跌风险较低的标的" },
+  { value: "ma200_timing", label: "200日均线择时", desc: "站上200日均线满仓，跌破清仓持币，避开深度熊市" },
+  { value: "value_averaging", label: "价值平均定投", desc: "市值沿目标路径逐月增长，跌多补、涨多卖，低买高卖" },
 ];
 
 const STRATEGY_LABELS = Object.fromEntries(
@@ -174,6 +178,8 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   price_volume_efficiency: "策略原理：把价格行为切成上涨效率和下跌效率，再看成交量是否配合；上涨高效且放量确认加分，下跌高效且放量确认扣分，最后按综合 rank 轮动持有前几名。",
   accelerated_dca_entry: "策略原理：T0先投入目标预算的25%，剩余75%在之后十二个月的首个交易日按固定基础金额投入；相对T0收盘回撤达到10%时当期投入总预算的20%，达到20%时一次性投入全部剩余资金。",
   deep_drawdown_recovery: "策略原理：价格相对此前三年的最高收盘价下跌40%后开始建仓，将资金分十份、每隔一个月投入一份；收盘价达到加权平均成本的140%后锁定退出计划，从下一交易日开始分五份、每隔一个月卖出一份。触发退出后即使价格回落也继续执行。",
+  ma200_timing: "策略原理：收盘价站上200日均线时满仓持有，跌破则清仓持币等待，用最简单的长期趋势过滤避开深度熊市；代价是震荡市里可能被反复打止损。",
+  value_averaging: "策略原理：让持仓市值沿预定路径逐月增长——低于路径就补足缺口（跌得越多买得越多），高于路径就卖出盈余落袋，比普通定投更贴近低买高卖。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {

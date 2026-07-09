@@ -46,6 +46,7 @@ _EXECUTOR_SIMULATED = {
     "dca_one_year_then_hold",
     "accelerated_dca_entry",
     "deep_drawdown_recovery",
+    "value_averaging",
 }
 
 # Number of monthly tranches over which each executor-simulated strategy ramps
@@ -58,6 +59,9 @@ _DEPLOY_RAMP_STEPS = {
     # deep_drawdown_recovery deploys on drawdowns and takes profit on the way
     # up, so no fixed window fits; a one-year ramp is a coarse action proxy.
     "deep_drawdown_recovery": 12,
+    # value_averaging climbs a linear value path across the whole window; a
+    # one-year ramp is the closest fixed-window action proxy.
+    "value_averaging": 12,
 }
 
 

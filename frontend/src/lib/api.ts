@@ -897,7 +897,9 @@ export interface PaperStrategyConfig {
     | "risk_parity"
     | "price_volume_efficiency"
     | "accelerated_dca_entry"
-    | "deep_drawdown_recovery";
+    | "deep_drawdown_recovery"
+    | "ma200_timing"
+    | "value_averaging";
   params: Record<string, unknown>;
 }
 

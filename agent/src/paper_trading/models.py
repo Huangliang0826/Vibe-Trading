@@ -54,6 +54,8 @@ class StrategyConfig(BaseModel):
         "price_volume_efficiency",
         "accelerated_dca_entry",
         "deep_drawdown_recovery",
+        "ma200_timing",
+        "value_averaging",
     ] = "buy_and_hold"
     params: dict[str, Any] = Field(default_factory=dict)
 

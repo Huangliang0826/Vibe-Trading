@@ -219,6 +219,35 @@ def generate_moving_average_cross(
     return signal_map
 
 
+# ── 200-day SMA timing (Faber's 10-month timing on daily bars) ──────────────
+
+def generate_ma200_timing(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Hold while the close sits above its long SMA, go to cash below it.
+
+    Meb Faber's classic timing rule (10-month SMA ≈ 200 trading days): fully
+    invested when close > SMA, fully in cash otherwise. No position scaling,
+    no second indicator — the entire edge is sidestepping deep bear legs.
+    Until the SMA has a full window of history the signal stays in cash.
+    """
+    window = max(int(params.get("window", 200)), 20)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        if code not in data_map:
+            continue
+        close = data_map[code]["close"].astype(float)
+        if close.empty:
+            continue
+        sma = close.rolling(window, min_periods=window).mean()
+        signal_map[code] = ((close > sma).astype(float) * _weight(h)).reindex(close.index).fillna(0.0)
+    return signal_map
+
+
 # ── RSI Reversion ────────────────────────────────────────────────────────────
 
 def generate_rsi_reversion(
@@ -1302,6 +1331,8 @@ def generate_signals(
         return generate_momentum_breakout(holdings, data_map, params)
     if strategy_name == "moving_average_cross":
         return generate_moving_average_cross(holdings, data_map, params)
+    if strategy_name == "ma200_timing":
+        return generate_ma200_timing(holdings, data_map, params)
     if strategy_name == "rsi_reversion":
         return generate_rsi_reversion(holdings, data_map, params)
     if strategy_name == "volatility_target":

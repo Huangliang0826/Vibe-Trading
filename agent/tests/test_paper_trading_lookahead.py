@@ -283,3 +283,106 @@ def test_price_volume_efficiency_rotation_prefers_clean_upside_with_volume_confi
     assert set(signals) == {"0700.HK", "9988.HK"}
     assert signals["0700.HK"].iloc[-1] == 1.0
     assert signals["9988.HK"].iloc[-1] == 0.0
+
+
+# ── ma200_timing ─────────────────────────────────────────────────────────────
+
+def test_ma200_timing_holds_above_sma_and_exits_below():
+    from src.paper_trading.strategies import generate_ma200_timing
+
+    holding = PaperHolding(symbol="NVDA", market="us", allocation_pct=100)
+    # 20-bar SMA (the function's minimum window): flat, then surge, then crash.
+    closes = [100.0] * 30 + [120.0] * 10 + [60.0] * 10
+    frame = _price_frame(closes)
+
+    signal = generate_ma200_timing([holding], {"NVDA.US": frame}, {"window": 20})["NVDA.US"]
+
+    # Warm-up / flat stretch: close never exceeds the SMA → in cash.
+    assert (signal.iloc[:30] == 0.0).all()
+    # Surge above the SMA → fully invested.
+    assert (signal.iloc[31:40] == 1.0).all()
+    # Crash below the SMA → back to cash by the last bars.
+    assert signal.iloc[-1] == 0.0
+
+
+def test_ma200_timing_stays_in_cash_without_enough_history():
+    from src.paper_trading.strategies import generate_ma200_timing
+
+    holding = PaperHolding(symbol="NVDA", market="us", allocation_pct=100)
+    frame = _price_frame(list(range(100, 150)))  # 50 bars < 200 window
+
+    signal = generate_ma200_timing([holding], {"NVDA.US": frame}, {})["NVDA.US"]
+
+    assert (signal == 0.0).all()
+
+
+def test_ma200_timing_is_dispatched_by_generate_signals():
+    holding = PaperHolding(symbol="NVDA", market="us", allocation_pct=100)
+    frame = _price_frame([100.0] * 30)
+
+    signal_map = generate_signals([holding], {"NVDA.US": frame}, "ma200_timing", {"window": 10})
+
+    assert "NVDA.US" in signal_map
+
+
+# ── value_averaging ──────────────────────────────────────────────────────────
+
+def _month_frame(monthly_first_prices, days_per_month=21):
+    """Daily frame where each month trades flat at the given price."""
+    closes = []
+    for price in monthly_first_prices:
+        closes.extend([float(price)] * days_per_month)
+    idx = pd.bdate_range("2024-01-01", periods=len(closes))
+    close = pd.Series(closes, index=idx, dtype=float)
+    return pd.DataFrame(
+        {"open": close, "high": close, "low": close, "close": close,
+         "volume": pd.Series(1_000.0, index=idx)},
+        index=idx,
+    )
+
+
+def test_value_averaging_buys_shortfall_and_harvests_surplus():
+    from src.paper_trading.executor import _run_value_averaging
+
+    holding = PaperHolding(symbol="NVDA", market="us", allocation_pct=100)
+    # Flat, then doubles: after the price doubles the market value jumps far
+    # above the linear path, so the strategy must SELL (harvest).
+    frame = _month_frame([100, 100, 200, 200])
+    equity, trades = _run_value_averaging(
+        100_000.0, [holding], {"NVDA.US": frame}, {"frequency": "monthly"},
+    )
+
+    harvests = [t for t in trades if t.exit_reason == "value_path_harvest"]
+    assert harvests, "doubling above the path must trigger a harvest sell"
+    assert all(t.pnl > 0 for t in harvests)
+    # Equity curve exists for every trading day and ends positive.
+    assert len(equity) == len(frame)
+    assert equity.iloc[-1] > 0
+
+
+def test_value_averaging_buys_more_after_price_drops_than_dca_would():
+    from src.paper_trading.executor import _run_value_averaging
+
+    holding = PaperHolding(symbol="NVDA", market="us", allocation_pct=100)
+    # Price halves mid-way: value averaging must buy harder into the drop.
+    frame = _month_frame([100, 100, 50, 50])
+    _equity, trades = _run_value_averaging(
+        100_000.0, [holding], {"NVDA.US": frame}, {"frequency": "monthly"},
+    )
+
+    buys = [t for t in trades if t.exit_reason == "end_of_backtest"]
+    # Entry price 50 lot must be materially larger than the 100-price lots.
+    cheap = sum(t.size for t in buys if t.entry_price <= 50)
+    dear = sum(t.size for t in buys if t.entry_price >= 100)
+    assert cheap > dear
+
+
+def test_value_averaging_is_dispatched_by_evaluate_strategy():
+    holding = PaperHolding(symbol="NVDA", market="us", allocation_pct=100)
+    frame = _month_frame([100, 110, 90, 120])
+
+    equity, _trades = evaluate_strategy(
+        [holding], {"NVDA.US": frame}, "value_averaging", {"frequency": "monthly"}, 100_000.0,
+    )
+
+    assert len(equity) == len(frame)
