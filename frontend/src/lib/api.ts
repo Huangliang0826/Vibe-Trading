@@ -259,6 +259,11 @@ export const api = {
   getNewsCenterDigest: (date: string, language: "zh" | "en" = "zh") =>
     request<NewsCenterDigest>(`/news-center/digest?date=${encodeURIComponent(date)}&language=${language}`),
   refreshNewsCenter: () => request<NewsCenterRefreshResult>("/news-center/refresh", { method: "POST" }),
+  generateNewsAiDigest: (date: string, language: "zh" | "en" = "zh", force = false) =>
+    request<NewsCenterDigest>(
+      `/news-center/ai-digest?date=${encodeURIComponent(date)}&language=${language}${force ? "&force=true" : ""}`,
+      { method: "POST" },
+    ),
 
   // 行业研报库
   getIndustryReports: () =>
@@ -500,9 +505,12 @@ export interface NewsCenterArticle {
   language?: "zh" | "en";
 }
 export interface NewsCenterList { items: NewsCenterArticle[]; total: number; sectors: string[]; }
+export interface NewsAiMajorItem { title: string; summary: string; impact: "positive" | "negative" | "neutral"; }
 export interface NewsCenterDigest {
   date: string; article_count: number; watchlist_count: number; positive_count: number;
   negative_count: number; summary: string; major_items: NewsCenterArticle[];
+  ai_summary?: string | null; ai_major?: NewsAiMajorItem[];
+  ai_generated_at?: string | null; ai_model?: string | null;
 }
 export interface NewsCenterRefreshResult { fetched: number; total: number; latest_date?: string | null; }
 export interface NewsCenterFilters {

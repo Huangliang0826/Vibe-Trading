@@ -32,6 +32,12 @@ class NewsCenterList(BaseModel):
     sectors: list[str]
 
 
+class NewsAiMajorItem(BaseModel):
+    title: str
+    summary: str = ""
+    impact: str = "neutral"
+
+
 class NewsCenterDigest(BaseModel):
     date: str
     article_count: int
@@ -40,6 +46,10 @@ class NewsCenterDigest(BaseModel):
     negative_count: int
     summary: str
     major_items: list[NewsCenterArticle]
+    ai_summary: str | None = None
+    ai_major: list[NewsAiMajorItem] = Field(default_factory=list)
+    ai_generated_at: str | None = None
+    ai_model: str | None = None
 
 
 class NewsCenterRefreshResult(BaseModel):

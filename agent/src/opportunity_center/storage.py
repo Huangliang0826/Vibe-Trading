@@ -126,6 +126,12 @@ class OpportunityStore:
                   payload_json TEXT NOT NULL, created_at TEXT NOT NULL,
                   PRIMARY KEY(article_id, market, code, analysis_date, prompt_version)
                 );
+                CREATE TABLE IF NOT EXISTS news_ai_digests (
+                  date_key TEXT NOT NULL, language TEXT NOT NULL,
+                  payload_json TEXT NOT NULL, model TEXT NOT NULL,
+                  generated_at TEXT NOT NULL,
+                  PRIMARY KEY(date_key, language)
+                );
                 CREATE TABLE IF NOT EXISTS opportunity_snapshots (
                   market TEXT NOT NULL, code TEXT NOT NULL, snapshot_date TEXT NOT NULL,
                   score_version TEXT NOT NULL, strategy_version TEXT NOT NULL,
@@ -552,6 +558,37 @@ class OpportunityStore:
                 ),
             )
         return impact
+
+    def get_news_ai_digest(self, date_key: str, language: str) -> dict | None:
+        """Cached AI daily digest payload, or None when not yet generated."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json, model, generated_at FROM news_ai_digests"
+                " WHERE date_key = ? AND language = ?",
+                (date_key, language),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["payload_json"])
+        payload["model"] = row["model"]
+        payload["generated_at"] = row["generated_at"]
+        return payload
+
+    def save_news_ai_digest(
+        self, date_key: str, language: str, payload: dict, model: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO news_ai_digests (date_key, language, payload_json, model, generated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(date_key, language) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    model = excluded.model,
+                    generated_at = excluded.generated_at
+                """,
+                (date_key, language, json.dumps(payload, ensure_ascii=False), model, utc_now()),
+            )
 
     def create_job(
         self,

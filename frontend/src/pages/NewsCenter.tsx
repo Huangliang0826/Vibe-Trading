@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Loader2, Newspaper, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ExternalLink, Loader2, Newspaper, RefreshCw, Search, Sparkles } from "lucide-react";
 import { api, type NewsCenterArticle, type NewsCenterDigest, type NewsCenterList } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +25,34 @@ export function NewsCenter() {
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefreshing, setAutoRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  // One auto-generation attempt per date+language per mount; failures don't retry on filter changes.
+  const aiAttempted = useRef(new Set<string>());
+  const currentViewKey = useRef("");
+
+  const generateAi = useCallback(async (selectedDate: string, lang: "zh" | "en", force = false) => {
+    const key = `${selectedDate}:${lang}`;
+    if (!force && aiAttempted.current.has(key)) return;
+    aiAttempted.current.add(key);
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const result = await api.generateNewsAiDigest(selectedDate, lang, force);
+      // Only apply if the user hasn't navigated to another day/language meanwhile.
+      if (currentViewKey.current === key) setDigest(result);
+    } catch (reason) {
+      if (currentViewKey.current === key) setAiError(reason instanceof Error ? reason.message : "AI 总结生成失败");
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async (selectedDate: string) => {
     if (!selectedDate) return;
     setLoading(true);
     setError(null);
+    currentViewKey.current = `${selectedDate}:${language}`;
     try {
       const [articles, daily] = await Promise.all([
         api.getNewsCenterArticles({
@@ -41,12 +64,18 @@ export function NewsCenter() {
       ]);
       setData(articles);
       setDigest(daily);
+      // 仅中文 Tab、且查看的是今天时自动生成 AI 联网简报（纯联网搜索，
+      // 历史日期无法回溯当天热点，只展示当天已缓存的版本）。
+      const today = new Date().toISOString().slice(0, 10);
+      if (language === "zh" && selectedDate === today && !daily.ai_summary) {
+        void generateAi(selectedDate, language);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "新闻加载失败");
     } finally {
       setLoading(false);
     }
-  }, [sector, direction, query, watchlistOnly, language]);
+  }, [sector, direction, query, watchlistOnly, language, generateAi]);
 
   useEffect(() => {
     api.getNewsCenterDates().then((items) => {
@@ -124,12 +153,52 @@ export function NewsCenter() {
       </div>
 
       <section className="border-b py-6">
-        <div className="flex items-center justify-between"><h2 className="text-sm font-semibold">今日投资简报</h2><span className="text-xs text-muted-foreground">{digest?.article_count ?? 0} 条新闻</span></div>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground">{digest?.summary || (autoRefreshing ? "正在获取今日新闻…(每天首次打开自动更新)" : loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。")}</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold">今日投资简报</h2>
+            {digest?.ai_summary && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />AI 联网总结</span>
+            )}
+            {digest?.ai_summary && !aiLoading && (
+              <button aria-label="重新生成 AI 简报" title="重新生成" onClick={() => void generateAi(date, language, true)} className="text-muted-foreground hover:text-foreground"><RefreshCw className="h-3 w-3" /></button>
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground">{digest?.article_count ?? 0} 条新闻</span>
+        </div>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground">
+          {digest?.ai_summary
+            || digest?.summary
+            || (autoRefreshing ? "正在获取今日新闻…(每天首次打开自动更新)" : loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。")}
+        </p>
+        {language === "zh" && aiLoading && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />AI 正在联网总结当日新闻…</p>}
+        {language === "zh" && aiError && !aiLoading && <p className="mt-2 text-xs text-amber-600">AI 总结暂不可用：{aiError}</p>}
         {digest && <div className="mt-3 flex gap-4 text-xs text-muted-foreground"><span>自选股 {digest.watchlist_count}</span><span className="text-red-500">利好 {digest.positive_count}</span><span className="text-emerald-600">利空 {digest.negative_count}</span></div>}
       </section>
 
-      {digest && digest.major_items.length > 0 && <section className="border-b py-6"><h2 className="mb-3 text-sm font-semibold">重大新闻</h2><div className="divide-y">{digest.major_items.map((item) => <NewsRow key={item.article_id} item={item} compact />)}</div></section>}
+      {digest && (digest.ai_major?.length ?? 0) > 0 ? (
+        <section className="border-b py-6">
+          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />AI 联网总结</span></div>
+          <div className="divide-y">
+            {digest.ai_major!.map((item, index) => (
+              <article key={index} className="py-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{item.title}</p>
+                    {item.summary && <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.summary}</p>}
+                  </div>
+                  <div className="shrink-0 text-[11px]">
+                    {item.impact === "positive" ? <span className="text-red-500">利好</span>
+                      : item.impact === "negative" ? <span className="text-emerald-600">利空</span>
+                      : <span className="text-muted-foreground">中性</span>}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : digest && digest.major_items.length > 0 ? (
+        <section className="border-b py-6"><h2 className="mb-3 text-sm font-semibold">今日重大新闻</h2><div className="divide-y">{digest.major_items.map((item) => <NewsRow key={item.article_id} item={item} compact />)}</div></section>
+      ) : null}
 
       <section className="py-6">
         <div className="flex flex-wrap items-center gap-2">

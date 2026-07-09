@@ -5,7 +5,13 @@ from pathlib import Path
 import re
 from typing import Any
 
+from src.news_center.ai_digest import (
+    ArkDigestClient,
+    build_digest_prompt,
+    parse_digest_output,
+)
 from src.news_center.models import (
+    NewsAiMajorItem,
     NewsCenterArticle,
     NewsCenterDigest,
     NewsCenterList,
@@ -16,11 +22,18 @@ from src.opportunity_center.storage import OpportunityStore
 
 
 class NewsCenterService:
-    def __init__(self, *, store: Any | None = None, feed_ingestor: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        store: Any | None = None,
+        feed_ingestor: Any | None = None,
+        ai_client: Any | None = None,
+    ) -> None:
         self.store = store or OpportunityStore()
         self.feed_ingestor = feed_ingestor or FeedIngestor(
             self.store, Path(__file__).parents[1] / "opportunity_center" / "sources.json"
         )
+        self.ai_client = ai_client or ArkDigestClient()
 
     def list_articles(
         self,
@@ -77,7 +90,7 @@ class NewsCenterService:
                 f"{date_key} 共收录 {len(items)} 条新闻，其中 {watchlist} 条关联自选股。"
                 f"重点关注：{headlines}。"
             )
-        return NewsCenterDigest(
+        digest = NewsCenterDigest(
             date=date_key,
             article_count=len(items),
             watchlist_count=watchlist,
@@ -86,6 +99,45 @@ class NewsCenterService:
             summary=summary,
             major_items=major,
         )
+        return self._merge_ai_digest(digest, date_key, language)
+
+    def _merge_ai_digest(
+        self, digest: NewsCenterDigest, date_key: str, language: str,
+    ) -> NewsCenterDigest:
+        """Attach the cached AI briefing when one exists (never generates)."""
+        getter = getattr(self.store, "get_news_ai_digest", None)
+        cached = getter(date_key, language) if callable(getter) else None
+        if not cached:
+            return digest
+        digest.ai_summary = str(cached.get("briefing") or "") or None
+        digest.ai_major = [NewsAiMajorItem(**row) for row in cached.get("major") or []]
+        digest.ai_generated_at = cached.get("generated_at")
+        digest.ai_model = cached.get("model")
+        return digest
+
+    def generate_ai_digest(
+        self, date_key: str, language: str = "zh", force: bool = False,
+    ) -> NewsCenterDigest:
+        """Generate (or reuse) the Doubao web-search briefing for a day.
+
+        Chinese tab only — the briefing is sourced purely from Ark's web
+        search (collected articles are not fed in), and the English tab keeps
+        the template digest. Slow path — one Ark call (minutes); cached per
+        date, so subsequent ``get_digest`` calls are instant. ``force``
+        regenerates over an existing cache.
+        """
+        if language != "zh":
+            return self.get_digest(date_key, language=language)
+        if not force:
+            cached = self.store.get_news_ai_digest(date_key, language)
+            if cached:
+                return self.get_digest(date_key, language=language)
+        prompt = build_digest_prompt(date_key)
+        briefing, major = parse_digest_output(self.ai_client.generate(prompt))
+        self.store.save_news_ai_digest(
+            date_key, language, {"briefing": briefing, "major": major}, self.ai_client.model,
+        )
+        return self.get_digest(date_key, language=language)
 
     def refresh(self) -> NewsCenterRefreshResult:
         saved = self.feed_ingestor.refresh(datetime.now(timezone.utc))

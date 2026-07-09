@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Query, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Response
 
+from src.news_center.ai_digest import ArkDigestError
 from src.news_center.models import NewsCenterDigest, NewsCenterList, NewsCenterRefreshResult
 from src.news_center.service import NewsCenterService
 
@@ -52,6 +53,22 @@ def register_news_center_routes(
     ) -> NewsCenterDigest:
         response.headers["Cache-Control"] = "no-store"
         return service.get_digest(date_key, language=language)
+
+    @router.post("/ai-digest", response_model=NewsCenterDigest)
+    async def ai_digest(
+        response: Response,
+        date_key: str = Query(..., alias="date", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+        language: Literal["zh", "en"] = "zh",
+        force: bool = False,
+    ) -> NewsCenterDigest:
+        """Generate the Doubao web-search briefing (cached per date+language)."""
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return await asyncio.to_thread(
+                service.generate_ai_digest, date_key, language, force,
+            )
+        except ArkDigestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.post("/refresh", response_model=NewsCenterRefreshResult)
     async def refresh(response: Response) -> NewsCenterRefreshResult:
