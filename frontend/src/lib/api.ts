@@ -707,7 +707,7 @@ export interface ScanAccuracyHorizon {
 export interface ScanAccuracy {
   universe: string;
   total_tracked: number;
-  horizons: { fwd_1d: ScanAccuracyHorizon; fwd_5d: ScanAccuracyHorizon; fwd_20d: ScanAccuracyHorizon };
+  horizons: { fwd_1d: ScanAccuracyHorizon; fwd_5d: ScanAccuracyHorizon; fwd_10d: ScanAccuracyHorizon; fwd_20d: ScanAccuracyHorizon };
   timeseries: { date: string; n: number; mean_1d: number }[];
 }
 

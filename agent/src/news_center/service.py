@@ -133,7 +133,7 @@ class NewsCenterService:
             if cached:
                 return self.get_digest(date_key, language=language)
         prompt = build_digest_prompt(date_key)
-        briefing, major = parse_digest_output(self.ai_client.generate(prompt))
+        briefing, major = parse_digest_output(self.ai_client.generate(prompt), date_key)
         self.store.save_news_ai_digest(
             date_key, language, {"briefing": briefing, "major": major}, self.ai_client.model,
         )

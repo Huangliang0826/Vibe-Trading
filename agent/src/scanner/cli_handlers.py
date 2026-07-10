@@ -126,7 +126,7 @@ def dispatch(args: argparse.Namespace) -> int:
                     parts = [f"{r.symbol:<8} score={r.score:>5.1f}"]
                     if r.entry_price is not None:
                         parts.append(f"entry=${r.entry_price:.2f}")
-                    for h, attr in [("1d", "fwd_1d"), ("5d", "fwd_5d"), ("20d", "fwd_20d")]:
+                    for h, attr in [("1d", "fwd_1d"), ("5d", "fwd_5d"), ("10d", "fwd_10d"), ("20d", "fwd_20d")]:
                         val = getattr(r, attr)
                         if val is not None:
                             parts.append(f"{h}={val:+.2f}%")

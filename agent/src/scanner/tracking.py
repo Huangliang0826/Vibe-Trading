@@ -25,6 +25,7 @@ class TrackingRecord:
     entry_price: float | None = None  # T+1 open
     fwd_1d: float | None = None
     fwd_5d: float | None = None
+    fwd_10d: float | None = None
     fwd_20d: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -40,6 +41,7 @@ class TrackingRecord:
             entry_price=d.get("entry_price"),
             fwd_1d=d.get("fwd_1d"),
             fwd_5d=d.get("fwd_5d"),
+            fwd_10d=d.get("fwd_10d"),
             fwd_20d=d.get("fwd_20d"),
         )
 
@@ -104,6 +106,7 @@ _FIELD_AVAILABILITY_PAD_DAYS = [
     ("entry_price", 1),   # T+1 open
     ("fwd_1d", 2),        # T+2 close
     ("fwd_5d", 8),        # ~6 trading days out
+    ("fwd_10d", 15),      # ~11 trading days out
     ("fwd_20d", 28),      # ~21 trading days out
 ]
 # Past this age every fillable horizon has long elapsed; records still missing
@@ -242,7 +245,7 @@ def backfill_returns(
             continue
 
         # Forward returns: close on T+N relative to entry
-        for horizon, attr in [(1, "fwd_1d"), (5, "fwd_5d"), (20, "fwd_20d")]:
+        for horizon, attr in [(1, "fwd_1d"), (5, "fwd_5d"), (10, "fwd_10d"), (20, "fwd_20d")]:
             if len(sym_close) > horizon:
                 exit_price = float(sym_close.iloc[horizon])
                 setattr(rec, attr, round((exit_price / entry_price - 1) * 100, 4))
@@ -349,7 +352,7 @@ def compute_accuracy(records: list[TrackingRecord]) -> dict[str, Any]:
     series. Horizons with no filled data report ``{"n": 0}``.
     """
     horizons: dict[str, Any] = {}
-    for attr in ("fwd_1d", "fwd_5d", "fwd_20d"):
+    for attr in ("fwd_1d", "fwd_5d", "fwd_10d", "fwd_20d"):
         filled = [r for r in records if getattr(r, attr) is not None]
         n = len(filled)
         if n == 0:

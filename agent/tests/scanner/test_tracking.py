@@ -162,6 +162,7 @@ class TestBackfillReturns:
         assert aapl.entry_date == "2025-06-02"
         assert aapl.fwd_1d is not None
         assert aapl.fwd_5d is not None
+        assert aapl.fwd_10d is not None
 
     def test_backfill_empty_candidates(self, tmp_path):
         assert backfill_returns("2025-06-01", [], root=tmp_path) == []
@@ -215,8 +216,14 @@ class TestIsBackfillPending:
 
     def test_complete_records_not_pending(self):
         rec = self._record(entry_date="2025-06-03", entry_price=100.0,
-                           fwd_1d=1.0, fwd_5d=2.0, fwd_20d=3.0)
+                           fwd_1d=1.0, fwd_5d=2.0, fwd_10d=2.5, fwd_20d=3.0)
         assert not is_backfill_pending([rec], self.ASOF, now="2025-07-10")
+
+    def test_pending_when_fwd_10d_overdue(self):
+        # Legacy records saved before the 10d horizon existed must re-backfill.
+        rec = self._record(entry_date="2025-06-03", entry_price=100.0,
+                           fwd_1d=1.0, fwd_5d=2.0, fwd_20d=3.0)
+        assert is_backfill_pending([rec], self.ASOF, now="2025-07-10")
 
     def test_not_pending_past_retry_window(self):
         # Delisted-style record that will never fill: stop retrying

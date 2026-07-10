@@ -65,10 +65,38 @@ def test_build_digest_prompt_is_web_search_only_chinese() -> None:
 
     assert "2026-07-09" in prompt
     assert "联网搜索" in prompt
-    assert "6~8" in prompt
+    assert "3~8" in prompt
     assert "简体中文" in prompt
+    # Hard same-day constraint: stale search results must be rejected.
+    assert "news_date" in prompt
+    assert "前一天或更早的新闻一律不要" in prompt
     # Collected articles are never fed in — the prompt carries no article list.
     assert "新闻列表" not in prompt
+
+
+def test_parse_digest_output_drops_items_dated_before_the_target_day() -> None:
+    text = (
+        '{"briefing": "总结", "major": ['
+        '{"title": "今天的", "summary": "s", "news_date": "2026-07-09", "impact": "positive"},'
+        '{"title": "昨天的", "summary": "s", "news_date": "2026-07-08", "impact": "positive"},'
+        '{"title": "没日期的", "summary": "s", "impact": "neutral"}]}'
+    )
+
+    _briefing, major = parse_digest_output(text, "2026-07-09")
+
+    titles = [m["title"] for m in major]
+    assert "今天的" in titles
+    assert "昨天的" not in titles
+    # Undated items degrade gracefully rather than vanishing.
+    assert "没日期的" in titles
+
+
+def test_parse_digest_output_keeps_all_items_without_date_key() -> None:
+    text = '{"briefing": "b", "major": [{"title": "T", "summary": "s", "news_date": "2020-01-01", "impact": "neutral"}]}'
+
+    _briefing, major = parse_digest_output(text)
+
+    assert len(major) == 1
 
 
 # ── client guard ─────────────────────────────────────────────────────────────

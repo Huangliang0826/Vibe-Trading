@@ -5,9 +5,10 @@ import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
-const HORIZONS: { key: "fwd_1d" | "fwd_5d" | "fwd_20d"; label: string }[] = [
+const HORIZONS: { key: "fwd_1d" | "fwd_5d" | "fwd_10d" | "fwd_20d"; label: string }[] = [
   { key: "fwd_1d", label: "1 日" },
   { key: "fwd_5d", label: "5 日" },
+  { key: "fwd_10d", label: "10 日" },
   { key: "fwd_20d", label: "20 日" },
 ];
 

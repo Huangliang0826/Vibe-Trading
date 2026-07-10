@@ -117,20 +117,31 @@ def extract_output_text(data: Any) -> str:
 def build_digest_prompt(date_key: str) -> str:
     """Chinese-only prompt asking for a web-searched briefing + major-news JSON."""
     return (
-        f"你是严谨的投资新闻编辑。今天是 {date_key}。请用联网搜索获取当日重要财经与科技动态"
+        f"你是严谨的投资新闻编辑。今天是 {date_key}（北京时间）。请用联网搜索获取当日重要财经与科技动态"
         "（覆盖宏观政策、A股/港股/美股大盘与行业、大宗商品与汇率、重要公司事件），完成两件事：\n"
         "1. briefing：写一段 120~200 字的当日投资简报，概括对投资者最重要的主线（宏观、行业、个股），"
         "语气克制、只陈述事实与直接影响，不编造数字或消息，不给买卖建议。\n"
-        "2. major：挑选 6~8 条当日最重大的新闻，每条给出简短标题 title、40~80 字摘要 summary、"
+        f"2. major：挑选 3~8 条发生在 {date_key} 当天的最重大新闻，每条给出简短标题 title、"
+        "40~80 字摘要 summary、事件发生日期 news_date（YYYY-MM-DD）、"
         "以及对市场的影响 impact（positive=利好 / negative=利空 / neutral=中性）。\n"
+        f"【日期硬性要求】搜索结果常混入旧新闻：只收录事件发生日或官方发布日为 {date_key} 当天的新闻；"
+        "前一天或更早的新闻一律不要，即使它很重要；无法确认发生日期的也不要。宁可少于 6 条，不要凑数。"
+        "美股隔夜行情（北京时间今天凌晨收盘）视为当天新闻。\n"
         "全部输出使用简体中文。\n"
         '只返回一个 JSON 对象，不要 Markdown 代码块：{"briefing":"...",'
-        '"major":[{"title":"...","summary":"...","impact":"positive|negative|neutral"}]}'
+        '"major":[{"title":"...","summary":"...","news_date":"YYYY-MM-DD","impact":"positive|negative|neutral"}]}'
     )
 
 
-def parse_digest_output(text: str) -> tuple[str, list[dict[str, str]]]:
-    """Parse the model's JSON into (briefing, major items); raise if unusable."""
+def parse_digest_output(text: str, date_key: str | None = None) -> tuple[str, list[dict[str, str]]]:
+    """Parse the model's JSON into (briefing, major items); raise if unusable.
+
+    When ``date_key`` is given, major items whose self-reported ``news_date``
+    names a different day are dropped — a second line of defence against web
+    search surfacing yesterday's headlines as today's. Items without a
+    ``news_date`` are kept (older cache entries and imperfect model output
+    should degrade gracefully, not vanish).
+    """
     try:
         parsed = json.loads(_FENCE_RE.sub("", text).strip())
     except json.JSONDecodeError as exc:
@@ -146,6 +157,9 @@ def parse_digest_output(text: str) -> tuple[str, list[dict[str, str]]]:
             continue
         title = str(row.get("title", "")).strip()
         if not title:
+            continue
+        news_date = str(row.get("news_date", "")).strip()
+        if date_key and news_date and news_date != date_key:
             continue
         impact = str(row.get("impact", "neutral")).strip().lower()
         if impact not in {"positive", "negative", "neutral"}:
