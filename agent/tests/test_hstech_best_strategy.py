@@ -3,6 +3,7 @@ import pandas as pd
 from src.paper_trading.hstech_best import (
     STRATEGY_NAMES,
     _candidate_row,
+    _robust_candidate_row,
     _paired_trade_signals,
     normalize_best_strategy_symbol,
     strategy_params,
@@ -128,6 +129,7 @@ def test_candidate_row_keeps_compact_metrics():
         "metrics": {
             "total_return": 0.2,
             "sharpe": 0.8,
+            "max_loss": -0.04,
             "max_drawdown": -0.1,
             "trade_count": 4,
             "annual_return": 0.12,
@@ -141,11 +143,27 @@ def test_candidate_row_keeps_compact_metrics():
         "metrics": {
             "total_return": 0.2,
             "sharpe": 0.8,
+            "max_loss": -0.04,
             "max_drawdown": -0.1,
             "trade_count": 4,
         },
         "error": None,
     }
+
+
+def test_robust_candidate_keeps_max_loss_distinct_from_drawdown():
+    row = _robust_candidate_row({
+        "name": "grid",
+        "mean_rank": 1.5,
+        "worst_rank": 3,
+        "rank_std": 0.4,
+        "ok_count": 5,
+        "mean_return": 0.12,
+        "mean_max_loss": -0.06,
+    })
+
+    assert row["metrics"]["max_loss"] == -0.06
+    assert row["metrics"]["max_drawdown"] is None
 
 
 def test_strategy_params_exposes_catalog_defaults():

@@ -1052,10 +1052,20 @@ export interface HSTechBestStrategyCandidate {
   metrics: {
     total_return?: number | null;
     sharpe?: number | null;
+    max_loss?: number | null;
     max_drawdown?: number | null;
     trade_count?: number | null;
   } | null;
   error?: string | null;
+}
+
+export interface StrategyBacktestMetrics extends Record<string, unknown> {
+  total_return?: number | null;
+  annual_return?: number | null;
+  sharpe?: number | null;
+  max_loss?: number | null;
+  max_drawdown?: number | null;
+  trade_count?: number | null;
 }
 
 export interface HSTechBestStrategyRun {
@@ -1065,7 +1075,7 @@ export interface HSTechBestStrategyRun {
   strategy: { name: string; label?: string; params?: Record<string, unknown> };
   start_date: string;
   end_date: string;
-  metrics: Record<string, unknown> | null;
+  metrics: StrategyBacktestMetrics | null;
   equity_curve: EquityPoint[];
   trades: TradeSignal[];
   paper_trades?: PaperTrade[];
@@ -1106,6 +1116,7 @@ export interface HSTechBestStrategyResponse {
     metrics?: {
       total_return?: number | null;
       sharpe?: number | null;
+      max_loss?: number | null;
       max_drawdown?: number | null;
       trade_count?: number | null;
     };

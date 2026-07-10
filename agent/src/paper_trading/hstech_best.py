@@ -372,7 +372,8 @@ def _robust_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
             "worst_rank": row.get("worst_rank"),
             "rank_std": row.get("rank_std"),
             "total_return": row.get("mean_return"),
-            "max_drawdown": row.get("mean_max_loss"),
+            "max_loss": row.get("mean_max_loss"),
+            "max_drawdown": row.get("mean_max_drawdown"),
         },
         "error": None,
     }
@@ -506,6 +507,7 @@ def _candidate_row(run: dict[str, Any]) -> dict[str, Any]:
         "metrics": {
             "total_return": metrics.get("total_return"),
             "sharpe": metrics.get("sharpe"),
+            "max_loss": metrics.get("max_loss"),
             "max_drawdown": metrics.get("max_drawdown"),
             "trade_count": metrics.get("trade_count"),
         } if metrics else None,
@@ -529,12 +531,13 @@ def summarize_best_strategy(
     best_name = STRATEGY_LABELS.get(best_strategy_name, best_strategy_name)
     best_sharpe = _finite(metrics.get("sharpe"))
     best_return = _finite(metrics.get("total_return"))
+    best_loss = _finite(metrics.get("max_loss"))
     best_drawdown = _finite(metrics.get("max_drawdown"))
     trade_count = int(_finite(metrics.get("trade_count"), len(best.get("trades") or [])))
 
     parts = [
         STRATEGY_PRINCIPLES.get(best_strategy_name, f"策略原理：{best_name} 根据历史价格信号动态调整仓位。"),
-        f"{best_name} 在 {display_code} 当前回测区间里综合排名第一，夏普比率为 {best_sharpe:.2f}，总收益为 {_fmt_pct(best_return)}，最大亏损为 {_fmt_pct(best_drawdown)}。",
+        f"{best_name} 在 {display_code} 当前回测区间里综合排名第一，夏普比率为 {best_sharpe:.2f}，总收益为 {_fmt_pct(best_return)}，最大亏损为 {_fmt_pct(best_loss)}，最大回撤为 {_fmt_pct(best_drawdown)}。",
     ]
     if second and second.get("metrics"):
         second_metrics = second["metrics"]
