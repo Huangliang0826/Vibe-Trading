@@ -208,8 +208,7 @@ export function Scanner() {
     });
   }, [universe, loadScan, loadPrevious, autoRefreshScan]);
 
-  const navigateDate = (dir: -1 | 1) => {
-    const newIdx = dateIdx + dir;
+  const goToDateIdx = (newIdx: number) => {
     if (newIdx < 0 || newIdx >= dates.length) return;
     setDateIdx(newIdx);
     loadScan(universe, dates[newIdx]);
@@ -220,6 +219,8 @@ export function Scanner() {
       setPrevData(null);
     }
   };
+
+  const navigateDate = (dir: -1 | 1) => goToDateIdx(dateIdx + dir);
 
   const refreshScan = async () => {
     if (refreshing) return;
@@ -340,9 +341,18 @@ export function Scanner() {
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
-              <span className="text-xs tabular-nums px-1 flex items-center gap-1">
+              <span className="flex items-center gap-1 pl-1 text-muted-foreground">
                 <Calendar className="h-3 w-3" />
-                {data.asof}
+                <select
+                  aria-label="选择扫描日期"
+                  value={data.asof}
+                  onChange={(e) => goToDateIdx(dates.indexOf(e.target.value))}
+                  className="cursor-pointer bg-transparent text-xs tabular-nums text-foreground focus:outline-none"
+                >
+                  {dates.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
               </span>
               <button
                 onClick={() => navigateDate(-1)}
