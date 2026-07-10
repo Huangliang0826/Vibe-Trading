@@ -320,3 +320,24 @@ class TestComputeAccuracy:
             {"date": "2025-06-02", "n": 2, "mean_1d": 2.0},
             {"date": "2025-06-03", "n": 1, "mean_1d": -2.0},
         ]
+
+    def test_provider_filter_restricts_to_one_signal_source(self):
+        recs = [
+            TrackingRecord(symbol="F1", score=80, asof="2025-06-02", fwd_1d=2.0, provider_id="factor_rank"),
+            TrackingRecord(symbol="F2", score=60, asof="2025-06-02", fwd_1d=1.0, provider_id="factor_rank"),
+            TrackingRecord(symbol="A1", score=90, asof="2025-06-02", fwd_1d=-3.0, provider_id="anomaly"),
+            TrackingRecord(symbol="Legacy", score=50, asof="2025-06-02", fwd_1d=5.0),  # no provider_id
+        ]
+
+        assert compute_accuracy(recs, provider="factor_rank")["horizons"]["fwd_1d"]["n"] == 2
+        assert compute_accuracy(recs, provider="anomaly")["horizons"]["fwd_1d"]["n"] == 1
+        # No filter includes the legacy (provider-less) record too.
+        assert compute_accuracy(recs)["horizons"]["fwd_1d"]["n"] == 4
+
+    def test_matches_provider_handles_comma_joined_and_legacy(self):
+        multi = TrackingRecord(symbol="M", score=50, asof="2025-06-02", provider_id="factor_rank, anomaly")
+        legacy = TrackingRecord(symbol="L", score=50, asof="2025-06-02")
+        assert multi.matches_provider("anomaly") is True
+        assert multi.matches_provider(None) is True
+        assert legacy.matches_provider("factor_rank") is False
+        assert legacy.matches_provider(None) is True

@@ -70,22 +70,29 @@ function HorizonCard({ label, h }: { label: string; h: ScanAccuracyHorizon }) {
   );
 }
 
+const PROVIDER_FILTERS: { value: string; label: string }[] = [
+  { value: "", label: "全部" },
+  { value: "factor_rank", label: "仅因子" },
+  { value: "anomaly", label: "仅异常" },
+];
+
 export function ScanAccuracyPanel({ universe }: { universe: string }) {
   const [data, setData] = useState<ScanAccuracy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [provider, setProvider] = useState("");
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.getScanAccuracy(universe)
+    api.getScanAccuracy(universe, provider || undefined)
       .then((d) => { if (!cancelled) setData(d); })
       .catch(() => { if (!cancelled) setError("获取准确率数据失败"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [universe]);
+  }, [universe, provider]);
 
   // Daily mean-1d line
   useEffect(() => {
@@ -107,11 +114,38 @@ export function ScanAccuracyPanel({ universe }: { universe: string }) {
     return () => { chart.dispose(); };
   }, [data]);
 
+  const filterTabs = (
+    <div className="inline-flex rounded-lg border bg-card p-0.5 text-xs">
+      {PROVIDER_FILTERS.map((f) => (
+        <button
+          key={f.value}
+          onClick={() => setProvider(f.value)}
+          className={cn(
+            "rounded-md px-3 py-1 font-medium transition-colors",
+            provider === f.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {f.label}
+        </button>
+      ))}
+    </div>
+  );
+
   if (loading) {
-    return <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin mr-2" /> 加载准确率…</div>;
+    return (
+      <div className="space-y-4">
+        {filterTabs}
+        <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin mr-2" /> 加载准确率…</div>
+      </div>
+    );
   }
   if (error || !data) {
-    return <p className="py-10 text-center text-xs text-muted-foreground">{error || "暂无数据"}</p>;
+    return (
+      <div className="space-y-4">
+        {filterTabs}
+        <p className="py-10 text-center text-xs text-muted-foreground">{error || "暂无数据"}</p>
+      </div>
+    );
   }
 
   const oneD = data.horizons.fwd_1d;
@@ -119,6 +153,7 @@ export function ScanAccuracyPanel({ universe }: { universe: string }) {
 
   return (
     <div className="space-y-4">
+      {filterTabs}
       <div className="rounded-lg border border-primary/20 bg-primary/[0.03] px-4 py-2.5">
         <p className="text-xs text-muted-foreground">
           共跟踪 <span className="font-medium text-foreground tabular-nums">{data.total_tracked}</span> 条推荐的真实前瞻收益,用于验证扫描是否有效。

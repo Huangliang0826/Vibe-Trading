@@ -27,6 +27,7 @@ class TrackingRecord:
     fwd_5d: float | None = None
     fwd_10d: float | None = None
     fwd_20d: float | None = None
+    provider_id: str | None = None  # signal source: factor_rank / anomaly / ...
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -43,7 +44,22 @@ class TrackingRecord:
             fwd_5d=d.get("fwd_5d"),
             fwd_10d=d.get("fwd_10d"),
             fwd_20d=d.get("fwd_20d"),
+            provider_id=d.get("provider_id"),
         )
+
+    def matches_provider(self, provider: str | None) -> bool:
+        """Whether this record's signal source matches a filter.
+
+        ``None``/empty filter matches everything. A record with no stored
+        ``provider_id`` (saved before the field existed) matches only the
+        no-filter case. A candidate flagged by several providers stores them
+        comma-joined, so membership is checked against the split parts.
+        """
+        if not provider:
+            return True
+        if not self.provider_id:
+            return False
+        return provider in {p.strip() for p in self.provider_id.split(",")}
 
 
 def _default_tracking_root() -> Path:
@@ -202,9 +218,13 @@ def backfill_returns(
 
     for c in candidates:
         sym = c["symbol"]
+        provider_id = c.get("provider_id")
         rec = existing.get(sym, TrackingRecord(
-            symbol=sym, score=c["score"], asof=asof,
+            symbol=sym, score=c["score"], asof=asof, provider_id=provider_id,
         ))
+        # Backfill provider_id onto records saved before the field existed.
+        if rec.provider_id is None and provider_id is not None:
+            rec.provider_id = provider_id
 
         if prices.empty:
             records.append(rec)
@@ -238,6 +258,7 @@ def backfill_returns(
         rec = TrackingRecord(
             symbol=sym, score=c["score"], asof=asof,
             entry_date=entry_date, entry_price=entry_price,
+            provider_id=provider_id,
         )
 
         if entry_price <= 0:
@@ -344,13 +365,20 @@ def _spearman_ic(scores: list[float], returns: list[float]) -> float:
     return 0.0 if pd.isna(ic) else float(ic)
 
 
-def compute_accuracy(records: list[TrackingRecord]) -> dict[str, Any]:
+def compute_accuracy(
+    records: list[TrackingRecord], provider: str | None = None,
+) -> dict[str, Any]:
     """Self-verification stats over all tracked picks.
 
     For each horizon: sample count, mean forward return, hit rate (% positive),
     the score top-vs-bottom-quintile spread, and rank IC. Plus a per-date mean
     series. Horizons with no filled data report ``{"n": 0}``.
+
+    ``provider`` restricts the stats to one signal source (``factor_rank`` /
+    ``anomaly``); ``None`` uses every tracked pick.
     """
+    if provider:
+        records = [r for r in records if r.matches_provider(provider)]
     horizons: dict[str, Any] = {}
     for attr in ("fwd_1d", "fwd_5d", "fwd_10d", "fwd_20d"):
         filled = [r for r in records if getattr(r, attr) is not None]
