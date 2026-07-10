@@ -1142,8 +1142,8 @@ export function PaperTrading() {
               })()}
             </div>
           )}
-          {(robustResult.baseline || robustResult.ensemble) && (
-            <div className="mb-3 grid gap-2 sm:grid-cols-2">
+          {(robustResult.baseline || robustResult.ensemble || (robustResult.param_sensitivity?.length ?? 0) > 0) && (
+            <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {robustResult.baseline && (() => {
                 const winner = robustResult.strategies.find((s) => s.name === robustResult.best_strategy);
                 const beat = winner?.windows_beating_hold;
@@ -1177,6 +1177,22 @@ export function PaperTrading() {
                     {robustResult.ensemble.beats_winner
                       ? <span className="ml-1 text-emerald-700 dark:text-emerald-300">平衡得分优于单一冠军，分散更稳</span>
                       : <span className="ml-1">得分略低于冠军，但降低了押错单一策略的风险</span>}
+                  </div>
+                </div>
+              )}
+              {(robustResult.param_sensitivity?.length ?? 0) > 0 && (
+                <div className="rounded-lg border px-3 py-2 text-xs leading-5">
+                  <span className="font-medium">参数稳健度</span>
+                  <span className="ml-2 text-muted-foreground">关键参数 ±25% 后是否仍跑赢持有</span>
+                  <div className="mt-0.5 space-y-0.5">
+                    {robustResult.param_sensitivity!.map((s) => (
+                      <div key={s.name} className="flex items-center gap-2">
+                        <span className="text-muted-foreground">{STRATEGY_LABELS[s.name as StrategyName] || s.name}</span>
+                        {s.verdict === "robust" && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">稳健</span>}
+                        {s.verdict === "sensitive" && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-400">敏感——优势可能来自参数巧合</span>}
+                        {s.verdict === "no_params" && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">无关键参数</span>}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

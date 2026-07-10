@@ -75,10 +75,10 @@ def test_backtest_shapes_and_benchmark(monkeypatch):
     bh = out["buy_and_hold"]["metrics"]
     # buy-and-hold over an uptrending eval window must be positive
     assert bh["total_return"] > 0.1
-    dca = out["dca"]
-    assert "metrics" in dca and "equity" in dca
-    assert len(dca["equity"]) == len(out["buy_and_hold"]["equity"])
-    assert dca["metrics"]["total_return"] > 0
+    # vol_target is the third forecast strategy in the output contract.
+    vol = out["strategies"]["vol_target"]
+    assert "metrics" in vol and "equity" in vol
+    assert len(vol["equity"]) == len(out["buy_and_hold"]["equity"])
     assert "beats_buy_and_hold" in out
 
 

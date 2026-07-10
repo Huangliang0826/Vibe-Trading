@@ -148,3 +148,89 @@ def test_build_ensemble_marks_window_failed_when_any_member_curve_missing() -> N
 def test_build_ensemble_requires_at_least_two_members() -> None:
     strategies = [{"name": "a", "ok_count": 1, "mean_score": 0.5}]
     assert _build_ensemble(strategies, {}, {}, [{"label": "w0"}], 1.0, None) is None
+
+
+# ── ±25% parameter sensitivity ───────────────────────────────────────────────
+
+from src.paper_trading.robust import (  # noqa: E402
+    _PERTURB_SPECS,
+    _param_sensitivity,
+    _perturbed_value,
+)
+
+
+def test_perturbed_value_scales_ints_with_rounding_and_floor() -> None:
+    assert _perturbed_value(200, 0.75) == 150
+    assert _perturbed_value(200, 1.25) == 250
+    assert _perturbed_value(5, 0.75) == 4      # round(3.75) = 4
+    assert _perturbed_value(1, 0.75) == 1      # floor at 1
+    assert _perturbed_value(0.4, 0.75) == pytest.approx(0.3)
+    assert _perturbed_value(0.4, 1.25) == pytest.approx(0.5)
+
+
+def test_perturb_specs_only_name_registered_strategies() -> None:
+    from src.paper_trading.hstech_best import STRATEGY_NAMES
+
+    unknown = set(_PERTURB_SPECS) - set(STRATEGY_NAMES)
+    assert not unknown, f"specs reference unregistered strategies: {unknown}"
+
+
+def _windows_one() -> list[dict]:
+    return [{"label": "w0", "start": pd.Timestamp("2024-01-01"), "end": pd.Timestamp("2025-01-01")}]
+
+
+def test_param_sensitivity_no_params_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    strategies = [{"name": "buy_and_hold", "mean_score": 0.5}]
+    out = _param_sensitivity(strategies, [{"name": "buy_and_hold", "params": {}}],
+                             [], {}, _windows_one(), 1.0, None)
+
+    assert out[0]["verdict"] == "no_params"
+    assert out[0]["variants"] == []
+
+
+def test_param_sensitivity_robust_and_sensitive_vs_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.paper_trading.robust as robust_mod
+
+    # Fake evaluator: ma200_timing variants stay strong; trailing_stop variants collapse.
+    def fake_eval(holdings, sliced, name, params, cash):
+        idx = pd.bdate_range("2024-01-01", periods=50)
+        final = 1.3 if name == "ma200_timing" else 0.8
+        curve = pd.Series([cash * (1 + (final - 1) * i / 49) for i in range(50)], index=idx)
+        return curve, []
+
+    monkeypatch.setattr(robust_mod, "evaluate_strategy", fake_eval)
+
+    bh_cells = [{"score": 0.0, "total_return": 0.0, "max_loss": 0.0, "status": "ok"}]
+    strategies = [
+        {"name": "ma200_timing", "mean_score": 0.35},
+        {"name": "trailing_stop", "mean_score": 0.30},
+    ]
+    specs = [{"name": "ma200_timing", "params": {}}, {"name": "trailing_stop", "params": {}}]
+    data_map = {"X": _frame("2024-01-02", "2024-12-31")}
+
+    out = _param_sensitivity(strategies, specs, [], data_map, _windows_one(), 100_000.0, bh_cells)
+
+    by_name = {r["name"]: r for r in out}
+    # +30% variants beat the 0.0 baseline score → robust.
+    assert by_name["ma200_timing"]["verdict"] == "robust"
+    assert len(by_name["ma200_timing"]["variants"]) == 2  # one param × two factors
+    # −20% variants score below baseline → sensitive.
+    assert by_name["trailing_stop"]["verdict"] == "sensitive"
+    assert len(by_name["trailing_stop"]["variants"]) == 4  # two params × two factors
+
+
+def test_param_sensitivity_all_variants_failing_is_sensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    import src.paper_trading.robust as robust_mod
+
+    def broken_eval(*args, **kwargs):
+        raise ValueError("no fit")
+
+    monkeypatch.setattr(robust_mod, "evaluate_strategy", broken_eval)
+
+    strategies = [{"name": "grid", "mean_score": 0.2}]
+    out = _param_sensitivity(strategies, [{"name": "grid", "params": {"grid_count": 5}}],
+                             [], {"X": _frame("2024-01-02", "2024-12-31")}, _windows_one(), 1.0,
+                             [{"score": 0.0, "status": "ok"}])
+
+    assert out[0]["verdict"] == "sensitive"
+    assert out[0]["worst_score"] is None

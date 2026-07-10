@@ -28,6 +28,41 @@ _MAX_WINDOWS = 20        # full 20-year span: up to 18 three-year windows + full
 _MAX_HISTORY_YEARS = 20
 _BASELINE_STRATEGY = "buy_and_hold"  # honest yardstick every strategy must beat
 _ENSEMBLE_SIZE = 3       # top-k blend to dampen single-winner selection luck
+_PERTURB_FACTORS = (0.75, 1.25)  # ±25% wiggle on each key parameter
+
+# Key numeric parameter(s) per strategy for the ±25% sensitivity check, as
+# (param, default) pairs mirroring the generators' internal defaults. A winner
+# whose edge evaporates under this wiggle likely won on parameter luck, not on
+# a real effect. Strategies absent here (or with an empty list) are cadence- or
+# identity-parameterised only and are reported as having no key parameters.
+_PERTURB_SPECS: Dict[str, List[tuple]] = {
+    # NOTE: dca/smart_dca/value_averaging run through the executor simulators,
+    # whose only knobs are cadence (frequency) — no numeric params to perturb.
+    "grid": [("grid_count", 5)],
+    "momentum_breakout": [("lookback", 20), ("stop_loss", 0.08)],
+    "moving_average_cross": [("short_window", 20), ("long_window", 60)],
+    "ma200_timing": [("window", 200)],
+    "rsi_reversion": [("window", 14), ("buy_below", 35.0)],
+    "volatility_target": [("target_vol", 0.18)],
+    "drawdown_rebalance": [("first_level", 0.05), ("third_level", 0.15)],
+    "trend_volatility_filter": [("ma_window", 120), ("target_vol", 0.18)],
+    "donchian_breakout": [("entry_window", 55), ("exit_window", 20)],
+    "bollinger_reversion": [("window", 20), ("band_width", 2.0)],
+    "trailing_stop": [("trailing_stop", 0.12), ("ma_window", 60)],
+    "atr_trend_stop": [("atr_multiple", 3.0), ("ma_window", 80)],
+    "mean_reversion_scaleout": [("window", 20), ("stop_loss", 0.12)],
+    "enhanced_dca_trend": [("ma_window", 120)],
+    "breakout_pullback": [("breakout_window", 50), ("pullback_pct", 0.05)],
+    "quality_momentum": [("lookback", 120)],
+    "low_volatility_rotation": [("trend_window", 120)],
+    "volatility_squeeze_breakout": [("width_quantile", 0.25), ("stop_loss", 0.10)],
+    "risk_parity": [("window", 60)],
+    "price_volume_efficiency": [("lookback", 60)],
+    "macd_divergence": [("fast", 12), ("slow", 26)],
+    "dual_momentum": [("lookback", 120)],
+    "accelerated_dca_entry": [("accelerate_drawdown", 0.1), ("all_in_drawdown", 0.2)],
+    "deep_drawdown_recovery": [("drawdown_threshold", 0.4), ("take_profit_pct", 0.4)],
+}
 
 
 def _balance_score(metrics: Dict[str, Any]) -> float:
@@ -147,6 +182,117 @@ def _windows_beating(
         return None
     beating = sum(1 for c, b in paired if c["score"] > b["score"])
     return {"beating": beating, "total": len(paired)}
+
+
+def _perturbed_value(base: Any, factor: float) -> Any:
+    """Scale a numeric param by ``factor``; ints round and stay ≥ 1."""
+    if isinstance(base, int) and not isinstance(base, bool):
+        return max(int(round(base * factor)), 1)
+    return round(float(base) * factor, 6)
+
+
+def _evaluate_over_windows(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    name: str,
+    params: Dict[str, Any],
+    windows: List[Dict[str, Any]],
+    initial_cash: float,
+) -> List[Optional[Dict[str, Any]]]:
+    """Slim window sweep for sensitivity variants (metrics only, no curves)."""
+    out: List[Optional[Dict[str, Any]]] = []
+    for w in windows:
+        sliced = {c: df.loc[w["start"]:w["end"]] for c, df in data_map.items()}
+        sliced = {c: df for c, df in sliced.items() if df is not None and len(df) >= 2}
+        try:
+            if not sliced:
+                raise ValueError("No data in window")
+            equity_series, trades = evaluate_strategy(
+                holdings, sliced, name, params, initial_cash,
+            )
+            if equity_series is None or len(equity_series) < 2:
+                raise ValueError("Empty equity curve")
+            m = calc_metrics(equity_series, trades, initial_cash, bars_per_year=None)
+            out.append({
+                "score": round(_balance_score(m), 6),
+                "total_return": round(float(m["total_return"]), 6),
+                "max_loss": round(float(m["max_loss"]), 6),
+                "status": "ok",
+            })
+        except Exception as exc:  # noqa: BLE001 — a variant may not fit a window
+            logger.debug("sensitivity: %s failed on window %s: %s", name, w["label"], exc)
+            out.append({"status": "failed"})
+    return out
+
+
+def _mean_score(cells: List[Optional[Dict[str, Any]]]) -> Optional[float]:
+    ok = [c["score"] for c in cells if c and c.get("status") == "ok"]
+    return round(float(np.mean(ok)), 6) if ok else None
+
+
+def _param_sensitivity(
+    strategies: List[Dict[str, Any]],
+    strategy_specs: List[Dict[str, Any]],
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    windows: List[Dict[str, Any]],
+    initial_cash: float,
+    bh_cells: Optional[List[Optional[Dict[str, Any]]]],
+) -> List[Dict[str, Any]]:
+    """±25% one-at-a-time perturbation of the top strategies' key parameters.
+
+    The multi-window test guards against era luck and the baseline guards
+    against rising-tide luck; this guards against parameter luck. Verdict:
+    ``robust`` when every perturbed variant's mean balance score still beats
+    buy & hold's, ``sensitive`` when any falls below, ``no_params`` for
+    cadence-only strategies.
+    """
+    params_by_name = {s["name"]: dict(s.get("params") or {}) for s in strategy_specs}
+    bh_score = _mean_score(bh_cells) if bh_cells is not None else None
+
+    results: List[Dict[str, Any]] = []
+    for row in strategies[:_ENSEMBLE_SIZE]:
+        name = row["name"]
+        specs = _PERTURB_SPECS.get(name, [])
+        if not specs:
+            results.append({
+                "name": name, "verdict": "no_params", "base_score": row.get("mean_score"),
+                "variants": [], "worst_score": None,
+            })
+            continue
+        base_params = params_by_name.get(name, {})
+        variants: List[Dict[str, Any]] = []
+        for param, default in specs:
+            base_value = base_params.get(param, default)
+            for factor in _PERTURB_FACTORS:
+                value = _perturbed_value(base_value, factor)
+                cells = _evaluate_over_windows(
+                    holdings, data_map, name, {**base_params, param: value},
+                    windows, initial_cash,
+                )
+                score = _mean_score(cells)
+                variants.append({
+                    "param": param,
+                    "value": value,
+                    "mean_score": score,
+                    "beats_hold": (
+                        None if score is None or bh_score is None else bool(score > bh_score)
+                    ),
+                })
+        scores = [v["mean_score"] for v in variants if v["mean_score"] is not None]
+        worst = min(scores) if scores else None
+        if not scores:
+            verdict = "sensitive"  # every variant failed to run — that IS fragility
+        elif bh_score is not None:
+            verdict = "robust" if worst > bh_score else "sensitive"
+        else:
+            base = row.get("mean_score")
+            verdict = "robust" if base is not None and worst >= base - abs(base) * 0.5 else "sensitive"
+        results.append({
+            "name": name, "verdict": verdict, "base_score": row.get("mean_score"),
+            "variants": variants, "worst_score": worst,
+        })
+    return results
 
 
 def _build_ensemble(
@@ -360,6 +506,12 @@ def run_robust_optimize(
         strategies, cells, curves, windows, initial_cash, bh_cells,
     )
 
+    # ── ±25% parameter sensitivity (direction: dampen parameter luck) ──────
+    param_sensitivity = _param_sensitivity(
+        strategies, strategy_specs, equity_holdings, data_map, windows,
+        initial_cash, bh_cells,
+    )
+
     return {
         "windows": [
             {"label": w["label"], "start": w["start"].strftime("%Y-%m-%d"),
@@ -370,6 +522,7 @@ def run_robust_optimize(
         "best_strategy": best_name,
         "baseline": baseline,
         "ensemble": ensemble,
+        "param_sensitivity": param_sensitivity,
         "window_years": window_years,
         "step_years": step_years,
         "data_start": span_start.strftime("%Y-%m-%d"),

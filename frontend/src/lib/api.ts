@@ -978,12 +978,28 @@ export interface RobustEnsemble {
   windows_beating_hold: RobustBeatCount | null;
 }
 
+export interface RobustParamVariant {
+  param: string;
+  value: number;
+  mean_score: number | null;
+  beats_hold: boolean | null;
+}
+
+export interface RobustParamSensitivity {
+  name: string;
+  verdict: "robust" | "sensitive" | "no_params";
+  base_score: number | null;
+  variants: RobustParamVariant[];
+  worst_score: number | null;
+}
+
 export interface RobustOptimizeResult {
   windows: RobustWindow[];
   strategies: RobustStrategyRow[];
   best_strategy: string | null;
   baseline?: RobustBaseline | null;
   ensemble?: RobustEnsemble | null;
+  param_sensitivity?: RobustParamSensitivity[];
   window_years: number;
   step_years: number;
   data_start: string;
