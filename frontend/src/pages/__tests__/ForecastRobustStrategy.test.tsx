@@ -22,11 +22,11 @@ const robustPayload = {
   },
   oos_validation: {
     start_date: "2025-07-02", end_date: "2026-07-01", passed: true,
-    metrics: { total_return: 0.18, sharpe: 0.9, max_drawdown: -0.12 },
+    metrics: { total_return: 0.18, sharpe: 0.9, max_loss: -0.05, max_drawdown: -0.12 },
   },
   best: {
     strategy: { name: "donchian_breakout", label: "唐奇安突破" },
-    metrics: { total_return: 0.5, max_drawdown: -0.2, sharpe: 1.1 }, trades: [],
+    metrics: { total_return: 0.5, max_loss: -0.08, max_drawdown: -0.2, sharpe: 1.1 }, trades: [],
   },
   candidates: [], summary: "稳健策略说明",
 };
@@ -45,7 +45,11 @@ it("labels the annual robust selection and daily signal cache", async () => {
 
   expect(await screen.findByText("最稳健：唐奇安突破")).toBeInTheDocument();
   expect(screen.getByText("总收益 +50.0%（20年）")).toBeInTheDocument();
+  expect(screen.getByText("最大亏损 -8.0%")).toBeInTheDocument();
+  expect(screen.getByText("最大回撤 -20.0%")).toBeInTheDocument();
   expect(screen.getByText(/样本外收益 \+18.0%/)).toBeInTheDocument();
+  expect(screen.getByText(/样本外最大亏损 -5.0%/)).toBeInTheDocument();
+  expect(screen.getByText(/样本外最大回撤 -12.0%/)).toBeInTheDocument();
   expect(screen.getByText(/年度选择已缓存/)).toBeInTheDocument();
   expect(screen.getByText(/每日信号已缓存/)).toBeInTheDocument();
   expect(screen.getByText(/有效至 2027-07-02/)).toBeInTheDocument();
