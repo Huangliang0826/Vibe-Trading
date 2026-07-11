@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Briefcase, Plus, Trash2, Loader2, Play, ChevronDown, ChevronRight } from "lucide-react";
-import { ApiError, api, type PaperTradingRun, type PaperHolding, type PaperStrategyConfig, type PaperTrade, type PriceHistoryBar, type PriceHistoryPeriod, type WatchlistMarket, type WatchlistQuote, type RobustOptimizeResult } from "@/lib/api";
+import { ApiError, api, type PaperTradingRun, type PaperHolding, type PaperStrategyConfig, type PaperTrade, type PriceHistoryBar, type PriceHistoryPeriod, type WatchlistMarket, type WatchlistQuote, type RobustOptimizeResult, type PaperTradingExperimentComparison } from "@/lib/api";
 import { PaperEquityChart } from "@/components/charts/PaperEquityChart";
 import { PaperHoldingPriceChart } from "@/components/charts/PaperHoldingPriceChart";
 import { cn } from "@/lib/utils";
@@ -408,6 +408,9 @@ export function PaperTrading() {
   const [robustAutoRunning, setRobustAutoRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [selectedExperimentIds, setSelectedExperimentIds] = useState<string[]>([]);
+  const [experimentComparison, setExperimentComparison] = useState<PaperTradingExperimentComparison | null>(null);
+  const [experimentCompareLoading, setExperimentCompareLoading] = useState(false);
   const [singlePricePeriod, setSinglePricePeriod] = useState<PriceHistoryPeriod>("ALL");
   const [singlePriceBars, setSinglePriceBars] = useState<PriceHistoryBar[]>([]);
   const [singlePriceLoading, setSinglePriceLoading] = useState(false);
@@ -431,6 +434,26 @@ export function PaperTrading() {
       .then(setRuns)
       .catch(() => {});
   }, []);
+
+  const toggleExperimentSelection = (runId: string) => {
+    setSelectedExperimentIds((current) => current.includes(runId)
+      ? current.filter((id) => id !== runId)
+      : current.length >= 5 ? current : [...current, runId]);
+    setExperimentComparison(null);
+  };
+
+  const compareSelectedExperiments = async () => {
+    if (selectedExperimentIds.length < 2) return;
+    setExperimentCompareLoading(true);
+    setError(null);
+    try {
+      setExperimentComparison(await api.comparePaperTradingExperiments(selectedExperimentIds));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "实验对比失败");
+    } finally {
+      setExperimentCompareLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1468,13 +1491,35 @@ export function PaperTrading() {
       {/* ── History Section ── */}
       {runs.length > 0 && (
         <div className="rounded-xl border bg-card p-4">
-          <button
-            onClick={() => setHistoryOpen(!historyOpen)}
-            className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {historyOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            历史回测 ({runs.length})
-          </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              onClick={() => setHistoryOpen(!historyOpen)}
+              className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {historyOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              历史回测 ({runs.length})
+            </button>
+            {historyOpen && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-muted-foreground">已选 {selectedExperimentIds.length}/5</span>
+                <button
+                  type="button"
+                  onClick={() => { setSelectedExperimentIds([]); setExperimentComparison(null); }}
+                  disabled={selectedExperimentIds.length === 0}
+                  className="rounded-md border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+                >清空</button>
+                <button
+                  type="button"
+                  onClick={compareSelectedExperiments}
+                  disabled={selectedExperimentIds.length < 2 || experimentCompareLoading}
+                  className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] text-primary-foreground disabled:opacity-40"
+                >
+                  {experimentCompareLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                  对比实验
+                </button>
+              </div>
+            )}
+          </div>
           {historyOpen && (
             <div className="mt-3 space-y-1">
               {runs.map((r) => (
@@ -1485,6 +1530,14 @@ export function PaperTrading() {
                     activeRun?.run_id === r.run_id && "bg-muted/50",
                   )}
                 >
+                  <input
+                    type="checkbox"
+                    checked={selectedExperimentIds.includes(r.run_id)}
+                    onChange={() => toggleExperimentSelection(r.run_id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="mr-2 h-3.5 w-3.5 accent-primary"
+                    aria-label={`选择实验 ${r.title || r.strategy.name}`}
+                  />
                   <button onClick={() => loadRun(r.run_id)} className="flex-1 text-left">
                     <span className="font-medium">{r.title || r.strategy.name}</span>
                     <span className="text-muted-foreground ml-2">{r.start_date} → {r.end_date}</span>
@@ -1494,6 +1547,11 @@ export function PaperTrading() {
                     )}>
                       {r.status}
                     </span>
+                    {r.experiment?.reproducibility_key && (
+                      <span className="ml-2 font-mono text-[10px] text-muted-foreground/60">
+                        {r.experiment.reproducibility_key.slice(0, 8)}
+                      </span>
+                    )}
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteRun(r.run_id); }}
@@ -1503,6 +1561,58 @@ export function PaperTrading() {
                   </button>
                 </div>
               ))}
+              {experimentComparison && (
+                <div className="mt-4 rounded-lg border bg-muted/15 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-semibold text-foreground">实验对比</h3>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">按数据区间、代码版本和指标口径对照结果</p>
+                    </div>
+                    <button type="button" onClick={() => setExperimentComparison(null)} className="text-[11px] text-muted-foreground hover:text-foreground">收起</button>
+                  </div>
+                  <div className="overflow-x-auto rounded-md border bg-card">
+                    <table className="w-full min-w-[760px] text-[11px]">
+                      <thead>
+                        <tr className="border-b text-muted-foreground">
+                          <th className="px-2.5 py-2 text-left font-medium">实验</th>
+                          <th className="px-2.5 py-2 text-left font-medium">策略</th>
+                          <th className="px-2.5 py-2 text-left font-medium">数据区间</th>
+                          <th className="px-2.5 py-2 text-right font-medium">收益</th>
+                          <th className="px-2.5 py-2 text-right font-medium">最大亏损</th>
+                          <th className="px-2.5 py-2 text-right font-medium">回撤</th>
+                          <th className="px-2.5 py-2 text-right font-medium">Sharpe</th>
+                          <th className="px-2.5 py-2 text-left font-medium">代码</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {experimentComparison.items.map((item) => {
+                          const metrics = item.metrics || {};
+                          const strategyName = item.strategy?.name || "—";
+                          return (
+                            <tr key={item.run_id} className="border-b last:border-0">
+                              <td className="px-2.5 py-2 font-medium">{item.title || item.run_id.slice(-8)}</td>
+                              <td className="px-2.5 py-2">{STRATEGY_LABELS[strategyName as StrategyName] || strategyName}</td>
+                              <td className="px-2.5 py-2 font-mono text-muted-foreground">{item.start_date} → {item.end_date}</td>
+                              <td className={cn("px-2.5 py-2 text-right tabular-nums", finiteNumber(metrics.total_return) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>{pct(finiteNumber(metrics.total_return))}</td>
+                              <td className="px-2.5 py-2 text-right tabular-nums text-red-500">{pct(finiteNumber(metrics.max_loss))}</td>
+                              <td className="px-2.5 py-2 text-right tabular-nums text-red-500">{pct(finiteNumber(metrics.max_drawdown))}</td>
+                              <td className="px-2.5 py-2 text-right tabular-nums">{finiteNumber(metrics.sharpe).toFixed(2)}</td>
+                              <td className="px-2.5 py-2 font-mono text-muted-foreground">{item.experiment?.code_version?.slice(0, 8) || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {experimentComparison.items.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+                      <span>指标版本：{[...new Set(experimentComparison.items.map((item) => item.experiment?.metric_version).filter(Boolean))].join(" / ") || "—"}</span>
+                      <span>基准：{[...new Set(experimentComparison.items.map((item) => item.experiment?.benchmark).filter(Boolean))].join(" / ") || "—"}</span>
+                      {experimentComparison.missing_run_ids.length > 0 && <span className="text-red-500">缺失 {experimentComparison.missing_run_ids.length} 条记录</span>}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
