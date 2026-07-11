@@ -3,7 +3,7 @@ import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
-import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistQuote } from "@/lib/api";
+import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistHistoryMetrics, WatchlistQuote } from "@/lib/api";
 
 export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"];
 
@@ -15,6 +15,7 @@ interface Props {
   height?: number;
   showRisk?: boolean;
   quote?: WatchlistQuote | null;
+  metrics?: WatchlistHistoryMetrics | null;
 }
 
 /** Max drawdown over the displayed window + recovery time of that episode.
@@ -109,7 +110,7 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   return val.slice(5); // MM-DD
 }
 
-export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null }: Props) {
+export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null, metrics = null }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
 
@@ -123,7 +124,14 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
   const up = absChange >= 0;
   const changeLabel = hasLiveDayQuote ? "今日涨跌" : `${period} 区间涨跌`;
   const dd = showRisk && hasData ? computeDrawdown(bars) : null;
-  const dailyDca = showRisk && hasData && period !== "1D" ? computeDailyDca(bars) : null;
+  const localDailyDca = showRisk && hasData && period !== "1D" ? computeDailyDca(bars) : null;
+  const buyAndHold = metrics?.buy_and_hold ?? null;
+  const dailyDca = period !== "1D" ? metrics?.daily_dca ?? localDailyDca : null;
+  const maxDrawdown = buyAndHold?.max_drawdown ?? dd?.maxDD ?? null;
+  const maxLoss = buyAndHold?.max_loss ?? null;
+  const dailyDcaReturn = dailyDca && ("total_return" in dailyDca ? dailyDca.total_return : dailyDca.totalReturn);
+  const dailyDcaMaxLoss = dailyDca && ("max_loss" in dailyDca ? dailyDca.max_loss : dailyDca.maxLoss);
+  const dailyDcaContributions = dailyDca?.contributions ?? 0;
 
   useEffect(() => {
     if (!ref.current || bars.length < 2) return;
@@ -291,15 +299,21 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
       </div>
 
       {/* Risk metrics over the displayed window: max drawdown + recovery time */}
-      {dd && !loading && (
+      {(dd || buyAndHold || dailyDca) && !loading && (
         <div className="flex items-center gap-x-4 gap-y-1 text-[11px] -mt-1 flex-wrap">
           <span className="text-muted-foreground">
             最大回撤{" "}
-            <b className={cn("tabular-nums", dd.maxDD < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
-              {(dd.maxDD * 100).toFixed(1)}%
+            <b className={cn("tabular-nums", (maxDrawdown ?? 0) < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+              {maxDrawdown == null ? "—" : `${(maxDrawdown * 100).toFixed(1)}%`}
             </b>
           </span>
-          <span className="text-muted-foreground">
+          {maxLoss != null && <span className="text-muted-foreground">
+            最大亏损{" "}
+            <b className={cn("tabular-nums", maxLoss < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+              {(maxLoss * 100).toFixed(1)}%
+            </b>
+          </span>}
+          {dd && <span className="text-muted-foreground">
             回撤修复{" "}
             {dd.maxDD === 0 ? (
               <b className="text-foreground">—</b>
@@ -308,21 +322,21 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
             ) : (
               <b className="tabular-nums text-amber-600 dark:text-amber-400">暂未修复（距高点 {dd.sincePeakDays} 天 · 已恢复 {dd.recoveredPct.toFixed(0)}%）</b>
             )}
-          </span>
+          </span>}
           {dailyDca && (
             <>
               <span className="text-muted-foreground">
                 每日定投收益{" "}
-                <b className={cn("tabular-nums", dailyDca.totalReturn >= 0 ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
-                  {dailyDca.totalReturn >= 0 ? "+" : ""}{(dailyDca.totalReturn * 100).toFixed(1)}%
+                <b className={cn("tabular-nums", (dailyDcaReturn ?? 0) >= 0 ? "text-red-500 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+                  {(dailyDcaReturn ?? 0) >= 0 ? "+" : ""}{((dailyDcaReturn ?? 0) * 100).toFixed(1)}%
                 </b>
               </span>
               <span className="text-muted-foreground">
                 每日定投最大亏损{" "}
-                <b className={cn("tabular-nums", dailyDca.maxLoss < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
-                  {(dailyDca.maxLoss * 100).toFixed(1)}%
+                <b className={cn("tabular-nums", (dailyDcaMaxLoss ?? 0) < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
+                  {((dailyDcaMaxLoss ?? 0) * 100).toFixed(1)}%
                 </b>
-                <span className="ml-1 text-muted-foreground/70">({dailyDca.contributions} 次)</span>
+                <span className="ml-1 text-muted-foreground/70">({dailyDcaContributions} 次)</span>
               </span>
             </>
           )}

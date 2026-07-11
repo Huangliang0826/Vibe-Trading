@@ -29,4 +29,6 @@ def test_smart_t_generates_trades_in_trapped_rebound_market() -> None:
     assert out["summary"]["trade_count"] > 0
     assert out["summary"]["effective_cost"] > 0
     assert "smart_t" in out["metrics"]
+    assert "max_loss" in out["metrics"]["smart_t"]
+    assert "annual_vol" in out["metrics"]["smart_t"]
     assert out["current_signal"]["action"] in {"观察", "低吸T仓", "高抛止盈", "风控卖出T仓"}

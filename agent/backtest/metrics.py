@@ -12,6 +12,93 @@ import pandas as pd
 
 from backtest.models import TradeRecord
 
+
+_PATH_METRIC_KEYS = (
+    "total_return",
+    "annual_return",
+    "max_drawdown",
+    "max_loss",
+    "sharpe",
+    "calmar",
+    "sortino",
+)
+
+
+def validate_price_series(prices: pd.Series, *, name: str = "prices") -> pd.Series:
+    """Return a sorted numeric price series after strict validity checks.
+
+    All price-based metrics use this gate. Missing, non-finite, zero, and
+    negative prices are rejected instead of silently contaminating returns.
+    Duplicate timestamps are also rejected because their ordering changes
+    path-dependent metrics such as drawdown and DCA.
+    """
+    if not isinstance(prices, pd.Series):
+        raise TypeError(f"{name} must be a pandas Series")
+    if prices.empty:
+        return prices.astype(float)
+    series = pd.to_numeric(prices, errors="coerce").astype(float)
+    values = series.to_numpy()
+    if not np.isfinite(values).all() or (values <= 0).any():
+        raise ValueError(f"{name} must contain only finite positive values")
+    if series.index.has_duplicates:
+        raise ValueError(f"{name} must not contain duplicate timestamps")
+    return series.sort_index()
+
+
+def _path_metric_summary(equity_curve: pd.Series, initial_cash: float, bars_per_year: int) -> Dict[str, float]:
+    """Calculate the common display subset for a positive equity path."""
+    metrics = calc_metrics(equity_curve, [], initial_cash, bars_per_year)
+    return {key: float(metrics[key]) for key in _PATH_METRIC_KEYS}
+
+
+def compute_price_path_metrics(prices: pd.Series, *, bars_per_year: int = 252) -> Dict[str, float]:
+    """Compute canonical buy-and-hold metrics for a positive close series.
+
+    Prices are normalized to one unit of starting capital, so the result is
+    independent of whether the source is quoted in HKD, USD, or CNY.
+    """
+    series = validate_price_series(prices)
+    if series.empty:
+        return _path_metric_summary(pd.Series(dtype=float), 1.0, bars_per_year)
+    equity = series / float(series.iloc[0])
+    return _path_metric_summary(equity, 1.0, bars_per_year)
+
+
+def compute_daily_dca_metrics(prices: pd.Series, *, bars_per_year: int = 252) -> Dict[str, float | int]:
+    """Compute canonical daily-DCA metrics from a close series.
+
+    One equal cash contribution is made on the first available bar and once
+    per distinct calendar date thereafter. Contributions are invested at that
+    day's close, then the resulting marked-to-market NAV is measured against
+    total contributed capital. Intraday bars therefore contribute at most once
+    per session.
+    """
+    series = validate_price_series(prices)
+    if series.empty:
+        result = _path_metric_summary(pd.Series(dtype=float), 1.0, bars_per_year)
+        result["contributions"] = 0
+        return result
+
+    try:
+        date_keys = pd.to_datetime(series.index).date
+    except (TypeError, ValueError):
+        date_keys = list(range(len(series)))
+
+    units = 1.0 / float(series.iloc[0])
+    contributed = 1.0
+    nav = [1.0]
+    last_date = date_keys[0]
+    for price, current_date in zip(series.iloc[1:], date_keys[1:]):
+        if current_date != last_date:
+            units += 1.0 / float(price)
+            contributed += 1.0
+            last_date = current_date
+        nav.append(units * float(price) / contributed)
+
+    result = _path_metric_summary(pd.Series(nav, index=series.index), 1.0, bars_per_year)
+    result["contributions"] = int(contributed)
+    return result
+
 # ─── Annualisation factor mapping ───
 
 # mootdx (A-share) and futu (HK + A-share) are equity sources, so they mirror
@@ -187,6 +274,7 @@ def calc_metrics(
     total_ret = float(equity_curve.iloc[-1] / initial_cash - 1)
     ann_ret = float((1 + total_ret) ** (bpy / max(n, 1)) - 1)
     vol = float(port_ret.std())
+    annual_vol = float(vol * np.sqrt(bpy))
     sharpe = float(port_ret.mean() / (vol + 1e-10) * np.sqrt(bpy))
 
     # Drawdown
@@ -224,6 +312,7 @@ def calc_metrics(
         "final_value": float(equity_curve.iloc[-1]),
         "total_return": total_ret,
         "annual_return": ann_ret,
+        "annual_vol": annual_vol,
         "max_drawdown": max_dd,
         "max_loss": max_loss,
         "sharpe": sharpe,
@@ -245,7 +334,8 @@ def _empty_metrics(initial_cash: float) -> Dict[str, Any]:
     """Return zero-valued metrics when no data is available."""
     return {
         "final_value": initial_cash,
-        "total_return": 0, "annual_return": 0, "max_drawdown": 0, "max_loss": 0,
+        "total_return": 0, "annual_return": 0, "annual_vol": 0,
+        "max_drawdown": 0, "max_loss": 0,
         "sharpe": 0, "calmar": 0, "sortino": 0,
         "win_rate": 0, "profit_loss_ratio": 0, "profit_factor": 0,
         "max_consecutive_loss": 0, "avg_holding_days": 0, "trade_count": 0,

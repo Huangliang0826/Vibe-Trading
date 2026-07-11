@@ -2194,6 +2194,7 @@ def _resolve_symbol_name(code: str, market: str) -> str:
 
 def _df_to_bars(df, intraday: bool) -> list[dict]:
     """Serialize an OHLCV DataFrame to [{date, close, volume}] rows."""
+    import math
     import pandas as pd
 
     fmt = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
@@ -2201,7 +2202,7 @@ def _df_to_bars(df, intraday: bool) -> list[dict]:
     for ts, row in df.iterrows():
         try:
             close_val = float(row["close"])
-            if pd.isna(close_val):
+            if pd.isna(close_val) or not math.isfinite(close_val) or close_val <= 0:
                 continue
             vol_val = int(row.get("volume", 0) or 0)
         except (ValueError, TypeError):
@@ -2209,6 +2210,28 @@ def _df_to_bars(df, intraday: bool) -> list[dict]:
         date_str = ts.strftime(fmt) if hasattr(ts, "strftime") else str(ts)[: (16 if intraday else 10)]
         rows.append({"date": date_str, "close": round(close_val, 4), "volume": vol_val})
     return rows
+
+
+def _history_metrics_from_bars(bars: list[dict]) -> dict[str, Any]:
+    """Build the canonical metric payload for the price-history endpoint."""
+    from backtest.metrics import compute_daily_dca_metrics, compute_price_path_metrics
+
+    empty = {"buy_and_hold": None, "daily_dca": None}
+    if len(bars) < 2:
+        return empty
+    try:
+        import pandas as pd
+
+        index = pd.to_datetime([bar["date"] for bar in bars])
+        prices = pd.Series([bar["close"] for bar in bars], index=index, dtype=float)
+        return {
+            "buy_and_hold": compute_price_path_metrics(prices),
+            "daily_dca": compute_daily_dca_metrics(prices),
+        }
+    except (TypeError, ValueError, KeyError):
+        # A malformed provider payload should result in an empty metrics block,
+        # while the raw history response remains inspectable by the caller.
+        return empty
 
 
 def _price_period_baseline_date(period: str, today):
@@ -2375,7 +2398,14 @@ async def get_watchlist_history(
         raise HTTPException(status_code=400, detail=f"period must be one of {sorted(_VALID)}")
     try:
         data = await asyncio.to_thread(_fetch_price_history, code.strip(), period, market)
-        return {"code": code.strip().upper(), "name": data["name"], "period": period, "bars": data["bars"]}
+        bars = data["bars"]
+        return {
+            "code": code.strip().upper(),
+            "name": data["name"],
+            "period": period,
+            "bars": bars,
+            "metrics": _history_metrics_from_bars(bars),
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Price history fetch failed: {exc}")
 

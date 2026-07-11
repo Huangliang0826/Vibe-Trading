@@ -534,6 +534,23 @@ export interface WatchlistHistoryResponse {
   name: string;
   period: PriceHistoryPeriod;
   bars: PriceHistoryBar[];
+  metrics?: WatchlistHistoryMetrics;
+}
+
+export interface PriceHistoryMetricSummary {
+  total_return: number;
+  annual_return: number;
+  max_drawdown: number;
+  max_loss: number;
+  sharpe: number;
+  calmar: number;
+  sortino: number;
+  contributions?: number;
+}
+
+export interface WatchlistHistoryMetrics {
+  buy_and_hold: PriceHistoryMetricSummary | null;
+  daily_dca: PriceHistoryMetricSummary | null;
 }
 
 export type ValuationMetric = "pe" | "pb" | "mktcap";
@@ -1054,6 +1071,8 @@ export interface HSTechBestStrategyCandidate {
   status: "completed" | "failed";
   metrics: {
     total_return?: number | null;
+    annual_return?: number | null;
+    annual_vol?: number | null;
     sharpe?: number | null;
     max_loss?: number | null;
     max_drawdown?: number | null;
@@ -1065,6 +1084,7 @@ export interface HSTechBestStrategyCandidate {
 export interface StrategyBacktestMetrics extends Record<string, unknown> {
   total_return?: number | null;
   annual_return?: number | null;
+  annual_vol?: number | null;
   sharpe?: number | null;
   max_loss?: number | null;
   max_drawdown?: number | null;
@@ -1182,6 +1202,7 @@ export interface StrategyLikeMetrics {
   annual_vol: number;
   sharpe: number;
   max_drawdown: number;
+  max_loss?: number;
   calmar: number;
 }
 
@@ -1526,7 +1547,9 @@ export interface BacktestMetrics {
   final_value: number;
   total_return: number;
   annual_return: number;
+  annual_vol: number;
   max_drawdown: number;
+  max_loss: number;
   sharpe: number;
   win_rate: number;
   trade_count: number;

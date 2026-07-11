@@ -18,7 +18,10 @@ from backtest.metrics import (
     by_symbol_stats,
     calc_bars_per_year,
     calc_metrics,
+    compute_daily_dca_metrics,
+    compute_price_path_metrics,
     win_rate_and_stats,
+    validate_price_series,
 )
 from backtest.models import TradeRecord
 
@@ -269,6 +272,11 @@ class TestCalcMetrics:
         m = calc_metrics(eq, [], 1_000_000, 252)
         assert m["final_value"] == pytest.approx(1_200_000, rel=0.01)
 
+    def test_annual_vol_is_return_volatility_annualized(self) -> None:
+        eq = pd.Series([100.0, 101.0, 99.0, 100.0], index=pd.bdate_range("2025-01-01", periods=4))
+        m = calc_metrics(eq, [], 100.0, 252)
+        assert m["annual_vol"] > 0
+
     def test_sortino_positive_for_growth(self) -> None:
         eq = self._growing_equity()
         m = calc_metrics(eq, [], 1_000_000, 252)
@@ -287,3 +295,22 @@ class TestCalcMetrics:
         # Calmar = annual_return / |max_drawdown|
         if m["annual_return"] > 0:
             assert m["calmar"] > 0
+
+
+class TestCanonicalPriceMetrics:
+    def test_price_path_metrics_use_first_close_as_baseline(self) -> None:
+        prices = pd.Series([100.0, 120.0, 90.0], index=pd.bdate_range("2025-01-01", periods=3))
+        metrics = compute_price_path_metrics(prices)
+        assert metrics["total_return"] == pytest.approx(-0.1)
+        assert metrics["max_drawdown"] == pytest.approx(-0.25)
+        assert metrics["max_loss"] == pytest.approx(-0.1)
+
+    def test_daily_dca_contributes_once_per_calendar_date(self) -> None:
+        index = pd.to_datetime(["2025-01-01 10:00", "2025-01-01 15:00", "2025-01-02 10:00"])
+        metrics = compute_daily_dca_metrics(pd.Series([100.0, 110.0, 100.0], index=index))
+        assert metrics["contributions"] == 2
+        assert metrics["total_return"] == pytest.approx(0.0)
+
+    def test_invalid_prices_are_rejected(self) -> None:
+        with pytest.raises(ValueError, match="finite positive"):
+            validate_price_series(pd.Series([100.0, 0.0]))

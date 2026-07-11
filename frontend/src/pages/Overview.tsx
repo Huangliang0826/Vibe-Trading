@@ -418,6 +418,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   const [period, setPeriod] = useState<PriceHistoryPeriod>("1Y");
   const [historicalPeriod, setHistoricalPeriod] = useState<HistoricalEventPeriod>("1Y");
   const [bars, setBars] = useState<PriceHistoryBar[]>([]);
+  const [historyMetrics, setHistoryMetrics] = useState<WatchlistHistoryResponse["metrics"]>(undefined);
   const [quote, setQuote] = useState<WatchlistQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -438,6 +439,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
     let cancelled = false;
     if (historyCache) {
       setBars(historyCache.value.bars);
+      setHistoryMetrics(historyCache.value.metrics);
       if (historyCache.value.name) setName(historyCache.value.name);
     }
     if (quoteCache) setQuote(quoteCache.value);
@@ -459,6 +461,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
         if (cancelled) return;
         if (res) {
           setBars(res.bars);
+          setHistoryMetrics(res.metrics);
           if (res.name) setName(res.name);
           writeOverviewCache(historyKey, res);
         }
@@ -533,6 +536,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
             height={260}
             showRisk
             quote={quote}
+            metrics={historyMetrics}
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>

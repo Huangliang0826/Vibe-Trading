@@ -7,11 +7,13 @@ rebounds. It is a research backtest, not an execution engine.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite, sqrt
+from math import isfinite
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from backtest.metrics import calc_metrics
 
 
 @dataclass(frozen=True)
@@ -48,30 +50,15 @@ def _to_price_frame(bars: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def _metrics(equity: pd.Series, periods_per_year: int = 252) -> dict[str, float]:
-    if len(equity) < 2:
-        return {
-            "total_return": 0.0,
-            "annual_return": 0.0,
-            "annual_vol": 0.0,
-            "sharpe": 0.0,
-            "max_drawdown": 0.0,
-            "calmar": 0.0,
-        }
-    total = float(equity.iloc[-1] / equity.iloc[0] - 1)
-    ann = float((1 + total) ** (periods_per_year / max(len(equity), 1)) - 1)
-    rets = equity.pct_change().fillna(0.0)
-    vol = float(rets.std() * sqrt(periods_per_year))
-    sharpe = ann / vol if vol > 1e-8 else 0.0
-    peak = equity.cummax()
-    max_dd = float((equity / peak - 1).min())
-    calmar = ann / abs(max_dd) if abs(max_dd) > 1e-8 else 0.0
+    metrics = calc_metrics(equity, [], float(equity.iloc[0]) if len(equity) else 1.0, periods_per_year)
     return {
-        "total_return": round(total, 4),
-        "annual_return": round(ann, 4),
-        "annual_vol": round(vol, 4),
-        "sharpe": round(sharpe, 2),
-        "max_drawdown": round(max_dd, 4),
-        "calmar": round(calmar, 2),
+        "total_return": round(float(metrics["total_return"]), 4),
+        "annual_return": round(float(metrics["annual_return"]), 4),
+        "annual_vol": round(float(metrics["annual_vol"]), 4),
+        "sharpe": round(float(metrics["sharpe"]), 2),
+        "max_drawdown": round(float(metrics["max_drawdown"]), 4),
+        "max_loss": round(float(metrics["max_loss"]), 4),
+        "calmar": round(float(metrics["calmar"]), 2),
     }
 
 
