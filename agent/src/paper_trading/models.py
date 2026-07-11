@@ -60,6 +60,20 @@ class StrategyConfig(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class ExperimentMetadata(BaseModel):
+    """Inputs and versions required to reproduce one backtest."""
+
+    schema_version: str = "experiment.v1"
+    code_version: str = "unknown"
+    metric_version: str = "backtest.metrics.v2"
+    data_sources: list[str] = Field(default_factory=list)
+    data_start: str = ""
+    data_end: str = ""
+    benchmark: str = "buy_and_hold"
+    cost_model: dict[str, dict[str, float]] = Field(default_factory=dict)
+    reproducibility_key: str = ""
+
+
 class PaperTradingCreate(BaseModel):
     title: str = ""
     holdings: list[PaperHolding] = Field(..., min_length=1)
@@ -83,6 +97,7 @@ class PaperTradingRun(BaseModel):
     status: PaperTradingStatus = PaperTradingStatus.queued
     created_at: str = ""
     updated_at: str = ""
+    experiment: ExperimentMetadata | None = None
     metrics: dict[str, Any] | None = None
     equity_curve: list[dict[str, Any]] | None = None
     trades: list[dict[str, Any]] | None = None

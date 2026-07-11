@@ -208,6 +208,10 @@ export const api = {
     }),
   listPaperTradingRuns: () =>
     request<PaperTradingList>("/paper-trading/runs"),
+  comparePaperTradingExperiments: (runIds: string[]) =>
+    request<PaperTradingExperimentComparison>(
+      `/paper-trading/experiments/compare?run_ids=${encodeURIComponent(runIds.join(","))}`,
+    ),
   getPaperTradingRun: (runId: string) =>
     request<PaperTradingRun>(`/paper-trading/runs/${encodeURIComponent(runId)}`),
   deletePaperTradingRun: (runId: string) =>
@@ -1041,10 +1045,23 @@ export interface PaperTradingRun {
   status: "queued" | "running" | "completed" | "failed";
   created_at: string;
   updated_at: string;
+  experiment?: ExperimentMetadata | null;
   metrics: Record<string, unknown> | null;
   equity_curve: EquityPoint[] | null;
   trades: PaperTrade[] | null;
   error: string | null;
+}
+
+export interface ExperimentMetadata {
+  schema_version: string;
+  code_version: string;
+  metric_version: string;
+  data_sources: string[];
+  data_start: string;
+  data_end: string;
+  benchmark: string;
+  cost_model: Record<string, Record<string, number>>;
+  reproducibility_key: string;
 }
 
 export interface PaperTrade {
@@ -1064,6 +1081,11 @@ export interface PaperTrade {
 
 export interface PaperTradingList {
   items: PaperTradingRun[];
+}
+
+export interface PaperTradingExperimentComparison {
+  items: Array<Pick<PaperTradingRun, "run_id" | "title" | "status" | "strategy" | "start_date" | "end_date" | "experiment" | "metrics">>;
+  missing_run_ids: string[];
 }
 
 export interface HSTechBestStrategyCandidate {

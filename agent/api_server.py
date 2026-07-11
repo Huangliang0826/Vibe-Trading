@@ -4802,6 +4802,36 @@ async def list_paper_trading_runs(limit: int = Query(50, ge=1, le=200)):
 
 
 @app.get(
+    "/paper-trading/experiments/compare",
+    dependencies=[Depends(require_local_or_auth)],
+)
+async def compare_paper_trading_experiments(
+    run_ids: str = Query(..., description="Comma-separated paper run IDs"),
+):
+    """Return reproducibility metadata and metrics for selected experiments."""
+    ids = [item.strip() for item in run_ids.split(",") if item.strip()]
+    if not ids or len(ids) > 50:
+        raise HTTPException(status_code=400, detail="run_ids must contain 1 to 50 run IDs")
+    runs = _get_paper_trading_store().compare_runs(ids)
+    return {
+        "items": [
+            {
+                "run_id": run.run_id,
+                "title": run.title,
+                "status": run.status,
+                "strategy": run.strategy,
+                "start_date": run.start_date,
+                "end_date": run.end_date,
+                "experiment": run.experiment,
+                "metrics": run.metrics,
+            }
+            for run in runs
+        ],
+        "missing_run_ids": [run_id for run_id in ids if run_id not in {run.run_id for run in runs}],
+    }
+
+
+@app.get(
     "/paper-trading/runs/{run_id}",
     response_model=PaperTradingRun,
     dependencies=[Depends(require_local_or_auth)],

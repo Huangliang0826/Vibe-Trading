@@ -1336,6 +1336,21 @@ export function PaperTrading() {
                 <Stat label="Calmar" value={(m.calmar as number)?.toFixed(2) ?? "—"} />
               </div>
 
+              {activeRun.experiment && (
+                <div className="rounded-xl border bg-muted/20 px-3 py-2.5 text-[11px] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <span>实验版本 {activeRun.experiment.schema_version}</span>
+                    <span>指标版本 {activeRun.experiment.metric_version}</span>
+                    <span>代码 {activeRun.experiment.code_version.slice(0, 12)}</span>
+                    <span>数据 {activeRun.experiment.data_start} → {activeRun.experiment.data_end}</span>
+                    <span>基准 {activeRun.experiment.benchmark}</span>
+                  </div>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground/70 break-all">
+                    reproducibility key: {activeRun.experiment.reproducibility_key}
+                  </p>
+                </div>
+              )}
+
               {/* Equity curve */}
               {activeRun.equity_curve && activeRun.equity_curve.length > 0 && (
                 <div className="rounded-xl border bg-card p-4">

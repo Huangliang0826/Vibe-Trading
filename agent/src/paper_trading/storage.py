@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import re
 import shutil
 import sqlite3
+import subprocess
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +21,7 @@ from src.paper_trading.models import (
     PaperTradingCreate,
     PaperTradingRun,
     PaperTradingStatus,
+    ExperimentMetadata,
     StrategyConfig,
 )
 
@@ -26,6 +30,68 @@ HKD_TO_USD = 1.0 / 7.8
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _code_version() -> str:
+    """Resolve the source revision without making git a runtime requirement."""
+    configured = os.getenv("VIBE_TRADING_CODE_VERSION", "").strip()
+    if configured:
+        return configured
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        return result.stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def _experiment_metadata(payload: PaperTradingCreate, total_usd: float) -> ExperimentMetadata:
+    from backtest.costs import get_costs
+
+    markets = sorted({holding.market for holding in payload.holdings})
+    cost_model = {
+        market: {
+            "commission_bps": get_costs(market).commission_bps,
+            "stamp_buy_bps": get_costs(market).stamp_buy_bps,
+            "stamp_sell_bps": get_costs(market).stamp_sell_bps,
+            "slippage_bps": get_costs(market).slippage_bps,
+        }
+        for market in markets
+    }
+    identity = {
+        "code_version": _code_version(),
+        "metric_version": "backtest.metrics.v2",
+        "data_sources": ["yfinance"],
+        "data_start": payload.start_date,
+        "data_end": payload.end_date,
+        "benchmark": "buy_and_hold",
+        "holdings": [holding.model_dump(mode="json") for holding in payload.holdings],
+        "strategy": payload.strategy.model_dump(mode="json"),
+        "initial_usd": payload.initial_usd,
+        "initial_hkd": payload.initial_hkd,
+        "initial_total_usd": round(total_usd, 2),
+        "cost_model": cost_model,
+    }
+    reproducibility_key = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return ExperimentMetadata(
+        code_version=identity["code_version"],
+        metric_version=identity["metric_version"],
+        data_sources=identity["data_sources"],
+        data_start=payload.start_date,
+        data_end=payload.end_date,
+        benchmark="buy_and_hold",
+        cost_model=cost_model,
+        reproducibility_key=reproducibility_key,
+    )
 
 
 class PaperTradingStore:
@@ -100,6 +166,7 @@ class PaperTradingStore:
             status=PaperTradingStatus.queued,
             created_at=now,
             updated_at=now,
+            experiment=_experiment_metadata(payload, total_usd),
         )
 
         path = self.run_dir(run_id)
@@ -167,6 +234,15 @@ class PaperTradingStore:
             if run is not None:
                 runs.append(run)
         return runs
+
+    def compare_runs(self, run_ids: list[str]) -> list[PaperTradingRun]:
+        """Return selected runs in caller-provided order for experiment comparison."""
+        result = []
+        for run_id in run_ids:
+            run = self.get_run(run_id)
+            if run is not None:
+                result.append(run)
+        return result
 
     def delete_run(self, run_id: str) -> None:
         path = self.run_dir(run_id)
