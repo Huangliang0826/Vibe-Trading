@@ -5,10 +5,11 @@ import json
 import re
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from src.config.paths import get_runtime_root
@@ -107,8 +108,22 @@ class ResearchAnalysisStore:
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that commits/rolls back and then always closes.
+
+        A bare ``with self._connect()`` only manages the transaction, leaking
+        the connection's file descriptors on every call.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS runs (
                     run_id TEXT PRIMARY KEY,
@@ -218,7 +233,7 @@ class ResearchAnalysisStore:
         run.company_name = company_name
         run.updated_at = utc_now()
         self._write_run_files(run, run.raw_decision, run.report_markdown)
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("UPDATE runs SET company_name = ? WHERE run_id = ?", (company_name, run_id))
 
     def fail_run(self, run_id: str, message: str) -> ResearchAnalysisRun:
@@ -258,7 +273,7 @@ class ResearchAnalysisStore:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(max(1, min(limit, 200)))
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
         out: list[ResearchAnalysisRun] = []
         for row in rows:
@@ -272,7 +287,7 @@ class ResearchAnalysisStore:
         existed = path.exists()
         if existed:
             shutil.rmtree(path, ignore_errors=True)
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
             try:
                 conn.execute("DELETE FROM runs_fts WHERE run_id = ?", (run_id,))
@@ -297,7 +312,7 @@ class ResearchAnalysisStore:
         )
 
     def _upsert_index(self, run: ResearchAnalysisRun, report_markdown: str) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO runs

@@ -6,8 +6,10 @@ import json
 import re
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 from uuid import uuid4
 
 from src.config.paths import get_runtime_root
@@ -42,8 +44,22 @@ class PaperTradingStore:
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that commits/rolls back and then always closes.
+
+        A bare ``with self._connect()`` only manages the transaction, leaking
+        the connection's file descriptors on every call.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS paper_runs (
                     run_id TEXT PRIMARY KEY,
@@ -140,7 +156,7 @@ class PaperTradingStore:
         return self.update_status(run_id, PaperTradingStatus.failed, error=error)
 
     def list_runs(self, limit: int = 50) -> list[PaperTradingRun]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT run_id FROM paper_runs ORDER BY created_at DESC LIMIT ?",
                 (limit,),
@@ -156,7 +172,7 @@ class PaperTradingStore:
         path = self.run_dir(run_id)
         if path.exists():
             shutil.rmtree(path)
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("DELETE FROM paper_runs WHERE run_id = ?", (run_id,))
 
     def _write_run(self, run: PaperTradingRun) -> None:
@@ -168,7 +184,7 @@ class PaperTradingStore:
         )
 
     def _upsert_index(self, run: PaperTradingRun) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 INSERT INTO paper_runs

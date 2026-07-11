@@ -6,9 +6,10 @@ import hashlib
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from src.config.paths import get_runtime_root
@@ -93,8 +94,25 @@ class OpportunityStore:
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that commits/rolls back and then always closes.
+
+        ``sqlite3.Connection`` used as a context manager only manages the
+        transaction; it never closes the connection. Long-lived processes that
+        opened a fresh connection per query leaked one set of file descriptors
+        (db + ``-wal`` + ``-shm``) each call, eventually exhausting the
+        process fd limit and failing with "unable to open database file".
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             migrated_snapshots = False
             conn.executescript(
                 """
@@ -271,7 +289,7 @@ class OpportunityStore:
     ) -> list[NewsArticle]:
         now = fetched_at or utc_now()
         saved: list[NewsArticle] = []
-        with self._connect() as conn:
+        with self._session() as conn:
             if source is not None:
                 source_row = _source_payload(source)
                 existing = conn.execute(
@@ -448,12 +466,12 @@ class OpportunityStore:
             params.append(since)
         sql += " ORDER BY news_articles.published_at DESC LIMIT ?"
         params.append(max(1, min(limit, 500)))
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [NewsArticle.model_validate(dict(row)) for row in rows]
 
     def list_news_center_articles(self, *, limit: int = 500) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._session() as conn:
             articles = conn.execute(
                 """
                 SELECT a.article_id, s.name AS source, a.title,
@@ -496,7 +514,7 @@ class OpportunityStore:
         return result
 
     def save_matches(self, article_id: str, matches: list[Mapping[str, Any]]) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             for match in matches:
                 conn.execute(
                     """
@@ -523,7 +541,7 @@ class OpportunityStore:
         analysis_date: str,
         prompt_version: str,
     ) -> NewsImpact | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 """
                 SELECT payload_json
@@ -538,7 +556,7 @@ class OpportunityStore:
 
     def save_news_analysis(self, impact: NewsImpact, analysis_date: str, prompt_version: str) -> NewsImpact:
         now = utc_now()
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 INSERT INTO news_analyses
@@ -561,7 +579,7 @@ class OpportunityStore:
 
     def get_news_ai_digest(self, date_key: str, language: str) -> dict | None:
         """Cached AI daily digest payload, or None when not yet generated."""
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT payload_json, model, generated_at FROM news_ai_digests"
                 " WHERE date_key = ? AND language = ?",
@@ -577,7 +595,7 @@ class OpportunityStore:
     def save_news_ai_digest(
         self, date_key: str, language: str, payload: dict, model: str,
     ) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 INSERT INTO news_ai_digests (date_key, language, payload_json, model, generated_at)
@@ -602,7 +620,7 @@ class OpportunityStore:
         completed: int = 0,
         error: str | None = None,
     ) -> RefreshJob:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("BEGIN IMMEDIATE")
             active = self._active_job_row(conn)
             if active is not None:
@@ -649,7 +667,7 @@ class OpportunityStore:
     ) -> RefreshJob:
         now = utc_now()
         market_dates_json = json.dumps(market_dates) if market_dates is not None else None
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 UPDATE refresh_jobs
@@ -698,19 +716,19 @@ class OpportunityStore:
         return self._job_from_row(updated)
 
     def get_active_job(self) -> RefreshJob | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = self._active_job_row(conn)
         if row is None:
             return None
         return self._job_from_row(row)
 
     def get_job(self, job_id: str) -> RefreshJob | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute("SELECT * FROM refresh_jobs WHERE job_id = ?", (job_id,)).fetchone()
         return self._job_from_row(row) if row is not None else None
 
     def get_last_refresh_error(self) -> str | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 """
                 SELECT error FROM refresh_jobs
@@ -734,7 +752,7 @@ class OpportunityStore:
         is_backfill = trigger == "fixed-universe-backfill"
         sample_source = "fixed_universe_backfill" if is_backfill else "live"
         now = utc_now()
-        with self._connect() as conn:
+        with self._session() as conn:
             previous_row = conn.execute(
                 """
                 SELECT payload_json
@@ -883,7 +901,7 @@ class OpportunityStore:
         level: str | None,
         limit: int = 200,
     ) -> list[OpportunityItem]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 WITH ranked AS (
@@ -925,7 +943,7 @@ class OpportunityStore:
             sql += " AND snapshot_date = ?"
             params.append(snapshot_date)
         sql += " ORDER BY snapshot_date DESC, updated_at DESC, rowid DESC LIMIT 1"
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(sql, params).fetchone()
         if row is None:
             return None
@@ -943,7 +961,7 @@ class OpportunityStore:
         return OpportunityDetail.model_validate({**item.model_dump(mode="json"), **detail_payload})
 
     def get_history(self, market: str, code: str, *, limit: int = 30) -> list[OpportunityItem]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 SELECT payload_json
@@ -958,7 +976,7 @@ class OpportunityStore:
         return [self._snapshot_item_from_payload(row["payload_json"]) for row in rows]
 
     def list_snapshot_items(self) -> list[OpportunityItem]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 WITH ranked AS (
@@ -978,7 +996,7 @@ class OpportunityStore:
 
     def upsert_outcome(self, outcome: OpportunityOutcome) -> OpportunityOutcome:
         now = utc_now()
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 """
                 INSERT INTO opportunity_outcomes
@@ -1025,7 +1043,7 @@ class OpportunityStore:
         return self._outcome_from_row(row)
 
     def list_outcomes(self) -> list[OpportunityOutcome]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT * FROM opportunity_outcomes ORDER BY snapshot_date, market, code, horizon_days"
             ).fetchall()
@@ -1035,7 +1053,7 @@ class OpportunityStore:
         if scope not in {"top3", "all"}:
             raise ValueError("scope must be top3 or all")
         where = "WHERE is_top3 = 1" if scope == "top3" else ""
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 f"SELECT * FROM opportunity_outcomes {where} ORDER BY horizon_days"  # noqa: S608
             ).fetchall()
@@ -1079,7 +1097,7 @@ class OpportunityStore:
         )
 
     def has_market_refresh(self, market: str, market_date: str) -> bool:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 SELECT market_dates_json
@@ -1124,7 +1142,7 @@ class OpportunityStore:
         ).fetchone()
 
     def _news_for_snapshot(self, market: str, code: str, snapshot_date: str) -> list[NewsImpact]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """
                 SELECT payload_json

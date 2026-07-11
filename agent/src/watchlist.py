@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
+from typing import Iterator
 
 from src.config.paths import get_runtime_root
 
@@ -25,8 +27,22 @@ class WatchlistStore:
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that commits/rolls back and then always closes.
+
+        A bare ``with self._connect()`` only manages the transaction, leaking
+        the connection's file descriptors on every call.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist (
                     market TEXT NOT NULL,
@@ -54,7 +70,7 @@ class WatchlistStore:
                     self._save_snapshot(conn, market, codes)
 
     def get(self, market: str) -> list[str]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT code FROM watchlist WHERE market = ? ORDER BY sort_order",
                 (market,),
@@ -62,7 +78,7 @@ class WatchlistStore:
         return [row["code"] for row in rows]
 
     def set(self, market: str, codes: list[str]) -> list[str]:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("DELETE FROM watchlist WHERE market = ?", (market,))
             for i, code in enumerate(codes):
                 conn.execute(
@@ -75,7 +91,7 @@ class WatchlistStore:
 
     def add(self, market: str, code: str) -> list[str]:
         code = code.upper()
-        with self._connect() as conn:
+        with self._session() as conn:
             max_order = conn.execute(
                 "SELECT COALESCE(MAX(sort_order), -1) as m FROM watchlist WHERE market = ?",
                 (market,),
@@ -91,7 +107,7 @@ class WatchlistStore:
         return codes
 
     def remove(self, market: str, code: str) -> list[str]:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 "DELETE FROM watchlist WHERE market = ? AND code = ?",
                 (market, code.upper()),
@@ -103,7 +119,7 @@ class WatchlistStore:
         return codes
 
     def get_as_of(self, market: str, as_of: str) -> list[str]:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 """SELECT codes_json FROM watchlist_snapshots
                    WHERE market = ? AND effective_date <= ?

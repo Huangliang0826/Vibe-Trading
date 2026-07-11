@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from src.historical_events.models import HistoricalEvent, HistoricalEventRun
 
@@ -17,8 +19,22 @@ class HistoricalEventStore:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that commits/rolls back and then always closes.
+
+        A bare ``with self._connect()`` only manages the transaction, leaking
+        the connection's file descriptors on every call.
+        """
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as db:
+        with self._session() as db:
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS historical_events (
@@ -42,7 +58,7 @@ class HistoricalEventStore:
             )
 
     def save_event(self, event: HistoricalEvent) -> HistoricalEvent:
-        with self._connect() as db:
+        with self._session() as db:
             db.execute(
                 """
                 INSERT OR REPLACE INTO historical_events
@@ -65,7 +81,7 @@ class HistoricalEventStore:
         params: tuple[str, ...] = (market, symbol, start_date, end_date)
         if analysis_version:
             params += (analysis_version,)
-        with self._connect() as db:
+        with self._session() as db:
             rows = db.execute(
                 f"""
                 SELECT payload_json FROM historical_events
@@ -78,7 +94,7 @@ class HistoricalEventStore:
         return [HistoricalEvent.model_validate_json(row["payload_json"]) for row in rows]
 
     def save_run(self, run: HistoricalEventRun) -> HistoricalEventRun:
-        with self._connect() as db:
+        with self._session() as db:
             db.execute(
                 "INSERT OR REPLACE INTO historical_event_runs (run_id, payload_json) VALUES (?, ?)",
                 (run.run_id, run.model_dump_json()),
@@ -86,7 +102,7 @@ class HistoricalEventStore:
         return run
 
     def get_run(self, run_id: str) -> HistoricalEventRun | None:
-        with self._connect() as db:
+        with self._session() as db:
             row = db.execute(
                 "SELECT payload_json FROM historical_event_runs WHERE run_id = ?", (run_id,),
             ).fetchone()
@@ -95,7 +111,7 @@ class HistoricalEventStore:
     def find_completed_run(
         self, market: str, symbol: str, period: str, analysis_version: str,
     ) -> HistoricalEventRun | None:
-        with self._connect() as db:
+        with self._session() as db:
             rows = db.execute("SELECT payload_json FROM historical_event_runs").fetchall()
         matches = [HistoricalEventRun.model_validate_json(row["payload_json"]) for row in rows]
         matches = [
