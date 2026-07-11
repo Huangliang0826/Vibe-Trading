@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_REBALANCE = 5      # trading days between signal updates (~weekly)
 DEFAULT_LEAD = 21          # forecast lead used for signals (~1 month)
 DEFAULT_EVAL_DAYS = 756    # ~3y eval window — bounds the forecast count
-DEFAULT_COST_BPS = 5.0     # per-side transaction cost
+DEFAULT_COST_BPS = 5.0     # per-side fallback; API callers resolve the real
+                           # per-market rate via backtest.costs.per_side_cost_bps
 _INITIAL_CASH = 10_000.0
 _MIN_HISTORY = 252         # context needed before the eval window starts
 

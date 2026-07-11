@@ -2707,12 +2707,19 @@ async def get_forecast_strategy(
     code: str,
     context: int = Query(0, ge=0),
     rebalance: int = Query(5, ge=1, le=63),
-    cost_bps: float = Query(5.0, ge=0, le=200),
+    cost_bps: float | None = Query(None, ge=0, le=200),
 ):
-    """Walk-forward backtest of forecast-driven strategies vs buy-and-hold."""
+    """Walk-forward backtest of forecast-driven strategies vs buy-and-hold.
+
+    ``cost_bps`` defaults to the market's per-side cost from the global cost
+    model (slippage + commission + stamp duty) instead of a flat number.
+    """
+    from backtest.costs import per_side_cost_bps
     from src.forecast import strategy
 
     market = market.lower()
+    if cost_bps is None:
+        cost_bps = round(per_side_cost_bps(market), 2)
     key = f"strategy:{market}:{code.upper()}:{context}:{rebalance}:{cost_bps}"
     cached = _STRATEGY_CACHE.get(key)
     if cached and (time.time() - cached[0]) < _STRATEGY_TTL:
@@ -2744,9 +2751,12 @@ async def get_strategy_robustness(
     codes: str,
     context: int = Query(0, ge=0),
     rebalance: int = Query(5, ge=1, le=63),
-    cost_bps: float = Query(5.0, ge=0, le=200),
+    cost_bps: float | None = Query(None, ge=0, le=200),
 ):
-    """Cross-stock robustness: run forecast strategies across many names."""
+    """Cross-stock robustness: run forecast strategies across many names.
+
+    ``cost_bps=None`` resolves per market inside each single-stock call.
+    """
     from src.forecast import strategy
 
     pairs = []

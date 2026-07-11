@@ -15,6 +15,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 
+from backtest.costs import market_of_code, slipped_price, trade_fee_rate
 from backtest.engines.base import _align
 from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.metrics import by_symbol_stats, calc_metrics
@@ -137,10 +138,12 @@ def evaluate_strategy(
     hk_codes = [c for c in valid_codes if c.endswith(".HK")]
     other_codes = [c for c in valid_codes if not c.endswith(".HK")]
 
-    # Pure HK → HK engine (stamp tax + levies). Anything else — US, A-share
+    # Pure HK → HK engine (100-share lots). Anything else — US, A-share
     # (.SS/.SZ), or a cross-market mix — runs on the US-rule engine (fractional
-    # shares, negligible commission) over ALL codes, so A-share holdings are
-    # never dropped from a mixed portfolio.
+    # shares) over ALL codes, so A-share holdings are never dropped from a
+    # mixed portfolio. Commission, stamp duty, and slippage resolve per symbol
+    # inside the engine either way (backtest.costs), so HK/A-share legs of a
+    # mixed portfolio still pay their own market's costs.
     if hk_codes and not other_codes:
         engine = GlobalEquityEngine({"initial_cash": initial_cash}, market="hk")
         engine._execute_bars(dates, data_map, close_df, target_pos, hk_codes)
@@ -153,6 +156,36 @@ def evaluate_strategy(
         index=[s.timestamp for s in engine.equity_snapshots],
     )
     return equity_series, engine.trades
+
+
+# ── Transaction costs (inline simulators) ───────────────────────────────────
+#
+# The engine-based strategies get costs from GlobalEquityEngine; the inline
+# simulators below (DCA family, value averaging, accelerated entry, deep
+# drawdown recovery) execute their own fills, so they charge the shared cost
+# model (backtest.costs) directly: adverse slippage on the fill price plus
+# commission/stamp deducted from cash. TradeRecord.pnl stays gross of costs
+# with the fees in ``commission`` — same convention as the engine.
+
+
+def _execute_buy(code: str, open_price: float, budget: float) -> tuple[float, float, float]:
+    """Fill a buy: split a total cash ``budget`` into shares after costs.
+
+    Returns ``(exec_price, shares, fee)`` where ``exec_price`` includes
+    slippage and ``fee`` is commission + buy-side stamp, so
+    ``shares × exec_price + fee == budget``.
+    """
+    market = market_of_code(code)
+    exec_price = slipped_price(open_price, 1, market)
+    rate = trade_fee_rate(True, market)
+    notional = budget / (1 + rate)
+    return exec_price, notional / exec_price, budget - notional
+
+
+def _sell_terms(code: str, open_price: float) -> tuple[float, float]:
+    """Fill terms for a sell: ``(exec_price, fee_rate)`` after slippage."""
+    market = market_of_code(code)
+    return slipped_price(open_price, -1, market), trade_fee_rate(False, market)
 
 
 # ── DCA simulator ───────────────────────────────────────────────────────────
@@ -234,15 +267,17 @@ def _run_dca(
                     amount = cash
                 if amount <= 0:
                     continue
-                new_shares = amount / price
+                exec_price, new_shares, fee = _execute_buy(c, price, amount)
+                if new_shares <= 0:
+                    continue
                 shares[c] += new_shares
                 cost_basis[c] += amount
                 cash -= amount
                 if c not in entry_times:
                     entry_times[c] = ts
                 buy_records.append({
-                    "symbol": c, "time": ts, "price": price,
-                    "shares": new_shares, "amount": amount,
+                    "symbol": c, "time": ts, "price": exec_price,
+                    "shares": new_shares, "amount": amount, "fee": fee,
                 })
 
         portfolio_value = cash
@@ -276,7 +311,7 @@ def _run_dca(
             pnl_pct=round(pnl_pct, 4),
             exit_reason="end_of_backtest",
             holding_bars=(last_ts - b["time"]).days,
-            commission=0.0,
+            commission=round(b["fee"], 4),
         ))
 
     return equity_series, trades
@@ -344,27 +379,33 @@ def _run_value_averaging(
                 diff = target_value - shares[c] * price
                 if diff > 0 and cash > 0:
                     amount = min(diff, cash)
-                    bought = amount / price
+                    exec_price, bought, fee = _execute_buy(c, price, amount)
+                    if bought <= 0:
+                        continue
                     shares[c] += bought
                     cash -= amount
-                    open_buys[c].append({"time": ts, "price": price, "shares": bought})
+                    open_buys[c].append({
+                        "time": ts, "price": exec_price, "shares": bought,
+                        "fee_ps": fee / bought,
+                    })
                 elif diff < 0 and shares[c] > 1e-10:
+                    sell_price, sell_rate = _sell_terms(c, price)
                     quantity = min(-diff / price, shares[c])
                     remaining = quantity
                     while remaining > 1e-10 and open_buys[c]:
                         entry = open_buys[c][0]
                         sold = min(remaining, entry["shares"])
-                        pnl = sold * (price - entry["price"])
+                        pnl = sold * (sell_price - entry["price"])
                         trades.append(TradeRecord(
                             symbol=c, direction=1,
-                            entry_price=round(entry["price"], 4), exit_price=round(price, 4),
+                            entry_price=round(entry["price"], 4), exit_price=round(sell_price, 4),
                             entry_time=entry["time"], exit_time=ts,
                             size=round(sold, 4), leverage=1.0,
                             pnl=round(pnl, 2),
-                            pnl_pct=round((price / entry["price"] - 1) * 100, 4),
+                            pnl_pct=round((sell_price / entry["price"] - 1) * 100, 4),
                             exit_reason="value_path_harvest",
                             holding_bars=(ts - entry["time"]).days,
-                            commission=0.0,
+                            commission=round(sold * entry["fee_ps"] + sold * sell_price * sell_rate, 4),
                         ))
                         entry["shares"] -= sold
                         remaining -= sold
@@ -372,7 +413,7 @@ def _run_value_averaging(
                             open_buys[c].pop(0)
                     executed = quantity - remaining
                     shares[c] -= executed
-                    cash += executed * price
+                    cash += executed * sell_price * (1 - sell_rate)
 
         portfolio_value = cash
         for c in valid_codes:
@@ -403,7 +444,7 @@ def _run_value_averaging(
                 pnl_pct=round((exit_price / entry["price"] - 1) * 100, 4),
                 exit_reason="end_of_backtest",
                 holding_bars=(last_ts - entry["time"]).days,
-                commission=0.0,
+                commission=round(entry["shares"] * entry["fee_ps"], 4),
             ))
 
     return equity_series, trades
@@ -496,13 +537,15 @@ def _run_accelerated_entry(
             amount = min(amount, sleeve_remaining.get(code, 0.0), cash)
             if price <= 0 or amount <= 0:
                 continue
-            new_shares = amount / price
+            exec_price, new_shares, fee = _execute_buy(code, price, amount)
+            if new_shares <= 0:
+                continue
             shares[code] += new_shares
             sleeve_remaining[code] -= amount
             cash -= amount
             buy_records.append({
-                "symbol": code, "time": ts, "price": price,
-                "shares": new_shares, "amount": amount,
+                "symbol": code, "time": ts, "price": exec_price,
+                "shares": new_shares, "amount": amount, "fee": fee,
             })
 
         portfolio_value = cash
@@ -535,7 +578,7 @@ def _run_accelerated_entry(
             pnl_pct=round((exit_price / buy["price"] - 1) * 100, 4),
             exit_reason="end_of_backtest",
             holding_bars=(last_ts - buy["time"]).days,
-            commission=0.0,
+            commission=round(buy["fee"], 4),
         ))
     return equity_series, trades
 
@@ -581,38 +624,44 @@ def _run_deep_drawdown_recovery(
         amount = min(amount, sleeve_cash[code])
         if amount <= 0 or price <= 0:
             return
-        quantity = amount / price
+        exec_price, quantity, fee = _execute_buy(code, price, amount)
+        if quantity <= 0:
+            return
         shares[code] += quantity
         cost_basis[code] += amount
         sleeve_cash[code] -= amount
         buys_completed[code] += 1
-        open_buys[code].append({"time": ts, "price": price, "shares": quantity})
+        open_buys[code].append({
+            "time": ts, "price": exec_price, "shares": quantity,
+            "fee_ps": fee / quantity, "cost_ps": amount / quantity,
+        })
 
     def sell(code: str, ts: pd.Timestamp, quantity: float, price: float) -> None:
+        sell_price, sell_rate = _sell_terms(code, price)
         quantity = min(quantity, shares[code])
         remaining = quantity
         while remaining > 1e-10 and open_buys[code]:
             entry = open_buys[code][0]
             sold = min(remaining, entry["shares"])
-            pnl = sold * (price - entry["price"])
+            pnl = sold * (sell_price - entry["price"])
             trades.append(TradeRecord(
                 symbol=code, direction=1,
-                entry_price=round(entry["price"], 4), exit_price=round(price, 4),
+                entry_price=round(entry["price"], 4), exit_price=round(sell_price, 4),
                 entry_time=entry["time"], exit_time=ts,
                 size=round(sold, 4), leverage=1.0,
                 pnl=round(pnl, 2),
-                pnl_pct=round((price / entry["price"] - 1) * 100, 4),
+                pnl_pct=round((sell_price / entry["price"] - 1) * 100, 4),
                 exit_reason="staged_take_profit_40pct",
                 holding_bars=(ts - entry["time"]).days,
-                commission=0.0,
+                commission=round(sold * entry["fee_ps"] + sold * sell_price * sell_rate, 4),
             ))
-            cost_basis[code] -= sold * entry["price"]
+            cost_basis[code] -= sold * entry["cost_ps"]
             entry["shares"] -= sold
             remaining -= sold
             if entry["shares"] <= 1e-10:
                 open_buys[code].pop(0)
         shares[code] -= quantity - remaining
-        sleeve_cash[code] += (quantity - remaining) * price
+        sleeve_cash[code] += (quantity - remaining) * sell_price * (1 - sell_rate)
         sells_completed[code] += 1
 
         if sells_completed[code] >= exit_tranche_count or shares[code] <= 1e-10:
@@ -715,7 +764,7 @@ def _run_deep_drawdown_recovery(
                 pnl_pct=round((exit_price / entry["price"] - 1) * 100, 4),
                 exit_reason="end_of_backtest",
                 holding_bars=(last_ts - entry["time"]).days,
-                commission=0.0,
+                commission=round(entry["shares"] * entry["fee_ps"], 4),
             ))
 
     equity_series = pd.Series(

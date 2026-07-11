@@ -82,7 +82,8 @@ def test_dca_then_hold_uses_exactly_three_years_of_monthly_tranches():
     )
 
     assert len(trades) == 36
-    assert sum(trade.size for trade in trades) == 360
+    # US fills pay 5bp slippage: $36k of budget buys 36_000 / 100.05 shares.
+    assert sum(trade.size for trade in trades) == pytest.approx(36_000 / 100.05, abs=0.01)
     StrategyConfig(name="dca_then_hold")
 
 
@@ -100,7 +101,8 @@ def test_two_year_dca_then_hold_uses_twenty_four_monthly_tranches():
     )
 
     assert len(trades) == 24
-    assert sum(trade.size for trade in trades) == 2_400
+    # US fills pay 5bp slippage: $240k of budget buys 240_000 / 100.05 shares.
+    assert sum(trade.size for trade in trades) == pytest.approx(240_000 / 100.05, abs=0.01)
     StrategyConfig(name="dca_two_year_then_hold")
 
 
@@ -156,9 +158,11 @@ def test_deep_drawdown_recovery_builds_ten_tranches_and_stages_five_exits():
     frame.loc[drop_day:, ["open", "high", "low", "close"]] = 60.0
     take_profit_signal = pd.Timestamp("2024-11-01")
     first_exit = pd.Timestamp("2024-11-04")
-    frame.loc[take_profit_signal, ["open", "high", "low", "close"]] = 84.0
+    # Cost basis includes 5bp slippage (fills at 60.03), so the +40% trigger
+    # sits at 84.042 — spike to 85 to clear it.
+    frame.loc[take_profit_signal, ["open", "high", "low", "close"]] = 85.0
     frame.loc[first_exit:, ["open", "high", "low", "close"]] = 70.0
-    frame.loc[first_exit, "open"] = 84.0
+    frame.loc[first_exit, "open"] = 85.0
 
     _equity, trades = evaluate_strategy(
         [holding], {"AAPL.US": frame}, "deep_drawdown_recovery",
@@ -177,7 +181,8 @@ def test_deep_drawdown_recovery_builds_ten_tranches_and_stages_five_exits():
         pd.Timestamp("2025-03-03"),
     ]
     assert all(trade.exit_reason == "staged_take_profit_40pct" for trade in trades)
-    assert sum(trade.size for trade in trades) == pytest.approx(2_000, abs=0.1)
+    # Ten $12k tranches fill at 60 × 1.0005 (5bp US slippage).
+    assert sum(trade.size for trade in trades) == pytest.approx(120_000 / 60.03, abs=0.1)
     StrategyConfig(name="deep_drawdown_recovery")
 
 
@@ -372,8 +377,9 @@ def test_value_averaging_buys_more_after_price_drops_than_dca_would():
 
     buys = [t for t in trades if t.exit_reason == "end_of_backtest"]
     # Entry price 50 lot must be materially larger than the 100-price lots.
-    cheap = sum(t.size for t in buys if t.entry_price <= 50)
-    dear = sum(t.size for t in buys if t.entry_price >= 100)
+    # (Fills carry slippage, so bucket around the midpoint instead of exactly.)
+    cheap = sum(t.size for t in buys if t.entry_price < 75)
+    dear = sum(t.size for t in buys if t.entry_price > 75)
     assert cheap > dear
 
 

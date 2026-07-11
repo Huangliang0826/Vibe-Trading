@@ -286,10 +286,12 @@ export const api = {
     request<ForecastResponse>(`/forecast/${market}/${encodeURIComponent(code)}?months=${months}&context=${context}&display_history=${displayHistory}${nocache ? "&nocache=1" : ""}`),
   getForecastCalibration: (market: string, code: string, context = 0) =>
     request<CalibrationResponse>(`/forecast/${market}/${encodeURIComponent(code)}/calibration?context=${context}`),
-  getForecastStrategy: (market: string, code: string, context = 0, costBps = 5) =>
-    request<StrategyResponse>(`/forecast/${market}/${encodeURIComponent(code)}/strategy?context=${context}&cost_bps=${costBps}`),
-  getStrategyRobustness: (codes: string, context = 0, costBps = 5) =>
-    request<RobustnessResponse>(`/forecast/robustness?codes=${encodeURIComponent(codes)}&context=${context}&cost_bps=${costBps}`),
+  // costBps omitted → backend resolves the market's real per-side cost
+  // (slippage + commission + stamp duty) from its global cost model.
+  getForecastStrategy: (market: string, code: string, context = 0, costBps?: number) =>
+    request<StrategyResponse>(`/forecast/${market}/${encodeURIComponent(code)}/strategy?context=${context}${costBps != null ? `&cost_bps=${costBps}` : ""}`),
+  getStrategyRobustness: (codes: string, context = 0, costBps?: number) =>
+    request<RobustnessResponse>(`/forecast/robustness?codes=${encodeURIComponent(codes)}&context=${context}${costBps != null ? `&cost_bps=${costBps}` : ""}`),
   getHSTechSmartT: (period = "ALL", refresh = false) =>
     request<SmartTResponse>(`/hstech/smart-t?period=${period}${refresh ? "&refresh=true" : ""}`),
   getHSTechBestPaperStrategy: (refresh = false, startDate = "2020-01-01") =>

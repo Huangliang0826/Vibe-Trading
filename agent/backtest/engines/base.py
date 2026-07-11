@@ -498,6 +498,7 @@ class BaseEngine(ABC):
             for c in list(self.positions.keys()):
                 position = self.positions[c]
                 close_price = self._safe_price(close_df, last_ts, c, position.entry_price)
+                self._active_symbol = c  # symbol-aware engines slip per market
                 price = self.apply_slippage(close_price, -position.direction)
                 self._close_position(c, price, last_ts, "end_of_backtest")
             if self.equity_snapshots:
