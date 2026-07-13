@@ -18,9 +18,17 @@ export function DataCoverageSummary({
   freshness,
   coverage,
 }: {
-  freshness: AnalyticsFreshness;
-  coverage: AnalyticsCoverage;
+  freshness?: AnalyticsFreshness;
+  coverage?: AnalyticsCoverage;
 }) {
+  if (!coverage || !freshness) {
+    return (
+      <aside className="rounded-xl border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        覆盖数据暂不可用
+      </aside>
+    );
+  }
+
   const dataThroughCandidates = coverage.sources
     .map((source) => source.data_through)
     .filter((value): value is string => Boolean(value))

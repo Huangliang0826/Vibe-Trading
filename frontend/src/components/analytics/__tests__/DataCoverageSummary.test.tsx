@@ -4,6 +4,12 @@ import { describe, expect, it } from "vitest";
 import { DataCoverageSummary } from "../DataCoverageSummary";
 
 describe("DataCoverageSummary", () => {
+  it("handles responses from servers that do not expose coverage yet", () => {
+    render(<DataCoverageSummary freshness={undefined} coverage={undefined} />);
+
+    expect(screen.getByText("覆盖数据暂不可用")).toBeInTheDocument();
+  });
+
   it("explains partial coverage without showing a fake zero", () => {
     render(
       <DataCoverageSummary
