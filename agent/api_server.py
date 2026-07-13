@@ -4993,16 +4993,40 @@ from src.api.alpha_routes import register_alpha_routes  # noqa: E402
 register_alpha_routes(app)
 
 from src.analytics.collector import AnalyticsCollector  # noqa: E402
+from src.analytics.quality_backfill import QualityBackfillCoordinator  # noqa: E402
+from src.analytics.quality_sources import (  # noqa: E402
+    BacktestHistorySource,
+    PaperTradingHistorySource,
+    ScannerHistorySource,
+)
 from src.analytics.rollup import AnalyticsRollup  # noqa: E402
 from src.analytics.runtime import AnalyticsRuntime  # noqa: E402
 from src.analytics.service import AnalyticsService  # noqa: E402
 from src.analytics.store import AnalyticsStore  # noqa: E402
+from src.config.paths import get_runtime_root  # noqa: E402
 from src.api.analytics_routes import register_analytics_routes  # noqa: E402
 
 _analytics_store = AnalyticsStore()
 _analytics_collector = AnalyticsCollector(_analytics_store)
 _analytics_rollup = AnalyticsRollup(_analytics_store)
-_analytics_runtime = AnalyticsRuntime(_analytics_collector, _analytics_rollup)
+_analytics_enabled = os.getenv("ANALYTICS_ENABLED", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+_analytics_quality_backfill = None
+if _analytics_enabled:
+    _analytics_quality_backfill = QualityBackfillCoordinator(
+        _analytics_store,
+        (
+            ScannerHistorySource(get_runtime_root() / "tracking"),
+            BacktestHistorySource(RUNS_DIR),
+            PaperTradingHistorySource(_get_paper_trading_store()),
+        ),
+    )
+_analytics_runtime = AnalyticsRuntime(
+    _analytics_collector,
+    _analytics_rollup,
+    quality_backfill=_analytics_quality_backfill,
+)
 register_analytics_routes(
     app,
     require_auth=require_local_or_auth,

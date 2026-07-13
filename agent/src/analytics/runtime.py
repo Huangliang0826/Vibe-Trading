@@ -11,6 +11,7 @@ from fastapi import Request
 
 from .collector import AnalyticsCollector
 from .models import AnalyticsEvent
+from .quality_backfill import QualityBackfillCoordinator
 from .rollup import AnalyticsRollup
 from .version import read_app_version
 
@@ -23,10 +24,12 @@ class AnalyticsRuntime:
         collector: AnalyticsCollector,
         rollup: AnalyticsRollup,
         *,
+        quality_backfill: QualityBackfillCoordinator | None = None,
         poll_seconds: float = 1.0,
     ) -> None:
         self.collector = collector
         self.rollup = rollup
+        self.quality_backfill = quality_backfill
         self.poll_seconds = poll_seconds
         self.task: asyncio.Task[None] | None = None
         self.app_version = read_app_version(Path(__file__).resolve().parents[3])
@@ -56,6 +59,14 @@ class AnalyticsRuntime:
             await self.flush_once()
             now = time.monotonic()
             if now - last_rollup >= 3600:
+                if self.quality_backfill is not None:
+                    try:
+                        await asyncio.to_thread(self.quality_backfill.run)
+                    except Exception as exc:
+                        logger.warning(
+                            "analytics quality backfill failed with %s",
+                            type(exc).__name__,
+                        )
                 try:
                     await asyncio.to_thread(self.rollup.run_missing_days)
                     await asyncio.to_thread(self.rollup.store.prune)
