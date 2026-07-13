@@ -2828,6 +2828,7 @@ async def get_forecast_calibration(
     key = f"calib:{market}:{code.upper()}:{bt_horizon}:{context}"
     cached = _CALIB_CACHE.get(key)
     if cached and (time.time() - cached[0]) < _CALIB_TTL:
+        _submit_forecast_quality({**cached[1], "bt_horizon": bt_horizon})
         return {**cached[1], "cached": True}
     try:
         hist = await asyncio.to_thread(_fetch_price_history, code.strip(), "ALL", market)
@@ -2848,6 +2849,7 @@ async def get_forecast_calibration(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"calibration failed: {exc}") from exc
     _CALIB_CACHE[key] = (time.time(), payload)
+    _submit_forecast_quality({**payload, "bt_horizon": bt_horizon})
     return {**payload, "cached": False}
 
 
@@ -5007,8 +5009,27 @@ register_analytics_routes(
     service=AnalyticsService(_analytics_store, _analytics_collector, _analytics_rollup),
 )
 
+
+def _submit_quality_events(events) -> None:
+    for event in events:
+        _analytics_collector.submit(event)
+
+
+def _submit_forecast_quality(payload) -> None:
+    if os.getenv("ANALYTICS_ENABLED", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return
+    try:
+        from src.analytics.quality_adapters import ForecastQualityAdapter
+        _submit_quality_events(ForecastQualityAdapter().from_calibration(payload))
+    except Exception as exc:
+        logger.warning("forecast quality collection failed with %s", type(exc).__name__)
+
 from src.api.scan_routes import register_scan_routes  # noqa: E402
-register_scan_routes(app)
+register_scan_routes(
+    app,
+    require_auth=require_local_or_auth,
+    quality_sink=None if os.getenv("ANALYTICS_ENABLED", "1").strip().lower() in {"0", "false", "no", "off"} else _submit_quality_events,
+)
 
 from src.api.opportunity_routes import register_opportunity_routes  # noqa: E402
 _opportunity_runtime = register_opportunity_routes(

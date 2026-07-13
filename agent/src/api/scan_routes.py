@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import time
 from typing import Any, Awaitable, Callable
 
@@ -17,8 +18,12 @@ from src.scanner.tracking import (
     load_all_tracking, load_tracking,
 )
 from src.scanner.universe_metadata import attach_company_names
+from src.analytics.models import AnalyticsEvent
+from src.analytics.quality_adapters import ScannerQualityAdapter
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
+QualitySink = Callable[[list[AnalyticsEvent]], None]
+logger = logging.getLogger(__name__)
 
 _SCAN_RESULT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _SCAN_RESULT_TTL = 24 * 3600
@@ -50,7 +55,11 @@ def _cache_set(key: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {**payload, "cached": False}
 
 
-def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> None:
+def register_scan_routes(
+    app: FastAPI,
+    require_auth: AuthDep | None = None,
+    quality_sink: QualitySink | None = None,
+) -> None:
     """Mount scanner routes onto ``app``.
 
     Args:
@@ -321,9 +330,16 @@ def register_scan_routes(app: FastAPI, require_auth: AuthDep | None = None) -> N
         provider = provider or None
         if provider not in (None, "factor_rank", "anomaly"):
             raise HTTPException(status_code=400, detail="unknown provider filter")
-        records = load_all_tracking(universe=_validate_scan_universe(universe))
-        return {"universe": universe, "provider": provider,
-                **compute_accuracy(records, provider=provider)}
+        validated = _validate_scan_universe(universe)
+        records = load_all_tracking(universe=validated)
+        result = {"universe": universe, "provider": provider,
+                  **compute_accuracy(records, provider=provider)}
+        if quality_sink is not None:
+            try:
+                quality_sink(ScannerQualityAdapter().collect(validated, provider))
+            except Exception as exc:
+                logger.warning("scanner quality collection failed with %s", type(exc).__name__)
+        return result
 
     @app.get("/scan/calibration", dependencies=[Depends(require_auth)])
     async def scan_calibration(universe: str = "sp500") -> dict[str, Any]:
