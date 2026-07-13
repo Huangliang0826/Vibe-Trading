@@ -10,6 +10,7 @@ import {
   strategySessionKey,
   writeSessionCache,
 } from "@/lib/forecast-session-cache";
+import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 
 const FORECAST_SESSION_TTL = 48 * 60 * 60 * 1000;
 const STRATEGY_SESSION_TTL = 24 * 60 * 60 * 1000;
@@ -512,6 +513,7 @@ export function Forecast() {
         ...prev,
         [key]: { data: cached, loading: false, error: null },
       }));
+      trackProductEvent({ feature: "forecast", action: "result_view", outcome: "success", sessionId: analyticsSessionId("/forecast"), metadata: { route: "/forecast", market, source: "session_cache" } });
       return;
     }
     const pending = bestRequestsRef.current.get(reqKey);
@@ -520,12 +522,18 @@ export function Forecast() {
       ...prev,
       [key]: { data: prev[key]?.data || null, loading: true, error: null },
     }));
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/forecast");
+    trackProductEvent({ feature: "forecast", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/forecast", market, source: "best_strategy" } });
     const request = api.getForecastBestPaperStrategy(market, code, refresh, "2020-01-01", strat)
       .then((data) => {
         writeSessionCache(sessionKey, compactStrategyResponse(data));
         setBestByKey((prev) => ({ ...prev, [key]: { data, loading: false, error: null } }));
+        trackProductEvent({ feature: "forecast", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/forecast", market, source: "best_strategy" } });
+        trackProductEvent({ feature: "forecast", action: "result_view", outcome: "success", sessionId, metadata: { route: "/forecast", market, source: "best_strategy" } });
       })
       .catch((e) => {
+        trackProductEvent({ feature: "forecast", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/forecast", market, source: "best_strategy" } });
         setBestByKey((prev) => ({
           ...prev,
           [key]: {

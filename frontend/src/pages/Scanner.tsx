@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { lastClosedTradingDay, type ScanUniverse } from "@/lib/market";
 import { ScanAccuracyPanel } from "@/components/charts/ScanAccuracyPanel";
+import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
   factor_rank: { label: "因子", color: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
@@ -150,9 +151,14 @@ export function Scanner() {
   // 失败则静默回退到已有的最新一期。
   const autoRefreshScan = useCallback(async (targetUniverse: ScanUniverse, existingDates: string[]) => {
     setAutoRefreshing(true);
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/scanner");
+    trackProductEvent({ feature: "scanner", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/scanner", market: targetUniverse } });
     try {
       const scan = await api.runScan(targetUniverse, 20);
       setData(scan);
+      trackProductEvent({ feature: "scanner", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/scanner", market: targetUniverse, result_count: scan.candidates.length } });
+      trackProductEvent({ feature: "scanner", action: "result_view", outcome: "success", sessionId, metadata: { route: "/scanner", market: targetUniverse, result_count: scan.candidates.length } });
       setDateIdx(0);
       const [dateResult, trackingResult, calibrationResult] = await Promise.all([
         api.getScanDates(targetUniverse),
@@ -167,6 +173,7 @@ export function Scanner() {
       if (calibrationResult) setCalibration(calibrationResult);
       setLoading(false);
     } catch {
+      trackProductEvent({ feature: "scanner", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/scanner", market: targetUniverse } });
       if (existingDates.length > 0) {
         loadScan(targetUniverse, existingDates[0]);
         if (existingDates.length > 1) loadPrevious(targetUniverse, existingDates[1]);
@@ -226,10 +233,15 @@ export function Scanner() {
     if (refreshing) return;
     setRefreshing(true);
     setError(null);
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/scanner");
+    trackProductEvent({ feature: "scanner", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/scanner", market: universe } });
     try {
       const previous = data;
       const scan = await api.runScan(universe, 20);
       setData(scan);
+      trackProductEvent({ feature: "scanner", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/scanner", market: universe, result_count: scan.candidates.length } });
+      trackProductEvent({ feature: "scanner", action: "result_view", outcome: "success", sessionId, metadata: { route: "/scanner", market: universe, result_count: scan.candidates.length } });
       if (previous) setPrevData(previous.asof === scan.asof ? prevData : previous);
       setDateIdx(0);
       const [dateResult, trackingResult, calibrationResult] = await Promise.all([
@@ -243,6 +255,7 @@ export function Scanner() {
       setTracking(nextTracking);
       if (calibrationResult) setCalibration(calibrationResult);
     } catch (reason) {
+      trackProductEvent({ feature: "scanner", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/scanner", market: universe } });
       setError(reason instanceof Error ? reason.message : "更新机会失败");
     } finally {
       setRefreshing(false);

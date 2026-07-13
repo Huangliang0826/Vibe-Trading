@@ -7,6 +7,7 @@ import { useApiHealth } from "@/hooks/useApiHealth";
 import { api, type SessionItem } from "@/lib/api";
 import { useAgentStore } from "@/stores/agent";
 import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
+import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 
 // Bump on each release; one place keeps the footer in sync with package.json.
 const APP_VERSION = "v0.1.9";
@@ -50,6 +51,17 @@ export function Layout() {
 
   useEffect(() => {
     setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    const route = `/${pathname.split("/").filter(Boolean)[0] || "overview"}`;
+    trackProductEvent({
+      feature: route.slice(1),
+      action: "page_view",
+      outcome: "success",
+      sessionId: analyticsSessionId(route),
+      metadata: { route },
+    });
   }, [pathname]);
 
   const loadSessions = () => {

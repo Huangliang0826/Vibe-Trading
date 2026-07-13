@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { AlertCircle, ChevronDown, ChevronRight, FileSearch, Loader2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api, type ResearchAnalysisListParams, type ResearchAnalysisRun } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 
 const RATING_LABEL: Record<string, string> = {
   buy: "买入倾向",
@@ -124,6 +125,9 @@ export function ResearchAnalysis() {
     }
     setCreating(true);
     setError(null);
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/research-analysis");
+    trackProductEvent({ feature: "research_analysis", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/research-analysis", source: "multi_agent" } });
     try {
       const run = await api.createResearchAnalysisRun({
         symbol: trimmed,
@@ -132,7 +136,10 @@ export function ResearchAnalysis() {
       });
       setSelectedRun(run);
       setRuns((prev) => [run, ...prev.filter((item) => item.run_id !== run.run_id)]);
+      trackProductEvent({ feature: "research_analysis", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/research-analysis", source: "multi_agent" } });
+      trackProductEvent({ feature: "research_analysis", action: "result_view", outcome: "success", sessionId, metadata: { route: "/research-analysis", source: "multi_agent" } });
     } catch (err) {
+      trackProductEvent({ feature: "research_analysis", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/research-analysis", source: "multi_agent" } });
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);

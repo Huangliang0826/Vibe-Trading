@@ -5,6 +5,7 @@ import { PaperEquityChart } from "@/components/charts/PaperEquityChart";
 import { PaperHoldingPriceChart } from "@/components/charts/PaperHoldingPriceChart";
 import { cn } from "@/lib/utils";
 import { buildRobustWinnerRunRequest } from "@/lib/paper-trading-robust";
+import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | "neutral" }) {
   const color = tone === "good" ? "text-emerald-600 dark:text-emerald-400"
@@ -446,9 +447,16 @@ export function PaperTrading() {
     if (selectedExperimentIds.length < 2) return;
     setExperimentCompareLoading(true);
     setError(null);
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/paper-trading");
+    trackProductEvent({ feature: "paper_trading", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/paper-trading", source: "experiment_compare" } });
     try {
       setExperimentComparison(await api.comparePaperTradingExperiments(selectedExperimentIds));
+      trackProductEvent({ feature: "paper_trading", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/paper-trading", source: "experiment_compare" } });
+      trackProductEvent({ feature: "paper_trading", action: "experiment_compare", outcome: "success", sessionId, metadata: { route: "/paper-trading" } });
+      trackProductEvent({ feature: "paper_trading", action: "result_view", outcome: "success", sessionId, metadata: { route: "/paper-trading", source: "experiment_compare" } });
     } catch (e) {
+      trackProductEvent({ feature: "paper_trading", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/paper-trading", source: "experiment_compare" } });
       setError(e instanceof Error ? e.message : "实验对比失败");
     } finally {
       setExperimentCompareLoading(false);
@@ -612,6 +620,9 @@ export function PaperTrading() {
     setSubmitting(true);
     setError(null);
     setActiveRun(null);
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/paper-trading");
+    trackProductEvent({ feature: "paper_trading", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/paper-trading", source: "single_run" } });
 
     const params: Record<string, unknown> = {};
     Object.assign(params, strategyParamsFor(strategy, dcaFrequency, gridCount));
@@ -626,8 +637,12 @@ export function PaperTrading() {
         initial_hkd: 0,
       });
       setActiveRun(run);
+      trackProductEvent({ feature: "paper_trading", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/paper-trading", source: "single_run" } });
+      trackProductEvent({ feature: "paper_trading", action: "experiment_save", outcome: "success", sessionId, metadata: { route: "/paper-trading" } });
+      trackProductEvent({ feature: "paper_trading", action: "result_view", outcome: "success", sessionId, metadata: { route: "/paper-trading", source: "single_run" } });
       pollRun(run.run_id);
     } catch (e: any) {
+      trackProductEvent({ feature: "paper_trading", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/paper-trading", source: "single_run" } });
       setError(e?.message || "创建回测失败");
     } finally {
       setSubmitting(false);
@@ -734,6 +749,9 @@ export function PaperTrading() {
     setActiveRun(null);
     setOptimalRuns([]);
     setRobustResult(null);
+    const started = performance.now();
+    const sessionId = analyticsSessionId("/paper-trading");
+    trackProductEvent({ feature: "paper_trading", action: "task_start", outcome: "unknown", sessionId, metadata: { route: "/paper-trading", source: "robust_optimize" } });
     try {
       const result = await api.robustOptimizePaperTrading({
         holdings,
@@ -761,9 +779,13 @@ export function PaperTrading() {
         initialHkd: 0,
       }));
       setActiveRun(run);
+      trackProductEvent({ feature: "paper_trading", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/paper-trading", source: "robust_optimize" } });
+      trackProductEvent({ feature: "paper_trading", action: "experiment_save", outcome: "success", sessionId, metadata: { route: "/paper-trading" } });
+      trackProductEvent({ feature: "paper_trading", action: "result_view", outcome: "success", sessionId, metadata: { route: "/paper-trading", source: "robust_optimize" } });
       setRobustAutoRunning(true);
       pollRun(run.run_id, () => setRobustAutoRunning(false));
     } catch (e: any) {
+      trackProductEvent({ feature: "paper_trading", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/paper-trading", source: "robust_optimize" } });
       setError(e?.message || "多时间段测试失败");
     } finally {
       setRobustLoading(false);
