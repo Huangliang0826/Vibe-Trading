@@ -1,4 +1,12 @@
-from src.analytics.quality_adapters import ForecastQualityAdapter, ScannerQualityAdapter
+from datetime import date
+from types import SimpleNamespace
+
+from src.analytics.quality_adapters import (
+    BacktestQualityAdapter,
+    ForecastQualityAdapter,
+    PaperTradingQualityAdapter,
+    ScannerQualityAdapter,
+)
 
 
 def test_scanner_adapter_maps_each_horizon_without_recomputing(monkeypatch):
@@ -28,3 +36,49 @@ def test_forecast_adapter_maps_calibration_payload():
     assert all(event.metadata["formula_version"] == "forecast.calibration.v1" for event in events)
     assert all(event.metadata["subject_id"] == "AAPL" for event in events)
     assert all(event.metadata["sample_count"] == 25 for event in events)
+
+
+def test_backtest_adapter_preserves_authoritative_metrics():
+    events = BacktestQualityAdapter().from_metrics(
+        run_id="run-1",
+        market="us",
+        as_of=date(2026, 7, 12),
+        metrics={
+            "total_return": 0.21,
+            "sharpe": 1.4,
+            "max_drawdown": -0.12,
+            "trade_count": 31,
+            "ignored": 123,
+        },
+    )
+
+    values = {
+        event.metadata["metric_name"]: event.metadata["metric_value"]
+        for event in events
+    }
+    assert values == {
+        "total_return": 0.21,
+        "sharpe": 1.4,
+        "max_drawdown": -0.12,
+        "trade_count": 31.0,
+    }
+    assert all(event.metadata["sample_count"] == 31 for event in events)
+
+
+def test_paper_adapter_uses_completion_date_and_metric_version():
+    run = SimpleNamespace(
+        run_id="paper-1",
+        updated_at="2026-07-12T14:30:00Z",
+        holdings=[SimpleNamespace(market="us")],
+        experiment=SimpleNamespace(metric_version="backtest.metrics.v2"),
+        metrics={"total_return": 0.15, "trade_count": 24},
+    )
+
+    events = PaperTradingQualityAdapter().from_run(run)
+
+    assert {event.metadata["as_of"] for event in events} == {"2026-07-12"}
+    assert all(
+        event.metadata["formula_version"] == "paper.backtest.metrics.v2"
+        for event in events
+    )
+    assert all(event.metadata["sample_count"] == 24 for event in events)

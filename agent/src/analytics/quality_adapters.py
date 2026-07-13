@@ -19,11 +19,28 @@ def _finite(value: object) -> float | None:
 
 class ScannerQualityAdapter:
     def collect(self, universe: str, provider: str | None = None) -> list[AnalyticsEvent]:
-        records = load_all_tracking(universe)
-        payload = compute_accuracy(records, provider=provider)
+        records = load_all_tracking(universe=universe)
         market = {"sp500": "us", "hstech": "hk"}.get(universe, universe)
         dates = [getattr(record, "asof", None) for record in records]
         as_of = date.fromisoformat(max(value for value in dates if value)) if any(dates) else date.today()
+        return self.from_records(
+            records,
+            market=market,
+            subject_id=provider or "all",
+            as_of=as_of,
+            provider=provider,
+        )
+
+    def from_records(
+        self,
+        records: list[Any],
+        *,
+        market: str,
+        subject_id: str,
+        as_of: date,
+        provider: str | None = None,
+    ) -> list[AnalyticsEvent]:
+        payload = compute_accuracy(records, provider=provider)
         events: list[AnalyticsEvent] = []
         mapping = {
             "mean": "mean_forward_return_pct",
@@ -54,7 +71,7 @@ class ScannerQualityAdapter:
                     low, high = bootstrap_interval(raw_values, statistic="mean")
                 events.append(make_quality_event(
                     subject_type="scanner",
-                    subject_id=provider or "all",
+                    subject_id=subject_id,
                     market=market,
                     horizon=horizon,
                     regime="all",
@@ -112,3 +129,66 @@ class ForecastQualityAdapter:
                 interval_high=high,
             ))
         return events
+
+
+SCALAR_METRICS = (
+    "total_return",
+    "total_return_pct",
+    "annual_return",
+    "annual_return_pct",
+    "sharpe",
+    "max_loss",
+    "max_drawdown",
+    "win_rate",
+    "trade_count",
+)
+
+
+class BacktestQualityAdapter:
+    def from_metrics(
+        self,
+        *,
+        run_id: str,
+        market: str,
+        as_of: date,
+        metrics: Mapping[str, Any],
+        formula_version: str = "backtest.metrics.v2",
+    ) -> list[AnalyticsEvent]:
+        trade_count = _finite(metrics.get("trade_count"))
+        sample_count = max(1, int(trade_count or 1))
+        events: list[AnalyticsEvent] = []
+        for metric_name in SCALAR_METRICS:
+            value = _finite(metrics.get(metric_name))
+            if value is None:
+                continue
+            events.append(make_quality_event(
+                subject_type="backtest",
+                subject_id=run_id,
+                market=market,
+                horizon="run",
+                regime="all",
+                metric_name=metric_name,
+                metric_value=value,
+                sample_count=sample_count,
+                formula_version=formula_version,
+                as_of=as_of,
+            ))
+        return events
+
+
+class PaperTradingQualityAdapter:
+    def from_run(self, run: Any) -> list[AnalyticsEvent]:
+        updated_at = str(getattr(run, "updated_at", ""))
+        as_of = date.fromisoformat(updated_at[:10])
+        holdings = getattr(run, "holdings", ()) or ()
+        markets = {str(getattr(holding, "market", "unknown")) for holding in holdings}
+        market = next(iter(markets)) if len(markets) == 1 else "multi"
+        experiment = getattr(run, "experiment", None)
+        metric_version = str(getattr(experiment, "metric_version", "backtest.metrics.v2"))
+        return BacktestQualityAdapter().from_metrics(
+            run_id=str(run.run_id),
+            market=market,
+            as_of=as_of,
+            metrics=getattr(run, "metrics", None) or {},
+            formula_version=f"paper.{metric_version}",
+        )
