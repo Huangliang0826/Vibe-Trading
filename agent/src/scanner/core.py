@@ -174,7 +174,7 @@ def run_scan(
     universe: str,
     asof: str,
     providers: list[Any],
-    period: str = "2018-2025",
+    period: str | None = None,
     panel_loader: Any = None,
 ) -> ScanResult:
     """Run all ``providers`` over the truncated universe panel as of ``asof``.
@@ -183,13 +183,19 @@ def run_scan(
         universe: Universe key (``sp500``).
         asof: ISO close date to scan.
         providers: Instantiated SignalProvider-likes (have .provider_id + .compute).
-        period: History window passed to the panel loader.
+        period: History window passed to the panel loader. Defaults to
+            2018-01-01 through ``asof`` — the window MUST follow ``asof``: a
+            fixed period (the old ``"2018-2025"`` default) froze every 2026
+            scan on data ending 2025-12-31, producing identical scores and
+            rankings day after day.
         panel_loader: Injectable ``(universe, period) -> panel``; defaults to the
             real ``_load_universe_panel``.
 
     Returns:
         A ScanResult (NOT persisted — caller decides).
     """
+    if period is None:
+        period = f"2018-01-01/{asof}"
     if panel_loader is None:
         from src.tools.alpha_bench_tool import _load_universe_panel as panel_loader  # type: ignore
 

@@ -98,7 +98,8 @@ def _load_universe_panel(
         period: ``YYYY-YYYY`` or ``YYYY-MM-DD/YYYY-MM-DD``.
         use_cache: When True (default) reuse a pickle in
             ``~/.vibe-trading/cache/`` if the same universe+period was fetched
-            before. Set to False to force a re-fetch.
+            before and is still fresh (see ``_cache_is_fresh``). Set to False
+            to force a re-fetch.
 
     Raises:
         ValueError: unknown universe or bad period.
@@ -112,7 +113,7 @@ def _load_universe_panel(
 
     cache_dir = Path.home() / ".vibe-trading" / "cache"
     cache_path = cache_dir / f"{universe}_{start}_{end}.pkl"
-    if use_cache and cache_path.is_file():
+    if use_cache and cache_path.is_file() and _cache_is_fresh(cache_path, end):
         cached = _read_pickle_cache(cache_path)
         if cached is not None:
             logger.info("universe %s: loaded from cache %s", universe, cache_path)
@@ -150,8 +151,70 @@ def _load_universe_panel(
 
     if use_cache:
         _write_pickle_cache(cache_dir, cache_path, panel)
+        _prune_dead_caches(cache_dir, universe, keep=cache_path)
 
     return panel
+
+
+def _cache_is_fresh(cache_path: Path, end: str) -> bool:
+    """A cached panel can only contain data through the day it was written.
+
+    A file written on day X serving a period that extends past X silently
+    freezes every consumer at X's prices — the daily scanner scored on a
+    three-week-old panel this way (identical ranks day after day, observed
+    2026-07-13). Rule: the cache is fresh only when its mtime date is on or
+    after ``min(end, today)``; a fully historical period (end < write date)
+    stays cached forever, while an open-ended period must have been fetched
+    today.
+    """
+    import datetime as _dt
+
+    try:
+        written = _dt.date.fromtimestamp(cache_path.stat().st_mtime)
+    except OSError:
+        return False
+    required = min(_dt.date.fromisoformat(end), _dt.date.today())
+    if written >= required:
+        return True
+    logger.info(
+        "cache %s written %s but data through %s is required; refetching",
+        cache_path.name, written, required,
+    )
+    return False
+
+
+_CACHE_NAME = re.compile(r"^(?P<universe>.+)_(?P<start>\d{4}-\d{2}-\d{2})_(?P<end>\d{4}-\d{2}-\d{2})\.pkl$")
+
+
+def _prune_dead_caches(cache_dir: Path, universe: str, keep: Path) -> None:
+    """Delete sibling caches that the freshness rule already refuses.
+
+    Daily scans now cache one panel per as-of date (sp500 panels run tens of
+    MB), so without pruning the cache directory grows unbounded. Only files
+    that are dead by rule — period end past their own write date, i.e. they
+    can never be served again — are removed; complete historical panels
+    (end before write date) are kept forever.
+    """
+    import datetime as _dt
+
+    for candidate in cache_dir.glob(f"{universe}_*.pkl"):
+        if candidate == keep:
+            continue
+        match = _CACHE_NAME.match(candidate.name)
+        if match is None or match.group("universe") != universe:
+            continue
+        if _cache_is_fresh(candidate, match.group("end")):
+            continue
+        try:
+            written = _dt.date.fromtimestamp(candidate.stat().st_mtime)
+            candidate.unlink(missing_ok=True)
+            _sha256_path(candidate).unlink(missing_ok=True)
+            logger.info(
+                "pruned dead cache %s (written %s, period ends %s)",
+                candidate.name, written, match.group("end"),
+            )
+        except OSError:
+            pass
 
 
 def _sha256_path(cache_path: Path) -> Path:
