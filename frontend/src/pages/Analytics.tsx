@@ -55,7 +55,7 @@ function formatValue(metric: string, value: number | null): string {
 }
 
 export function Analytics() {
-  const [view, setView] = useState<AnalyticsView>("usage");
+  const [view, setView] = useState<AnalyticsView>("development");
   const [days, setDays] = useState<AnalyticsDays>(30);
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,10 +98,10 @@ export function Analytics() {
       </header>
 
       <div className="flex gap-2">
+        <button onClick={() => setView("development")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "development" && "border-primary bg-primary/10 text-primary")}><RefreshCw className="h-4 w-4" />研发与版本</button>
         <button onClick={() => setView("usage")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "usage" && "border-primary bg-primary/10 text-primary")}><Activity className="h-4 w-4" />功能使用</button>
         <button onClick={() => setView("system")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "system" && "border-primary bg-primary/10 text-primary")}><Database className="h-4 w-4" />系统健康</button>
         <button onClick={() => setView("research")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "research" && "border-primary bg-primary/10 text-primary")}><BarChart3 className="h-4 w-4" />研究质量</button>
-        <button onClick={() => setView("development")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "development" && "border-primary bg-primary/10 text-primary")}><RefreshCw className="h-4 w-4" />研发与版本</button>
       </div>
 
       {view === "research" && <ResearchQualityView days={days} />}
