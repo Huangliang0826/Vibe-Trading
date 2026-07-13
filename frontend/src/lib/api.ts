@@ -457,6 +457,11 @@ export const api = {
     if (params.regime) query.set("regime", params.regime);
     return request<AnalyticsResearchQualityResponse>(`/api/analytics/research-quality?${query}`);
   },
+  getAnalyticsDevelopment: (days: AnalyticsDays = 30, release?: string, windowDays: 7 | 30 = 7) => {
+    const query = new URLSearchParams({ days: String(days), window_days: String(windowDays) });
+    if (release) query.set("release", release);
+    return request<AnalyticsDevelopmentResponse>(`/api/analytics/development?${query}`);
+  },
 
 };
 
@@ -534,6 +539,32 @@ export interface AnalyticsResearchQualityResponse {
   status: "available" | "insufficient_sample" | "no_data";
   value: number | null;
   series: AnalyticsResearchSeriesPoint[];
+}
+
+export interface AnalyticsCommit {
+  sha: string; authored_at: string; author: string; subject: string;
+  files_changed: number; insertions: number; deletions: number;
+  modules: string[]; test_files_changed: number;
+}
+export interface AnalyticsFeatureGroup {
+  label: string; commit_shas: string[]; subjects: string[]; modules: string[];
+  started_at: string; ended_at: string; files_changed: number; insertions: number; deletions: number;
+}
+export interface AnalyticsRelease { tag: string; sha: string; created_at: string; }
+export interface ReleaseMetricComparison {
+  metric: string; before_value: number | null; after_value: number | null;
+  before_sample_count: number; after_sample_count: number;
+}
+export interface AnalyticsReleaseComparison {
+  status: string; tag: string; window_days?: number; metrics: ReleaseMetricComparison[];
+  causal: false; disclaimer: string;
+}
+export interface AnalyticsDevelopmentResponse {
+  data_through: string | null; generated_at: string; sample_count: number;
+  calculation_version: string; warnings: string[]; days: AnalyticsDays;
+  commits: AnalyticsCommit[]; feature_groups: AnalyticsFeatureGroup[];
+  module_churn: Array<{ module: string; files_changed: number; insertions: number; deletions: number; changed_lines: number }>;
+  releases: AnalyticsRelease[]; release_comparison: AnalyticsReleaseComparison | null;
 }
 
 // --- 行情看板 types ---
