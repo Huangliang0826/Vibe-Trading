@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.vibetrading.data-quality</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/lianghuang/Vibe-Trading/.venv/bin/python</string>
+    <string>-m</string>
+    <string>src.data_quality.sentinel</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/lianghuang/Vibe-Trading/agent</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key><string>/Users/lianghuang/Vibe-Trading/agent</string>
+  </dict>
+  <!-- Daily at 22:20 — after the HK close scan, before the 22:35 backup, so a
+       corrupted feed is flagged the same evening its data would be archived.
+       Alerts land in ~/.vibe-trading/watchdog.log; detail in
+       ~/.vibe-trading/logs/data_quality.log. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>22</integer>
+    <key>Minute</key><integer>20</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/lianghuang/.vibe-trading/logs/data-quality-launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/lianghuang/.vibe-trading/logs/data-quality-launchd.log</string>
+</dict>
+</plist>
