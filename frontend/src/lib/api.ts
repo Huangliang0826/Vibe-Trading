@@ -450,6 +450,13 @@ export const api = {
     request<AnalyticsUsageResponse>(`/api/analytics/usage?days=${days}`),
   getAnalyticsSystemHealth: (days: AnalyticsDays = 30) =>
     request<AnalyticsSystemHealthResponse>(`/api/analytics/system-health?days=${days}`),
+  getAnalyticsResearchQuality: (params: AnalyticsResearchQualityParams) => {
+    const query = new URLSearchParams({ days: String(params.days), subject: params.subject });
+    if (params.market) query.set("market", params.market);
+    if (params.horizon) query.set("horizon", params.horizon);
+    if (params.regime) query.set("regime", params.regime);
+    return request<AnalyticsResearchQualityResponse>(`/api/analytics/research-quality?${query}`);
+  },
 
 };
 
@@ -492,6 +499,42 @@ export interface AnalyticsUsageResponse extends AnalyticsTrendResponse {
 }
 
 export type AnalyticsSystemHealthResponse = AnalyticsTrendResponse;
+
+export interface AnalyticsResearchQualityParams {
+  days: AnalyticsDays;
+  subject: "scanner" | "forecast" | "backtest" | "paper_trading";
+  market?: string;
+  horizon?: string;
+  regime?: string;
+}
+
+export interface AnalyticsResearchSeriesPoint {
+  bucket: string;
+  subject: string;
+  subject_id: string;
+  market: string;
+  horizon: string;
+  regime: string;
+  metric: string;
+  value: number | null;
+  sample_count: number;
+  interval_low: number | null;
+  interval_high: number | null;
+  formula_version: string;
+  reason: string | null;
+}
+
+export interface AnalyticsResearchQualityResponse {
+  data_through: string | null;
+  generated_at: string;
+  sample_count: number;
+  calculation_version: string;
+  warnings: string[];
+  days: AnalyticsDays;
+  status: "available" | "insufficient_sample" | "no_data";
+  value: number | null;
+  series: AnalyticsResearchSeriesPoint[];
+}
 
 // --- 行情看板 types ---
 

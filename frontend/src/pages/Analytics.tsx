@@ -4,8 +4,9 @@ import { api, type AnalyticsDays, type AnalyticsMetricPoint, type AnalyticsSyste
 import { MetricCard } from "@/components/analytics/MetricCard";
 import { TrendChart } from "@/components/analytics/TrendChart";
 import { cn } from "@/lib/utils";
+import { ResearchQualityView } from "@/components/analytics/ResearchQualityView";
 
-type AnalyticsView = "usage" | "system";
+type AnalyticsView = "usage" | "system" | "research";
 type DashboardResponse = AnalyticsUsageResponse | AnalyticsSystemHealthResponse;
 
 const LABELS: Record<string, string> = {
@@ -22,6 +23,7 @@ const LABELS: Record<string, string> = {
 const VIEW_METRICS: Record<AnalyticsView, string[]> = {
   usage: ["effective_research_sessions", "task_success_rate", "result_view_rate", "time_to_insight_p95_ms"],
   system: ["duration_p95_ms", "request_success_rate", "freshness_compliance_rate", "completeness_rate"],
+  research: [],
 };
 
 function dailyValues(points: AnalyticsMetricPoint[], metric: string): Array<{ bucket: string; value: number }> {
@@ -57,6 +59,11 @@ export function Analytics() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (view === "research") {
+      setLoading(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -73,7 +80,7 @@ export function Analytics() {
 
   const metrics = VIEW_METRICS[view];
   const series = useMemo(() => Object.fromEntries(metrics.map((metric) => [metric, dailyValues(data?.points || [], metric)])), [data, metrics]);
-  const noData = !loading && (data?.warnings.includes("no_data") || !data?.points.length);
+  const noData = view !== "research" && !loading && (data?.warnings.includes("no_data") || !data?.points.length);
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 px-5 py-6">
@@ -90,13 +97,16 @@ export function Analytics() {
       <div className="flex gap-2">
         <button onClick={() => setView("usage")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "usage" && "border-primary bg-primary/10 text-primary")}><Activity className="h-4 w-4" />功能使用</button>
         <button onClick={() => setView("system")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "system" && "border-primary bg-primary/10 text-primary")}><Database className="h-4 w-4" />系统健康</button>
+        <button onClick={() => setView("research")} className={cn("inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm", view === "research" && "border-primary bg-primary/10 text-primary")}><BarChart3 className="h-4 w-4" />研究质量</button>
       </div>
+
+      {view === "research" && <ResearchQualityView days={days} />}
 
       {loading && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[1, 2, 3, 4].map((item) => <div key={item} className="h-28 animate-pulse rounded-xl bg-muted" />)}</div>}
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">{error}</div>}
       {noData && <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">暂无统计数据。使用功能后，趋势将在下一次本地聚合时显示。</div>}
 
-      {!loading && !error && !noData && data && (
+      {view !== "research" && !loading && !error && !noData && data && (
         <>
           {data.warnings.length > 0 && <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">数据提示：{data.warnings.join("、")}</div>}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
