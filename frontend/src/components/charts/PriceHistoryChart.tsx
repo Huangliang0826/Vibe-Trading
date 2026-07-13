@@ -128,7 +128,6 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
   const buyAndHold = metrics?.buy_and_hold ?? null;
   const dailyDca = period !== "1D" ? metrics?.daily_dca ?? localDailyDca : null;
   const maxDrawdown = buyAndHold?.max_drawdown ?? dd?.maxDD ?? null;
-  const maxLoss = buyAndHold?.max_loss ?? null;
   const dailyDcaReturn = dailyDca && ("total_return" in dailyDca ? dailyDca.total_return : dailyDca.totalReturn);
   const dailyDcaMaxLoss = dailyDca && ("max_loss" in dailyDca ? dailyDca.max_loss : dailyDca.maxLoss);
   const dailyDcaContributions = dailyDca?.contributions ?? 0;
@@ -307,12 +306,6 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
               {maxDrawdown == null ? "—" : `${(maxDrawdown * 100).toFixed(1)}%`}
             </b>
           </span>
-          {maxLoss != null && <span className="text-muted-foreground">
-            最大亏损{" "}
-            <b className={cn("tabular-nums", maxLoss < 0 ? "text-red-500 dark:text-red-400" : "text-foreground")}>
-              {(maxLoss * 100).toFixed(1)}%
-            </b>
-          </span>}
           {dd && <span className="text-muted-foreground">
             回撤修复{" "}
             {dd.maxDD === 0 ? (
