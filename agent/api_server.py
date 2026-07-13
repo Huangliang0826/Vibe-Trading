@@ -4891,6 +4891,36 @@ register_historical_event_routes(app, require_auth=require_local_or_auth)
 # Main Entry Point
 # ============================================================================
 
+def _raise_fd_limit(target: int = 16384) -> None:
+    """Raise this process's open-file limit toward ``target``.
+
+    launchd starts agents with a soft ``RLIMIT_NOFILE`` around 256. The backend
+    juggles many SQLite databases (each WAL connection costs db + -wal + -shm
+    fds) plus yfinance's timezone cache, which keeps a per-thread SQLite
+    connection: under load the process bumps the ceiling and new opens fail with
+    ``sqlite3.OperationalError('unable to open database file')`` — surfacing to
+    the UI as "美股自选数据获取失败" because the yfinance fallback can't open its
+    cache. Lifting the soft limit to the hard cap removes that ceiling.
+    """
+    try:
+        import resource
+    except ImportError:  # non-POSIX; nothing to do
+        return
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        desired = target if hard == resource.RLIM_INFINITY else min(target, hard)
+        if soft < desired:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (desired, hard))
+            # print (not logging) so it lands in serve.log even though this
+            # runs before uvicorn configures logging — matches the preflight
+            # banner's convention.
+            print(f"[startup] raised RLIMIT_NOFILE soft limit {soft} -> {desired}")
+        else:
+            print(f"[startup] RLIMIT_NOFILE soft limit already {soft} (>= {desired})")
+    except (ValueError, OSError) as exc:
+        print(f"[startup] could not raise RLIMIT_NOFILE: {exc}")
+
+
 def serve_main(argv: list[str] | None = None) -> int:
     """Start the API server from CLI-style arguments."""
     import argparse
@@ -4898,6 +4928,8 @@ def serve_main(argv: list[str] | None = None) -> int:
     import uvicorn
     from fastapi.staticfiles import StaticFiles
     from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    _raise_fd_limit()
 
     class SPAStaticFiles(StaticFiles):
         """Serve index.html for browser refreshes on client-side routes."""
