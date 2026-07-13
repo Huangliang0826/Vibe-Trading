@@ -29,6 +29,7 @@ describe("ResearchQualityView", () => {
 
   it("shows uncertainty and never turns missing quality into zero", async () => {
     render(<ResearchQualityView days={30} />);
+    expect(screen.getByRole("option", { name: "10d" })).toBeInTheDocument();
     expect(await screen.findByText("57.5%")).toBeInTheDocument();
     expect(screen.getByText("覆盖 1 / 30 天")).toBeInTheDocument();
     expect(screen.getByText("n=40")).toBeInTheDocument();
