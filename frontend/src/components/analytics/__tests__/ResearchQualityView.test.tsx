@@ -38,7 +38,7 @@ describe("ResearchQualityView", () => {
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Backtest" }));
     await waitFor(() => expect(apiMock.getAnalyticsResearchQuality).toHaveBeenLastCalledWith(
-      expect.objectContaining({ subject: "backtest", horizon: "run" }),
+      expect.objectContaining({ subject: "backtest", horizon: "run", market: undefined }),
     ));
   });
 });
