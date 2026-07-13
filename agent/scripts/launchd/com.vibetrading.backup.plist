@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.vibetrading.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/lianghuang/Vibe-Trading/scripts/backup_state.sh</string>
+  </array>
+  <!-- Daily at 22:35, after both market-close scan jobs have written their
+       snapshots. Set VIBE_BACKUP_DEST here to target an external volume or
+       iCloud Drive instead of the ~/Backups default. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>22</integer>
+    <key>Minute</key><integer>35</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/lianghuang/.vibe-trading/logs/backup-launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/lianghuang/.vibe-trading/logs/backup-launchd.log</string>
+</dict>
+</plist>

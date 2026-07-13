@@ -212,7 +212,10 @@ def run_single_symbol_best_strategy(
     }
 
 
-ROBUST_SELECTION_VERSION = "paper-robust-parity-v3"
+# v4: transaction-cost model (commission + stamp duty + slippage) landed in
+# every backtest path — cached selections made under zero-cost ranking are
+# stale and must be re-selected.
+ROBUST_SELECTION_VERSION = "paper-robust-costs-v4"
 
 
 def _robust_validation_profile(history_bars: int) -> dict[str, Any]:
