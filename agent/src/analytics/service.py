@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from pathlib import Path
+from dataclasses import asdict
 
 from .collector import AnalyticsCollector
 from .rollup import CALCULATION_VERSION, AnalyticsRollup
 from .store import AnalyticsStore
 from .statistics import wilson_interval
+from .git_activity import GitActivityReader
+from .development import group_commits, rank_module_churn
 
 
 def _iso_now() -> str:
@@ -19,10 +23,12 @@ class AnalyticsService:
         store: AnalyticsStore,
         collector: AnalyticsCollector,
         rollup: AnalyticsRollup,
+        git_reader: GitActivityReader | None = None,
     ) -> None:
         self.store = store
         self.collector = collector
         self.rollup = rollup
+        self.git_reader = git_reader or GitActivityReader(Path(__file__).resolve().parents[3])
 
     def trends(self, metric: str, days: int) -> dict[str, Any]:
         points = self._points(days=days, metric=metric)
@@ -104,6 +110,65 @@ class AnalyticsService:
             "value": available[-1]["value"] if available else None,
             "series": series,
         }
+
+    def development(
+        self,
+        *,
+        days: int,
+        release: str | None = None,
+        window_days: int = 7,
+    ) -> dict[str, Any]:
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        activity = self.git_reader.read(since=since)
+        commits = activity.commits
+        groups = group_commits(commits)
+        comparison = self._release_comparison(activity.releases, release, window_days)
+        return {
+            "data_through": commits[0].authored_at if commits else None,
+            "generated_at": _iso_now(),
+            "sample_count": len(commits),
+            "calculation_version": CALCULATION_VERSION,
+            "warnings": activity.warnings + (["no_data"] if not commits else []),
+            "days": days,
+            "commits": [asdict(commit) for commit in commits],
+            "feature_groups": [asdict(group) for group in groups],
+            "module_churn": rank_module_churn(commits, days),
+            "releases": [asdict(item) for item in activity.releases],
+            "release_comparison": comparison,
+        }
+
+    def _release_comparison(self, releases, tag: str | None, window_days: int) -> dict[str, Any] | None:
+        if not tag:
+            return None
+        release = next((item for item in releases if item.tag == tag), None)
+        if release is None:
+            return {"status": "release_not_found", "tag": tag, "metrics": [], "causal": False, "disclaimer": "时间相关性，不代表该版本造成了指标变化。"}
+        released = datetime.fromisoformat(release.created_at.replace("Z", "+00:00")).date()
+        before_start = (released - timedelta(days=window_days)).isoformat()
+        before_end = (released - timedelta(days=1)).isoformat()
+        after_start = released.isoformat()
+        after_end = (released + timedelta(days=window_days - 1)).isoformat()
+        before = self.store.query_metric_points(granularity="day", start_bucket=before_start, end_bucket=before_end)
+        after = self.store.query_metric_points(granularity="day", start_bucket=after_start, end_bucket=after_end)
+        before_days = {point.bucket for point in before}
+        after_days = {point.bucket for point in after}
+        status = "available" if len(before_days) >= 3 and len(after_days) >= 3 else "insufficient_sample"
+        metrics = []
+        for metric in sorted({point.metric for point in before} & {point.metric for point in after}):
+            left = [point for point in before if point.metric == metric]
+            right = [point for point in after if point.metric == metric]
+            def aggregate(points):
+                denominator = sum(point.denominator or 0 for point in points)
+                if denominator:
+                    numerator = sum(point.numerator or 0 for point in points)
+                    return numerator / denominator, int(denominator)
+                samples = sum(point.sample_count for point in points)
+                value = sum((point.value or 0) * point.sample_count for point in points) / samples if samples else None
+                return value, samples
+            before_value, before_sample = aggregate(left)
+            after_value, after_sample = aggregate(right)
+            metrics.append({"metric": metric, "before_value": before_value, "after_value": after_value, "before_sample_count": before_sample, "after_sample_count": after_sample})
+        return {"status": status, "tag": tag, "window_days": window_days, "metrics": metrics if status == "available" else [], "causal": False, "disclaimer": "时间相关性，不代表该版本造成了指标变化。"}
 
     def _points(
         self,

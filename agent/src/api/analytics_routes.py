@@ -66,4 +66,15 @@ def register_analytics_routes(
             regime=regime,
         )
 
+    @router.get("/development")
+    async def development(
+        days: AnalyticsDays = 30,
+        release: str | None = Query(None, max_length=40),
+        window_days: int = Query(7),
+    ) -> dict[str, Any]:
+        if window_days not in {7, 30}:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=422, detail="window_days must be 7 or 30")
+        return service.development(days=int(days), release=release, window_days=window_days)
+
     app.include_router(router)
