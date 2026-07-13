@@ -1,4 +1,5 @@
 import { authHeaders, getApiAuthKey } from "@/lib/apiAuth";
+import { APP_VERSION } from "@/lib/version";
 
 type AnalyticsOutcome = "success" | "failure" | "cancelled" | "unknown";
 type ProductMetadata = {
@@ -29,6 +30,7 @@ interface WireEvent {
   outcome: AnalyticsOutcome;
   duration_ms?: number;
   metadata: ProductMetadata;
+  app_version: string;
 }
 
 const USER_KEY = "alpha-mind-analytics-user";
@@ -84,6 +86,7 @@ export function trackProductEvent(input: ProductEventInput): void {
     outcome: input.outcome,
     duration_ms: input.durationMs === undefined ? undefined : Math.max(0, Math.round(input.durationMs)),
     metadata: { ...input.metadata },
+    app_version: APP_VERSION.replace(/^v/, ""),
   });
   if (queue.length >= MAX_BATCH) {
     void flushProductEvents();

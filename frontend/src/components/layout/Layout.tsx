@@ -8,9 +8,8 @@ import { api, type SessionItem } from "@/lib/api";
 import { useAgentStore } from "@/stores/agent";
 import { ConnectionBanner } from "@/components/layout/ConnectionBanner";
 import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
+import { APP_VERSION } from "@/lib/version";
 
-// Bump on each release; one place keeps the footer in sync with package.json.
-const APP_VERSION = "v0.1.9";
 const SHOW_HSTECH_NAV = false;
 
 const NAV = [

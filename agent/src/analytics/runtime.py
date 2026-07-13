@@ -5,12 +5,14 @@ import logging
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
+from pathlib import Path
 
 from fastapi import Request
 
 from .collector import AnalyticsCollector
 from .models import AnalyticsEvent
 from .rollup import AnalyticsRollup
+from .version import read_app_version
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ class AnalyticsRuntime:
         self.rollup = rollup
         self.poll_seconds = poll_seconds
         self.task: asyncio.Task[None] | None = None
+        self.app_version = read_app_version(Path(__file__).resolve().parents[3])
 
     def start(self) -> None:
         if self.task is None or self.task.done():
@@ -77,6 +80,7 @@ class AnalyticsRuntime:
                 action="request",
                 outcome="success" if status_code < 500 else "failure",
                 duration_ms=max(0, duration_ms),
+                app_version=self.app_version,
                 metadata={
                     "route": route_path,
                     "method": request.method,
@@ -118,6 +122,7 @@ class AnalyticsRuntime:
                 action="provider_fetch",
                 outcome="success" if status == "success" else "failure",
                 duration_ms=max(0, duration_ms),
+                app_version=self.app_version,
                 metadata=metadata,
             )
         )
