@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -228,6 +228,21 @@ class AnalyticsStore:
                 parameters,
             ).fetchall()
         return [self._metric_from_row(row) for row in rows]
+
+    def prune(self, *, reference: datetime | None = None) -> dict[str, int]:
+        now = reference or datetime.now(timezone.utc)
+        raw_cutoff = _utc_iso(now - timedelta(days=90))
+        hourly_cutoff = _utc_iso(now - timedelta(days=180))[:19]
+        with self._session() as connection:
+            raw = connection.execute(
+                "DELETE FROM raw_events WHERE kind IN ('product', 'system') AND occurred_at < ?",
+                (raw_cutoff,),
+            ).rowcount
+            metrics = connection.execute(
+                "DELETE FROM metric_points WHERE granularity = 'hour' AND substr(bucket, 1, 19) < ?",
+                (hourly_cutoff,),
+            ).rowcount
+        return {"raw_events": raw, "metric_points": metrics}
 
     @staticmethod
     def _event_from_row(row: sqlite3.Row) -> AnalyticsEvent:

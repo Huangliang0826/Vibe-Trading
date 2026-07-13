@@ -533,6 +533,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_analytics_runtime = None
+
+
+@app.middleware("http")
+async def _observe_http_analytics(request: Request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        if _analytics_runtime is not None:
+            try:
+                _analytics_runtime.observe_http(
+                    request,
+                    status_code=500,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+            except Exception:
+                pass
+        raise
+    if _analytics_runtime is not None:
+        try:
+            _analytics_runtime.observe_http(
+                request,
+                status_code=response.status_code,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+        except Exception:
+            pass
+    return response
+
 
 # ----------------------------------------------------------------------------
 # SPA deep-link fallback
@@ -595,12 +625,18 @@ async def _run_startup_preflight() -> None:
     from src.preflight import run_preflight
 
     run_preflight(console)
+    if _analytics_runtime is not None and os.getenv("ANALYTICS_ENABLED", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }:
+        _analytics_runtime.start()
     if _opportunity_runtime is not None:
         _opportunity_runtime.scheduler.start()
 
 
 @app.on_event("shutdown")
 async def _stop_opportunity_runtime() -> None:
+    if _analytics_runtime is not None:
+        await _analytics_runtime.stop()
     if _opportunity_runtime is not None:
         await _opportunity_runtime.stop()
 
@@ -2290,6 +2326,69 @@ def _cn_raw_daily(code: str, start_str: str, end_str: str):
     return df.sort_index()
 
 
+def _fetch_with_analytics(loader, *, codes, start_date, end_date, interval, market):
+    started = time.perf_counter()
+    provider = type(loader).__module__.rsplit(".", 1)[-1]
+    freshness_slo_ms = 60 * 60 * 1000 if interval != "1D" else 72 * 60 * 60 * 1000
+    try:
+        result = loader.fetch(
+            codes=codes,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+        )
+    except Exception as exc:
+        if _analytics_runtime is not None:
+            try:
+                _analytics_runtime.observe_provider(
+                    provider,
+                    market,
+                    "failure",
+                    int((time.perf_counter() - started) * 1000),
+                    0,
+                    1,
+                    None,
+                    freshness_slo_ms,
+                    error_code=type(exc).__name__,
+                )
+            except Exception:
+                pass
+        raise
+
+    frame = result.get(codes[0]) if result else None
+    observed_count = int(frame is not None and not frame.empty)
+    freshness_ms = None
+    if observed_count:
+        try:
+            newest = frame.index.max()
+            if hasattr(newest, "to_pydatetime"):
+                newest = newest.to_pydatetime()
+            if isinstance(newest, datetime):
+                if newest.tzinfo is None:
+                    newest = newest.replace(tzinfo=timezone.utc)
+                freshness_ms = max(
+                    0,
+                    int((datetime.now(timezone.utc) - newest.astimezone(timezone.utc)).total_seconds() * 1000),
+                )
+        except Exception:
+            freshness_ms = None
+    if _analytics_runtime is not None:
+        try:
+            _analytics_runtime.observe_provider(
+                provider,
+                market,
+                "success",
+                int((time.perf_counter() - started) * 1000),
+                observed_count,
+                1,
+                freshness_ms,
+                freshness_slo_ms,
+            )
+        except Exception:
+            pass
+    return result
+
+
 def _fetch_price_history(code: str, period: str, market_hint: str | None = None) -> dict:
     """Fetch OHLCV close+volume + name for a symbol over the period.
 
@@ -2329,7 +2428,14 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         start_str = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         end_str = today.strftime("%Y-%m-%d")
         try:
-            result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="15m")
+            result = _fetch_with_analytics(
+                loader,
+                codes=[code],
+                start_date=start_str,
+                end_date=end_str,
+                interval="15m",
+                market=market,
+            )
             df = result.get(code)
         except Exception:
             df = None
@@ -2345,7 +2451,14 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         fb_days = {"1D": 4}[period]
         start_str = (today - timedelta(days=fb_days)).strftime("%Y-%m-%d")
         end_str = today.strftime("%Y-%m-%d")
-        result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
+        result = _fetch_with_analytics(
+            loader,
+            codes=[code],
+            start_date=start_str,
+            end_date=end_str,
+            interval="1D",
+            market=market,
+        )
         df = result.get(code)
         if df is None or df.empty:
             return {"name": name, "bars": []}
@@ -2365,7 +2478,14 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         start_str = (today - timedelta(days=400)).strftime("%Y-%m-%d")
     end_str = today.strftime("%Y-%m-%d")
 
-    result = loader.fetch(codes=[code], start_date=start_str, end_date=end_str, interval="1D")
+    result = _fetch_with_analytics(
+        loader,
+        codes=[code],
+        start_date=start_str,
+        end_date=end_str,
+        interval="1D",
+        market=market,
+    )
     df = result.get(code)
     if df is None or df.empty:
         return {"name": name, "bars": []}
@@ -4869,6 +4989,23 @@ async def delete_paper_trading_run(run_id: str):
 
 from src.api.alpha_routes import register_alpha_routes  # noqa: E402
 register_alpha_routes(app)
+
+from src.analytics.collector import AnalyticsCollector  # noqa: E402
+from src.analytics.rollup import AnalyticsRollup  # noqa: E402
+from src.analytics.runtime import AnalyticsRuntime  # noqa: E402
+from src.analytics.service import AnalyticsService  # noqa: E402
+from src.analytics.store import AnalyticsStore  # noqa: E402
+from src.api.analytics_routes import register_analytics_routes  # noqa: E402
+
+_analytics_store = AnalyticsStore()
+_analytics_collector = AnalyticsCollector(_analytics_store)
+_analytics_rollup = AnalyticsRollup(_analytics_store)
+_analytics_runtime = AnalyticsRuntime(_analytics_collector, _analytics_rollup)
+register_analytics_routes(
+    app,
+    require_auth=require_local_or_auth,
+    service=AnalyticsService(_analytics_store, _analytics_collector, _analytics_rollup),
+)
 
 from src.api.scan_routes import register_scan_routes  # noqa: E402
 register_scan_routes(app)
