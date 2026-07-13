@@ -32,7 +32,12 @@ export function ResearchQualityView({ days }: { days: AnalyticsDays }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const selectedHorizon = subject === "forecast" && horizon === "5d" ? "63d" : horizon;
+    const isRunSubject = subject === "backtest" || subject === "paper_trading";
+    const selectedHorizon = isRunSubject
+      ? "run"
+      : subject === "forecast" && horizon === "5d"
+        ? "63d"
+        : horizon;
     api.getAnalyticsResearchQuality({ days, subject, market, horizon: selectedHorizon, regime: "all" })
       .then((response) => { if (!cancelled) setData(response); })
       .catch(() => { if (!cancelled) setData(null); })
@@ -58,7 +63,9 @@ export function ResearchQualityView({ days }: { days: AnalyticsDays }) {
       </div>
       <div className="flex flex-wrap gap-3 rounded-xl border bg-card p-3">
         <label className="text-xs text-muted-foreground">市场<select aria-label="市场" value={market} onChange={(event) => setMarket(event.target.value)} className="ml-2 rounded border bg-background px-2 py-1"><option value="us">美股</option><option value="hk">港股</option><option value="cn">A股</option></select></label>
-        <label className="text-xs text-muted-foreground">周期<select aria-label="周期" value={subject === "forecast" && horizon === "5d" ? "63d" : horizon} onChange={(event) => setHorizon(event.target.value)} className="ml-2 rounded border bg-background px-2 py-1"><option value="1d">1d</option><option value="5d">5d</option><option value="20d">20d</option><option value="63d">63d</option></select></label>
+        {subject === "backtest" || subject === "paper_trading"
+          ? <span className="text-xs text-muted-foreground">周期 <span className="ml-2 font-medium text-foreground">每次运行</span></span>
+          : <label className="text-xs text-muted-foreground">周期<select aria-label="周期" value={subject === "forecast" && horizon === "5d" ? "63d" : horizon} onChange={(event) => setHorizon(event.target.value)} className="ml-2 rounded border bg-background px-2 py-1"><option value="1d">1d</option><option value="5d">5d</option><option value="20d">20d</option><option value="63d">63d</option></select></label>}
       </div>
       {!loading && data && <DataCoverageSummary freshness={data.freshness} coverage={data.coverage} />}
       {loading && <div className="h-32 animate-pulse rounded-xl bg-muted" />}

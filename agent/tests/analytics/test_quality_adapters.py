@@ -77,6 +77,7 @@ def test_paper_adapter_uses_completion_date_and_metric_version():
     events = PaperTradingQualityAdapter().from_run(run)
 
     assert {event.metadata["as_of"] for event in events} == {"2026-07-12"}
+    assert {event.metadata["subject_type"] for event in events} == {"paper_trading"}
     assert all(
         event.metadata["formula_version"] == "paper.backtest.metrics.v2"
         for event in events

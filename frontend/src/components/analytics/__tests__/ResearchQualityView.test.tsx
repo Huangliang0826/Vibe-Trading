@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -23,7 +23,8 @@ describe("ResearchQualityView", () => {
   beforeEach(() => {
     apiMock.getAnalyticsResearchQuality
       .mockResolvedValueOnce(scannerFixture)
-      .mockResolvedValueOnce({ ...scannerFixture, status: "insufficient_sample", value: null, series: [{ ...scannerFixture.series[0], subject: "forecast", value: null, sample_count: 2, reason: "insufficient_sample" }] });
+      .mockResolvedValueOnce({ ...scannerFixture, status: "insufficient_sample", value: null, series: [{ ...scannerFixture.series[0], subject: "forecast", value: null, sample_count: 2, reason: "insufficient_sample" }] })
+      .mockResolvedValueOnce({ ...scannerFixture, series: [{ ...scannerFixture.series[0], subject: "backtest", horizon: "run", metric: "sharpe", value: 1.2 }] });
   });
 
   it("shows uncertainty and never turns missing quality into zero", async () => {
@@ -35,5 +36,9 @@ describe("ResearchQualityView", () => {
     await userEvent.click(screen.getByRole("button", { name: "Forecast" }));
     expect(await screen.findByText("样本不足")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Backtest" }));
+    await waitFor(() => expect(apiMock.getAnalyticsResearchQuality).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subject: "backtest", horizon: "run" }),
+    ));
   });
 });

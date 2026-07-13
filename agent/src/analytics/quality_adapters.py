@@ -153,6 +153,7 @@ class BacktestQualityAdapter:
         as_of: date,
         metrics: Mapping[str, Any],
         formula_version: str = "backtest.metrics.v2",
+        subject_type: str = "backtest",
     ) -> list[AnalyticsEvent]:
         trade_count = _finite(metrics.get("trade_count"))
         sample_count = max(1, int(trade_count or 1))
@@ -162,7 +163,7 @@ class BacktestQualityAdapter:
             if value is None:
                 continue
             events.append(make_quality_event(
-                subject_type="backtest",
+                subject_type=subject_type,
                 subject_id=run_id,
                 market=market,
                 horizon="run",
@@ -191,4 +192,5 @@ class PaperTradingQualityAdapter:
             as_of=as_of,
             metrics=getattr(run, "metrics", None) or {},
             formula_version=f"paper.{metric_version}",
+            subject_type="paper_trading",
         )
