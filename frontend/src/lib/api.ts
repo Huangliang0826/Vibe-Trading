@@ -444,7 +444,54 @@ export const api = {
   getHistoricalEvents: (market: "cn" | "hk" | "us", code: string, period: HistoricalEventPeriod) =>
     request<HistoricalEvent[]>(`/historical-events/${market}/${encodeURIComponent(code)}?period=${period}`),
 
+  getAnalyticsTrends: (metric: string, days: AnalyticsDays = 30) =>
+    request<AnalyticsTrendResponse>(`/api/analytics/trends?metric=${encodeURIComponent(metric)}&days=${days}`),
+  getAnalyticsUsage: (days: AnalyticsDays = 30) =>
+    request<AnalyticsUsageResponse>(`/api/analytics/usage?days=${days}`),
+  getAnalyticsSystemHealth: (days: AnalyticsDays = 30) =>
+    request<AnalyticsSystemHealthResponse>(`/api/analytics/system-health?days=${days}`),
+
 };
+
+export type AnalyticsDays = 7 | 30 | 90;
+
+export interface AnalyticsMetricPoint {
+  bucket: string;
+  granularity?: "hour" | "day" | "release";
+  domain?: "usage" | "system" | "data" | "research" | "development" | "health";
+  metric: string;
+  dimensions: Record<string, string>;
+  value: number | null;
+  numerator?: number | null;
+  denominator?: number | null;
+  sample_count: number;
+  interval_low?: number | null;
+  interval_high?: number | null;
+  calculation_version?: string;
+}
+
+export interface AnalyticsFunnelStep {
+  step: string;
+  numerator: number;
+  denominator: number;
+  rate: number | null;
+}
+
+export interface AnalyticsTrendResponse {
+  data_through: string | null;
+  generated_at: string;
+  sample_count: number;
+  calculation_version: string;
+  warnings: string[];
+  days: AnalyticsDays;
+  points: AnalyticsMetricPoint[];
+}
+
+export interface AnalyticsUsageResponse extends AnalyticsTrendResponse {
+  funnel: AnalyticsFunnelStep[];
+}
+
+export type AnalyticsSystemHealthResponse = AnalyticsTrendResponse;
 
 // --- 行情看板 types ---
 
