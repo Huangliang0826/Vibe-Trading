@@ -21,7 +21,7 @@ describe("forecast session cache", () => {
       selection: { robust_result: { strategies: new Array(25).fill({}) }, selected_strategy: "grid" },
     });
 
-    expect(compact.candidates).toEqual([]);
+    expect(compact.candidates).toEqual([{ strategy: { name: "grid" } }]);
     expect(compact.best.equity_curve).toEqual([]);
     expect(compact.best.trades).toHaveLength(1);
     expect(compact.selection.robust_result).toBeUndefined();
@@ -29,6 +29,6 @@ describe("forecast session cache", () => {
 
   it("isolates forecast ranges and per-stock strategy caches", () => {
     expect(forecastSessionKey("cn", "600519", 1260, 1260)).toBe("forecast:cn:600519:1260:1260");
-    expect(strategySessionKey("cn", "600519")).toBe("strategy:cn:600519");
+    expect(strategySessionKey("cn", "600519")).toBe("strategy:v2:cn:600519");
   });
 });
