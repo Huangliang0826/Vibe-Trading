@@ -50,4 +50,20 @@ def register_analytics_routes(
     async def system_health(days: AnalyticsDays = 30) -> dict[str, Any]:
         return service.system_health(int(days))
 
+    @router.get("/research-quality")
+    async def research_quality(
+        days: AnalyticsDays = 30,
+        subject: str = Query("scanner", min_length=1, max_length=40),
+        market: str | None = Query(None, max_length=20),
+        horizon: str | None = Query(None, max_length=20),
+        regime: str | None = Query("all", max_length=40),
+    ) -> dict[str, Any]:
+        return service.research_quality(
+            days=int(days),
+            subject=subject,
+            market=market,
+            horizon=horizon,
+            regime=regime,
+        )
+
     app.include_router(router)
