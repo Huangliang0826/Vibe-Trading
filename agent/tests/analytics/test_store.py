@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from src.analytics.models import AnalyticsEvent, MetricPoint
+from src.analytics.models import AnalyticsEvent, MetricPoint, SourceSyncState
 from src.analytics.store import AnalyticsStore
 
 
@@ -68,3 +68,24 @@ def test_prune_applies_raw_and_hourly_retention_without_deleting_daily(tmp_path)
     assert store.prune(reference=now) == {"raw_events": 1, "metric_points": 1}
     assert {event.event_id for event in store.query_events()} == {"old-quality", "current"}
     assert [point.granularity for point in store.query_metric_points()] == ["day"]
+
+
+def test_source_sync_state_round_trips_and_updates(tmp_path):
+    store = AnalyticsStore(tmp_path / "analytics.db")
+    first = SourceSyncState(
+        source="scanner",
+        status="available",
+        last_attempted_at="2026-07-13T10:00:00Z",
+        last_success_at="2026-07-13T10:00:00Z",
+        data_through="2026-07-12",
+        records_scanned=20,
+        events_written=8,
+        coverage_days=4,
+    )
+
+    store.upsert_source_state(first)
+    assert store.get_source_states("scanner") == [first]
+
+    updated = first.model_copy(update={"events_written": 0, "coverage_days": 5})
+    store.upsert_source_state(updated)
+    assert store.get_source_states("scanner") == [updated]

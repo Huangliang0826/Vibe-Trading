@@ -37,3 +37,15 @@ class MetricPoint(BaseModel):
     interval_low: float | None = None
     interval_high: float | None = None
     calculation_version: str
+
+
+class SourceSyncState(BaseModel):
+    source: str
+    status: Literal["available", "partial", "no_data", "source_unavailable", "error"]
+    last_attempted_at: str
+    last_success_at: str | None = None
+    data_through: str | None = None
+    records_scanned: int = Field(default=0, ge=0)
+    events_written: int = Field(default=0, ge=0)
+    coverage_days: int = Field(default=0, ge=0)
+    reason: str | None = None

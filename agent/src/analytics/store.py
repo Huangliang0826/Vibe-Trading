@@ -9,7 +9,7 @@ from typing import Iterator
 
 from src.config.paths import get_runtime_root
 
-from .models import AnalyticsEvent, MetricPoint
+from .models import AnalyticsEvent, MetricPoint, SourceSyncState
 
 
 def _canonical_json(value: object) -> str:
@@ -88,7 +88,19 @@ class AnalyticsStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_metric_points_lookup
                     ON metric_points(metric, granularity, bucket);
-                PRAGMA user_version=1;
+
+                CREATE TABLE IF NOT EXISTS source_sync_state (
+                    source TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    last_attempted_at TEXT NOT NULL,
+                    last_success_at TEXT,
+                    data_through TEXT,
+                    records_scanned INTEGER NOT NULL,
+                    events_written INTEGER NOT NULL,
+                    coverage_days INTEGER NOT NULL,
+                    reason TEXT
+                );
+                PRAGMA user_version=2;
                 """
             )
 
@@ -229,6 +241,49 @@ class AnalyticsStore:
             ).fetchall()
         return [self._metric_from_row(row) for row in rows]
 
+    def upsert_source_state(self, state: SourceSyncState) -> None:
+        with self._session() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_sync_state (
+                    source, status, last_attempted_at, last_success_at,
+                    data_through, records_scanned, events_written,
+                    coverage_days, reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    status = excluded.status,
+                    last_attempted_at = excluded.last_attempted_at,
+                    last_success_at = excluded.last_success_at,
+                    data_through = excluded.data_through,
+                    records_scanned = excluded.records_scanned,
+                    events_written = excluded.events_written,
+                    coverage_days = excluded.coverage_days,
+                    reason = excluded.reason
+                """,
+                (
+                    state.source,
+                    state.status,
+                    state.last_attempted_at,
+                    state.last_success_at,
+                    state.data_through,
+                    state.records_scanned,
+                    state.events_written,
+                    state.coverage_days,
+                    state.reason,
+                ),
+            )
+
+    def get_source_states(self, source: str | None = None) -> list[SourceSyncState]:
+        query = "SELECT * FROM source_sync_state"
+        parameters: tuple[object, ...] = ()
+        if source is not None:
+            query += " WHERE source = ?"
+            parameters = (source,)
+        query += " ORDER BY source"
+        with self._session() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [self._source_state_from_row(row) for row in rows]
+
     def prune(self, *, reference: datetime | None = None) -> dict[str, int]:
         now = reference or datetime.now(timezone.utc)
         raw_cutoff = _utc_iso(now - timedelta(days=90))
@@ -277,4 +332,18 @@ class AnalyticsStore:
             interval_low=row["interval_low"],
             interval_high=row["interval_high"],
             calculation_version=row["calculation_version"],
+        )
+
+    @staticmethod
+    def _source_state_from_row(row: sqlite3.Row) -> SourceSyncState:
+        return SourceSyncState(
+            source=row["source"],
+            status=row["status"],
+            last_attempted_at=row["last_attempted_at"],
+            last_success_at=row["last_success_at"],
+            data_through=row["data_through"],
+            records_scanned=row["records_scanned"],
+            events_written=row["events_written"],
+            coverage_days=row["coverage_days"],
+            reason=row["reason"],
         )
