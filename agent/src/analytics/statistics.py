@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
-from statistics import median
-from typing import Sequence
+import random
+from statistics import median, stdev
+from typing import Literal, Sequence
 
 
 def ewma(values: Sequence[float], alpha: float = 0.3) -> list[float]:
@@ -56,3 +57,31 @@ def robust_z_score(value: float, history: Sequence[float]) -> float:
             return 0.0
         scale = float(median(nonzero))
     return 0.6744897501960817 * (float(value) - centre) / scale
+
+
+def bootstrap_interval(
+    values: list[float],
+    statistic: Literal["mean", "sharpe"],
+    resamples: int = 2000,
+    seed: int = 1729,
+) -> tuple[float, float]:
+    finite = [float(value) for value in values if math.isfinite(value)]
+    if len(finite) < 2:
+        raise ValueError("bootstrap requires at least two finite values")
+    if statistic not in {"mean", "sharpe"}:
+        raise ValueError("unsupported bootstrap statistic")
+    if resamples <= 0:
+        raise ValueError("resamples must be positive")
+    rng = random.Random(seed)
+
+    def calculate(sample: list[float]) -> float:
+        mean = sum(sample) / len(sample)
+        if statistic == "mean":
+            return mean
+        deviation = stdev(sample)
+        return mean / deviation * math.sqrt(252) if deviation else 0.0
+
+    estimates = sorted(calculate(rng.choices(finite, k=len(finite))) for _ in range(resamples))
+    low_rank = max(1, math.ceil(0.025 * resamples))
+    high_rank = max(1, math.ceil(0.975 * resamples))
+    return estimates[low_rank - 1], estimates[high_rank - 1]
