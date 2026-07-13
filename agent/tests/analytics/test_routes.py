@@ -41,3 +41,10 @@ def test_event_batch_and_empty_trend_contract(tmp_path):
     assert response.status_code == 200
     assert response.json()["points"] == []
     assert response.json()["warnings"] == ["no_data"]
+    assert response.json()["freshness"] == "no_data"
+    assert response.json()["coverage"] == {
+        "window_days": 30,
+        "covered_days": 0,
+        "coverage_rate": 0.0,
+        "sources": [],
+    }

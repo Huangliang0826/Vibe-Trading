@@ -17,6 +17,33 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _freshness(data_through: str | None, *, source_error: bool = False) -> str:
+    if data_through is None:
+        return "no_data"
+    try:
+        observed = datetime.fromisoformat(data_through[:10]).date()
+    except ValueError:
+        return "stale"
+    if source_error or (datetime.now(timezone.utc).date() - observed).days > 2:
+        return "stale"
+    return "fresh"
+
+
+def _coverage(
+    *,
+    days: int,
+    buckets: set[str],
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    covered_days = len(buckets)
+    return {
+        "window_days": days,
+        "covered_days": covered_days,
+        "coverage_rate": covered_days / days,
+        "sources": sources,
+    }
+
+
 class AnalyticsService:
     def __init__(
         self,
@@ -36,14 +63,14 @@ class AnalyticsService:
 
     def usage(self, days: int) -> dict[str, Any]:
         points = self._points(days=days, domain="usage")
-        response = self._response(points, days=days)
+        response = self._response(points, days=days, source="product_events")
         response["funnel"] = self._session_funnel(days)
         return response
 
     def system_health(self, days: int) -> dict[str, Any]:
         system = self._points(days=days, domain="system")
         data = self._points(days=days, domain="data")
-        return self._response([*system, *data], days=days)
+        return self._response([*system, *data], days=days, source="system_events")
 
     def research_quality(
         self,
@@ -99,16 +126,30 @@ class AnalyticsService:
         latest = series[-1] if series else None
         available = [point for point in series if point["value"] is not None]
         status = "available" if available else ("insufficient_sample" if series else "no_data")
+        source_states = self.store.get_source_states(subject)
+        freshness = _freshness(
+            latest["bucket"] if latest else None,
+            source_error=any(state.status == "error" for state in source_states),
+        )
+        warnings = [status] if status != "available" else []
+        if freshness == "stale":
+            warnings.append("stale_data")
         return {
             "data_through": latest["bucket"] if latest else None,
             "generated_at": _iso_now(),
             "sample_count": sum(point["sample_count"] for point in series),
             "calculation_version": CALCULATION_VERSION,
-            "warnings": [status] if status != "available" else [],
+            "warnings": warnings,
             "days": days,
             "status": status,
             "value": available[-1]["value"] if available else None,
             "series": series,
+            "freshness": freshness,
+            "coverage": _coverage(
+                days=days,
+                buckets={point["bucket"] for point in series},
+                sources=[state.model_dump(mode="json") for state in source_states],
+            ),
         }
 
     def development(
@@ -188,15 +229,42 @@ class AnalyticsService:
         )
 
     @staticmethod
-    def _response(points: list, *, days: int) -> dict[str, Any]:
+    def _response(
+        points: list,
+        *,
+        days: int,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        data_through = max((point.bucket for point in points), default=None)
+        freshness = _freshness(data_through)
+        warnings = [] if points else ["no_data"]
+        if freshness == "stale":
+            warnings.append("stale_data")
+        buckets = {point.bucket for point in points}
+        sources: list[dict[str, Any]] = []
+        if source is not None and points:
+            now = _iso_now()
+            sources.append({
+                "source": source,
+                "status": "available",
+                "last_attempted_at": now,
+                "last_success_at": now,
+                "data_through": data_through,
+                "records_scanned": sum(point.sample_count for point in points),
+                "events_written": 0,
+                "coverage_days": len(buckets),
+                "reason": None,
+            })
         return {
-            "data_through": max((point.bucket for point in points), default=None),
+            "data_through": data_through,
             "generated_at": _iso_now(),
             "sample_count": sum(point.sample_count for point in points),
             "calculation_version": CALCULATION_VERSION,
-            "warnings": [] if points else ["no_data"],
+            "warnings": warnings,
             "days": days,
             "points": [point.model_dump(mode="json") for point in points],
+            "freshness": freshness,
+            "coverage": _coverage(days=days, buckets=buckets, sources=sources),
         }
 
     def _session_funnel(self, days: int) -> list[dict[str, Any]]:
