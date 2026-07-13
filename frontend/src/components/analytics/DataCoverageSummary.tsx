@@ -21,11 +21,11 @@ export function DataCoverageSummary({
   freshness: AnalyticsFreshness;
   coverage: AnalyticsCoverage;
 }) {
-  const dataThrough = coverage.sources
+  const dataThroughCandidates = coverage.sources
     .map((source) => source.data_through)
     .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1);
+    .sort();
+  const dataThrough = dataThroughCandidates[dataThroughCandidates.length - 1];
   const reasons = [...new Set(
     coverage.sources
       .map((source) => source.reason)
