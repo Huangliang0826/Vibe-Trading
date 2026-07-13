@@ -6,6 +6,7 @@ import { TrendChart } from "@/components/analytics/TrendChart";
 import { cn } from "@/lib/utils";
 import { ResearchQualityView } from "@/components/analytics/ResearchQualityView";
 import { DevelopmentView } from "@/components/analytics/DevelopmentView";
+import { DataCoverageSummary } from "@/components/analytics/DataCoverageSummary";
 
 type AnalyticsView = "usage" | "system" | "research" | "development";
 type DashboardResponse = AnalyticsUsageResponse | AnalyticsSystemHealthResponse;
@@ -108,6 +109,7 @@ export function Analytics() {
 
       {loading && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[1, 2, 3, 4].map((item) => <div key={item} className="h-28 animate-pulse rounded-xl bg-muted" />)}</div>}
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">{error}</div>}
+      {view !== "research" && view !== "development" && !loading && !error && data && <DataCoverageSummary freshness={data.freshness} coverage={data.coverage} />}
       {noData && <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">暂无统计数据。使用功能后，趋势将在下一次本地聚合时显示。</div>}
 
       {view !== "research" && view !== "development" && !loading && !error && !noData && data && (

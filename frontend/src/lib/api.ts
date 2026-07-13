@@ -466,6 +466,26 @@ export const api = {
 };
 
 export type AnalyticsDays = 7 | 30 | 90;
+export type AnalyticsFreshness = "fresh" | "stale" | "no_data";
+
+export interface AnalyticsSourceState {
+  source: string;
+  status: "available" | "partial" | "no_data" | "source_unavailable" | "error";
+  last_attempted_at: string;
+  last_success_at: string | null;
+  data_through: string | null;
+  records_scanned: number;
+  events_written: number;
+  coverage_days: number;
+  reason: string | null;
+}
+
+export interface AnalyticsCoverage {
+  window_days: number;
+  covered_days: number;
+  coverage_rate: number;
+  sources: AnalyticsSourceState[];
+}
 
 export interface AnalyticsMetricPoint {
   bucket: string;
@@ -497,6 +517,8 @@ export interface AnalyticsTrendResponse {
   warnings: string[];
   days: AnalyticsDays;
   points: AnalyticsMetricPoint[];
+  freshness: AnalyticsFreshness;
+  coverage: AnalyticsCoverage;
 }
 
 export interface AnalyticsUsageResponse extends AnalyticsTrendResponse {
@@ -539,6 +561,8 @@ export interface AnalyticsResearchQualityResponse {
   status: "available" | "insufficient_sample" | "no_data";
   value: number | null;
   series: AnalyticsResearchSeriesPoint[];
+  freshness: AnalyticsFreshness;
+  coverage: AnalyticsCoverage;
 }
 
 export interface AnalyticsCommit {

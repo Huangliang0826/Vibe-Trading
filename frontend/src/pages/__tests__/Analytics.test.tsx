@@ -25,6 +25,8 @@ const base = {
   calculation_version: "analytics.v1",
   warnings: [],
   days: 30,
+  freshness: "fresh",
+  coverage: { window_days: 30, covered_days: 1, coverage_rate: 1 / 30, sources: [] },
 };
 
 describe("Analytics", () => {
@@ -43,6 +45,7 @@ describe("Analytics", () => {
   it("renders usage trends and switches to system health", async () => {
     render(<Analytics />);
     expect(await screen.findByText("有效研究会话")).toBeInTheDocument();
+    expect(screen.getByText("覆盖 1 / 30 天")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "系统健康" }));
     expect(await screen.findByText("P95 延迟")).toBeInTheDocument();
   });

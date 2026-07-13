@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type AnalyticsDays, type AnalyticsResearchQualityParams, type AnalyticsResearchQualityResponse } from "@/lib/api";
 import { TrendChart } from "@/components/analytics/TrendChart";
+import { DataCoverageSummary } from "@/components/analytics/DataCoverageSummary";
 import { cn } from "@/lib/utils";
 
 type Subject = AnalyticsResearchQualityParams["subject"];
@@ -59,6 +60,7 @@ export function ResearchQualityView({ days }: { days: AnalyticsDays }) {
         <label className="text-xs text-muted-foreground">市场<select aria-label="市场" value={market} onChange={(event) => setMarket(event.target.value)} className="ml-2 rounded border bg-background px-2 py-1"><option value="us">美股</option><option value="hk">港股</option><option value="cn">A股</option></select></label>
         <label className="text-xs text-muted-foreground">周期<select aria-label="周期" value={subject === "forecast" && horizon === "5d" ? "63d" : horizon} onChange={(event) => setHorizon(event.target.value)} className="ml-2 rounded border bg-background px-2 py-1"><option value="1d">1d</option><option value="5d">5d</option><option value="20d">20d</option><option value="63d">63d</option></select></label>
       </div>
+      {!loading && data && <DataCoverageSummary freshness={data.freshness} coverage={data.coverage} />}
       {loading && <div className="h-32 animate-pulse rounded-xl bg-muted" />}
       {!loading && (!data || data.status === "no_data") && <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">暂无质量观测</div>}
       {!loading && data?.status === "insufficient_sample" && <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-6 text-center"><p className="font-medium text-amber-600">样本不足</p><p className="mt-1 text-xs text-muted-foreground">至少需要 20 个可比样本，当前不会显示为 0。</p></div>}
