@@ -31,6 +31,60 @@ def build_spy_ma200_targets(spy_close: pd.Series) -> pd.DataFrame:
     return invested.to_frame("SPY.US")
 
 
+def capped_inverse_vol_weights(
+    volatility: pd.Series, gross: float, cap: float,
+) -> pd.Series:
+    valid = volatility.replace([np.inf, -np.inf], np.nan).dropna()
+    valid = valid[valid > 0]
+    weights = pd.Series(0.0, index=volatility.index)
+    remaining = list(valid.index)
+    budget = float(gross)
+    while remaining and budget > 1e-12:
+        inverse = 1.0 / valid.loc[remaining]
+        proposal = inverse / inverse.sum() * budget
+        capped = proposal[proposal >= cap]
+        if capped.empty:
+            weights.loc[proposal.index] = proposal
+            break
+        weights.loc[capped.index] = cap
+        budget -= cap * len(capped)
+        capped_names = set(capped.index)
+        remaining = [name for name in remaining if name not in capped_names]
+    return weights
+
+
+def build_defensive_momentum_targets(
+    close: pd.DataFrame, volume: pd.DataFrame, spy_close: pd.Series,
+) -> pd.DataFrame:
+    close = close.sort_index().astype(float)
+    volume = volume.reindex_like(close).astype(float)
+    spy_close = spy_close.reindex(close.index).ffill().astype(float)
+    dollar_volume = (close * volume).rolling(60, min_periods=60).mean()
+    momentum = close.shift(21) / close.shift(252) - 1.0
+    sma200 = close.rolling(200, min_periods=200).mean()
+    volatility = close.pct_change().rolling(20, min_periods=20).std()
+    spy_sma200 = spy_close.rolling(200, min_periods=200).mean()
+    weekly_dates = close.groupby(close.index.to_period("W-FRI")).tail(1).index
+    rows: list[pd.Series] = []
+    for ts in weekly_dates:
+        liquid = dollar_volume.loc[ts].dropna().nlargest(200).index
+        eligible_mask = (
+            (close.loc[ts, liquid] > 5.0)
+            & (close.loc[ts, liquid] > sma200.loc[ts, liquid])
+            & momentum.loc[ts, liquid].notna()
+        )
+        eligible = eligible_mask[eligible_mask].index
+        selected = momentum.loc[ts, eligible].nlargest(15).index
+        gross = 0.90 if spy_close.loc[ts] > spy_sma200.loc[ts] else 0.30
+        selected_weights = capped_inverse_vol_weights(
+            volatility.loc[ts, selected], gross, 0.08,
+        )
+        row = pd.Series(0.0, index=close.columns, name=ts)
+        row.loc[selected_weights.index] = selected_weights
+        rows.append(row)
+    return pd.DataFrame(rows).sort_index()
+
+
 def _self_financing_targets(
     equity: float, current_value: pd.Series, weights: pd.Series, cost_rate: float,
 ) -> tuple[pd.Series, float]:
