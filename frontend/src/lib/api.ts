@@ -223,6 +223,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  createStrategyComparison: (body: StrategyComparisonCreate) =>
+    request<StrategyComparisonRun>("/paper-trading/strategy-comparisons", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getStrategyComparison: (runId: string) =>
+    request<StrategyComparisonRun>(`/paper-trading/strategy-comparisons/${encodeURIComponent(runId)}`),
 
   // Scanner API
   runScan: (universe = "sp500", top = 20) =>
@@ -1070,6 +1077,69 @@ export interface PaperStrategyConfig {
     | "ma200_timing"
     | "value_averaging";
   params: Record<string, unknown>;
+}
+
+export interface StrategyComparisonCreate {
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  cost_bps: number;
+}
+
+export type StrategyComparisonStatus = "queued" | "running" | "completed" | "partial" | "failed";
+export type StrategyComparisonKey = "spy_buy_hold" | "spy_ma200" | "defensive_momentum_v0";
+
+export interface StrategyComparisonPoint {
+  date: string;
+  equity: number;
+  normalized: number;
+  drawdown: number;
+  stock_exposure: number;
+  cash_ratio: number;
+}
+
+export interface StrategyComparisonMetrics {
+  total_return: number;
+  cagr: number;
+  sharpe: number;
+  max_drawdown: number;
+  calmar: number;
+  annual_vol: number;
+  worst_year: number | null;
+  monthly_win_rate: number | null;
+  turnover: number;
+  transaction_cost: number;
+  average_cash_ratio: number;
+  minimum_cash_ratio: number;
+  annual_returns: Record<string, number>;
+}
+
+export interface StrategyComparisonResult {
+  key: StrategyComparisonKey;
+  label: string;
+  status: "completed" | "unavailable";
+  metrics: StrategyComparisonMetrics | null;
+  points: StrategyComparisonPoint[];
+  error: string | null;
+  coverage_rate: number;
+}
+
+export interface StrategyComparisonRun {
+  run_id: string;
+  status: StrategyComparisonStatus;
+  request: StrategyComparisonCreate;
+  created_at: string;
+  updated_at: string;
+  cache_key: string;
+  cache_hit: boolean;
+  calculation_version: string;
+  survivorship_bias: boolean;
+  universe_source_date: string;
+  data_through: string | null;
+  results: StrategyComparisonResult[];
+  scorecard: Array<{ key: string; label: string; status: "pass" | "fail" | "unknown" | "preliminary"; detail: string }>;
+  warnings: string[];
+  error: string | null;
 }
 
 export interface PaperTradingCreate {
