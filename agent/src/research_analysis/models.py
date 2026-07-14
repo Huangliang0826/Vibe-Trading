@@ -21,6 +21,7 @@ class ResearchAnalysisCreate(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=32)
     market: Literal["us", "hk", "auto"] = "auto"
     analysis_date: str | None = Field(default=None, description="YYYY-MM-DD; defaults to today")
+    mode: Literal["fast", "full"] = "fast"
 
 
 class ResearchAnalysisReport(BaseModel):
@@ -45,6 +46,7 @@ class ResearchAnalysisRun(BaseModel):
     market: str
     company_name: str | None = None
     analysis_date: str
+    mode: Literal["fast", "full"] = "fast"
     created_at: str
     updated_at: str
     status: ResearchAnalysisStatus

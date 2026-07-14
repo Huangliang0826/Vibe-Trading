@@ -980,11 +980,13 @@ export interface IndustryReportsResponse {
 export type ResearchAnalysisRating = "buy" | "hold" | "sell";
 export type ResearchAnalysisStatus = "queued" | "running" | "completed" | "failed";
 export type ResearchAnalysisMarket = "auto" | "us" | "hk";
+export type ResearchAnalysisMode = "fast" | "full";
 
 export interface ResearchAnalysisCreate {
   symbol: string;
   market?: ResearchAnalysisMarket;
   analysis_date?: string | null;
+  mode?: ResearchAnalysisMode;
 }
 
 export interface ResearchAnalysisReport {
@@ -1009,6 +1011,7 @@ export interface ResearchAnalysisRun {
   market: string;
   company_name?: string | null;
   analysis_date: string;
+  mode: ResearchAnalysisMode;
   created_at: string;
   updated_at: string;
   status: ResearchAnalysisStatus;

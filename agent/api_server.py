@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import signal
+import threading
 import time
 import csv
 import uuid
@@ -632,11 +633,22 @@ async def _run_startup_preflight() -> None:
         _analytics_runtime.start()
     if _opportunity_runtime is not None:
         _opportunity_runtime.scheduler.start()
+    orphaned = _get_research_analysis_store().fail_incomplete_runs(
+        "后端已重启，原分析任务无法恢复，请重新运行分析"
+    )
+    if orphaned:
+        logger.warning("marked %d orphaned research analysis runs as failed", len(orphaned))
     schedule_startup_refresh()
 
 
 @app.on_event("shutdown")
 async def _stop_opportunity_runtime() -> None:
+    for stop_event in _research_analysis_stop_events.values():
+        stop_event.set()
+    if _research_analysis_tasks:
+        _get_research_analysis_store().fail_incomplete_runs(
+            "后端已停止，分析任务已中断，请重新运行分析"
+        )
     if _analytics_runtime is not None:
         await _analytics_runtime.stop()
     if _opportunity_runtime is not None:
@@ -4693,6 +4705,7 @@ async def stop_runner_endpoint(payload: LiveRunnerControlRequest):
 
 
 _research_analysis_tasks: Dict[str, "asyncio.Task[Any]"] = {}
+_research_analysis_stop_events: Dict[str, threading.Event] = {}
 _research_analysis_store: Optional[ResearchAnalysisStore] = None
 
 
@@ -4708,37 +4721,96 @@ async def _execute_research_analysis(run_id: str) -> None:
     run = store.get_run(run_id)
     if run is None:
         return
+    stop_event = _research_analysis_stop_events.setdefault(run_id, threading.Event())
+    progress_queue: asyncio.Queue[str] = asyncio.Queue()
+    progress_monitor: asyncio.Task[Any] | None = None
     try:
         store.update_status(run_id, ResearchAnalysisStatus.running, "TradingAgents 分析运行中")
 
         from src.research_analysis.tradingagents_adapter import resolve_company_name, run_tradingagents_analysis
 
-        # Resolve company name
-        company_name = await asyncio.to_thread(resolve_company_name, run.symbol)
+        try:
+            company_name = await asyncio.wait_for(
+                asyncio.to_thread(resolve_company_name, run.symbol),
+                timeout=15,
+            )
+        except asyncio.TimeoutError:
+            company_name = None
         if company_name:
             store.update_company_name(run_id, company_name)
 
         def on_progress(message: str) -> None:
-            try:
-                store.update_status(run_id, ResearchAnalysisStatus.running, message)
-            except Exception:
-                pass
+            if not stop_event.is_set():
+                loop.call_soon_threadsafe(progress_queue.put_nowait, message)
 
-        report, raw_decision, analysis_config, report_markdown = await asyncio.to_thread(
-            run_tradingagents_analysis,
-            run.symbol,
-            run.analysis_date,
-            on_progress,
+        async def monitor_progress() -> None:
+            stage = "TradingAgents 分析运行中"
+            started = time.monotonic()
+            while not stop_event.is_set():
+                try:
+                    message = await asyncio.wait_for(progress_queue.get(), timeout=10)
+                except asyncio.TimeoutError:
+                    elapsed = int(time.monotonic() - started)
+                    try:
+                        store.touch_run(run_id, f"{stage} · 已运行 {elapsed // 60}:{elapsed % 60:02d}")
+                    except ValueError:
+                        return
+                    continue
+                if message != stage:
+                    stage = message
+                    try:
+                        store.update_status(run_id, ResearchAnalysisStatus.running, stage)
+                    except ValueError:
+                        return
+
+        loop = asyncio.get_running_loop()
+        progress_monitor = asyncio.create_task(monitor_progress())
+        env_values = _read_settings_env_values()
+        task_timeout = max(
+            60,
+            min(3600, _coerce_int(env_values.get("RESEARCH_ANALYSIS_TIMEOUT_SECONDS", "900"), 900)),
         )
+
+        try:
+            report, raw_decision, analysis_config, report_markdown = await asyncio.wait_for(
+                asyncio.to_thread(
+                    run_tradingagents_analysis,
+                    run.symbol,
+                    run.analysis_date,
+                    on_progress,
+                    run.mode,
+                    stop_event.is_set,
+                ),
+                timeout=task_timeout,
+            )
+        except asyncio.TimeoutError:
+            stop_event.set()
+            store.fail_run(run_id, f"分析超过 {task_timeout // 60} 分钟，已自动终止，请重试")
+            return
+        current = store.get_run(run_id)
+        if stop_event.is_set() or current is None or current.status != ResearchAnalysisStatus.running:
+            return
         completed_run = store.complete_run(run_id, report, raw_decision, analysis_config, report_markdown)
         if company_name and not completed_run.company_name:
             store.update_company_name(run_id, company_name)
+    except asyncio.CancelledError:
+        stop_event.set()
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("research analysis %s failed: %s", run_id, exc)
         try:
             store.fail_run(run_id, str(exc))
         except Exception:
             logger.exception("failed to persist research analysis failure for %s", run_id)
+    finally:
+        stop_event.set()
+        if progress_monitor is not None:
+            progress_monitor.cancel()
+            try:
+                await progress_monitor
+            except asyncio.CancelledError:
+                pass
+        _research_analysis_stop_events.pop(run_id, None)
 
 
 @app.post(
@@ -4754,7 +4826,7 @@ async def create_research_analysis_run(payload: ResearchAnalysisCreate):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     store = _get_research_analysis_store()
-    run = store.create_run(normalized, payload.analysis_date)
+    run = store.create_run(normalized, payload.analysis_date, payload.mode)
     task = asyncio.create_task(_execute_research_analysis(run.run_id))
     _research_analysis_tasks[run.run_id] = task
     task.add_done_callback(
@@ -4819,6 +4891,9 @@ async def get_research_analysis_run(run_id: str):
 async def delete_research_analysis_run(run_id: str):
     """Delete one local research analysis record and its files."""
     task = _research_analysis_tasks.pop(run_id, None)
+    stop_event = _research_analysis_stop_events.pop(run_id, None)
+    if stop_event is not None:
+        stop_event.set()
     if task is not None and not task.done():
         task.cancel()
     try:

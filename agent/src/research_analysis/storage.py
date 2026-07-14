@@ -137,6 +137,7 @@ class ResearchAnalysisStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     analysis_date TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'fast',
                     error TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_research_symbol ON runs(symbol);
@@ -150,13 +151,21 @@ class ResearchAnalysisStore:
                 """)
             except sqlite3.OperationalError:
                 pass
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            if "mode" not in columns:
+                conn.execute("ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'fast'")
 
     def run_dir(self, run_id: str) -> Path:
         if not re.fullmatch(r"research-[0-9]{8}-[0-9]{6}-[a-f0-9]{8}", run_id):
             raise ValueError("invalid run_id")
         return self.root / run_id
 
-    def create_run(self, normalized: NormalizedSymbol, analysis_date: str | None = None) -> ResearchAnalysisRun:
+    def create_run(
+        self,
+        normalized: NormalizedSymbol,
+        analysis_date: str | None = None,
+        mode: str = "fast",
+    ) -> ResearchAnalysisRun:
         now = utc_now()
         run_id = f"research-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:8]}"
         run = ResearchAnalysisRun(
@@ -164,6 +173,7 @@ class ResearchAnalysisStore:
             symbol=normalized.symbol,
             market=normalized.market,
             analysis_date=analysis_date or date.today().isoformat(),
+            mode="full" if mode == "full" else "fast",
             created_at=now,
             updated_at=now,
             status=ResearchAnalysisStatus.queued,
@@ -198,6 +208,36 @@ class ResearchAnalysisStore:
         self._upsert_index(run, run.report_markdown)
         self.append_event(run_id, status.value, summary or status.value, error=error)
         return run
+
+    def touch_run(self, run_id: str, summary: str = "") -> ResearchAnalysisRun:
+        """Refresh a live run heartbeat without appending a noisy event."""
+        run = self.get_run(run_id)
+        if run is None:
+            raise ValueError("run not found")
+        if run.status not in {ResearchAnalysisStatus.queued, ResearchAnalysisStatus.running}:
+            return run
+        run.updated_at = utc_now()
+        if summary:
+            run.summary = summary
+        self._write_run_files(run, run.raw_decision, run.report_markdown)
+        self._upsert_index(run, run.report_markdown)
+        return run
+
+    def fail_incomplete_runs(self, message: str) -> list[str]:
+        """Fail queued/running work that cannot survive a backend restart."""
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT run_id FROM runs WHERE status IN (?, ?)",
+                (ResearchAnalysisStatus.queued.value, ResearchAnalysisStatus.running.value),
+            ).fetchall()
+        failed: list[str] = []
+        for row in rows:
+            run_id = row["run_id"]
+            run = self.get_run(run_id)
+            if run and run.status in {ResearchAnalysisStatus.queued, ResearchAnalysisStatus.running}:
+                self.fail_run(run_id, message)
+                failed.append(run_id)
+        return failed
 
     def complete_run(
         self,
@@ -317,8 +357,8 @@ class ResearchAnalysisStore:
                 """
                 INSERT OR REPLACE INTO runs
                 (run_id, symbol, market, company_name, rating, confidence, status, summary,
-                 created_at, updated_at, analysis_date, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, updated_at, analysis_date, mode, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run.run_id,
@@ -332,6 +372,7 @@ class ResearchAnalysisStore:
                     run.created_at,
                     run.updated_at,
                     run.analysis_date,
+                    run.mode,
                     run.error,
                 ),
             )

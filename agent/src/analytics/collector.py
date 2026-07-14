@@ -10,7 +10,7 @@ from .store import AnalyticsStore
 logger = logging.getLogger(__name__)
 
 ALLOWED_METADATA = {
-    "product": {"route", "market", "result_count", "source"},
+    "product": {"route", "market", "result_count", "source", "mode"},
     "system": {
         "route",
         "method",

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 from typing_extensions import TypedDict
@@ -36,6 +37,13 @@ def _env(key: str, defaults: dict[str, str] | None = None) -> str:
     if value:
         return value
     return (defaults or {}).get(key, "")
+
+
+def _env_int(key: str, defaults: dict[str, str], fallback: int) -> int:
+    try:
+        return int(_env(key, defaults) or str(fallback))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _raw_text(value: Any) -> str:
@@ -165,27 +173,11 @@ def _ensure_langgraph_runtime_compat() -> None:
             Runtime.server_info = None  # type: ignore[attr-defined]
 
 
-_NODE_LABEL: dict[str, str] = {
-    "Market Analyst": "📊 市场/技术分析中",
-    "market_tools": "📊 获取市场数据中",
-    "clear_market_messages": "📊 市场分析完成",
-    "Sentiment Analyst": "💬 情绪分析中",
-    "social_tools": "💬 获取社交媒体数据中",
-    "clear_social_messages": "💬 情绪分析完成",
-    "News Analyst": "📰 新闻分析中",
-    "news_tools": "📰 获取新闻数据中",
-    "clear_news_messages": "📰 新闻分析完成",
-    "Fundamentals Analyst": "📋 基本面分析中",
-    "fundamentals_tools": "📋 获取基本面数据中",
-    "clear_fundamentals_messages": "📋 基本面分析完成",
-    "Bull Researcher": "🐂 多方研究员辩论中",
-    "Bear Researcher": "🐻 空方研究员辩论中",
-    "Research Manager": "🎯 研究经理综合判断中",
-    "Trader": "💹 交易员制定计划中",
-    "Aggressive Analyst": "⚡ 激进风控分析师评估中",
-    "Neutral Analyst": "⚖️ 中立风控分析师评估中",
-    "Conservative Analyst": "🛡️ 保守风控分析师评估中",
-    "Portfolio Manager": "📝 组合经理最终决策中",
+_ANALYST_STAGE: dict[str, tuple[str, str]] = {
+    "market": ("market_report", "📊 市场/技术分析中"),
+    "social": ("sentiment_report", "💬 情绪分析中"),
+    "news": ("news_report", "📰 新闻分析中"),
+    "fundamentals": ("fundamentals_report", "📋 基本面分析中"),
 }
 
 
@@ -203,6 +195,8 @@ def run_tradingagents_analysis(
     symbol: str,
     analysis_date: str,
     on_progress: Callable[[str], None] | None = None,
+    mode: str = "fast",
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[ResearchAnalysisReport, Any, dict[str, Any], str]:
     """Run TradingAgents synchronously; callers should offload this to a worker thread."""
     env_values = _dotenv_values()
@@ -235,28 +229,67 @@ def run_tradingagents_analysis(
             "TradingAgents 未安装。请在后端环境安装 TauricResearch/TradingAgents，并配置所需 API key 后重试。"
         ) from exc
 
+    started_at = time.monotonic()
     config = dict(DEFAULT_CONFIG)
     provider = _env("LANGCHAIN_PROVIDER", env_values).strip().lower()
     model_name = _env("LANGCHAIN_MODEL_NAME", env_values).strip()
+    quick_model = _env("RESEARCH_ANALYSIS_QUICK_MODEL", env_values).strip() or model_name
+    deep_model = _env("RESEARCH_ANALYSIS_DEEP_MODEL", env_values).strip() or model_name
+    request_timeout = max(10, _env_int("TIMEOUT_SECONDS", env_values, 120))
+    max_retries = max(0, _env_int("MAX_RETRIES", env_values, 2))
+    normalized_mode = "full" if mode == "full" else "fast"
+    if normalized_mode == "full":
+        selected_analysts = ["market", "social", "news", "fundamentals"]
+    else:
+        configured_analysts = _env("RESEARCH_ANALYSIS_FAST_ANALYSTS", env_values).strip()
+        selected_analysts = [item.strip() for item in configured_analysts.split(",") if item.strip()]
+        selected_analysts = selected_analysts or ["market", "fundamentals"]
+        allowed_analysts = set(_ANALYST_STAGE)
+        if any(item not in allowed_analysts for item in selected_analysts):
+            raise RuntimeError("RESEARCH_ANALYSIS_FAST_ANALYSTS 包含不支持的分析师")
     if provider:
         config["llm_provider"] = provider
-    if model_name:
-        config["quick_think_llm"] = model_name
-        config["deep_think_llm"] = model_name
+    if quick_model:
+        config["quick_think_llm"] = quick_model
+    if deep_model:
+        config["deep_think_llm"] = deep_model
     if provider == "openrouter":
         config["backend_url"] = _env("OPENROUTER_BASE_URL", env_values).strip() or "https://openrouter.ai/api/v1"
     elif provider == "openai":
         config["backend_url"] = _env("OPENAI_BASE_URL", env_values).strip() or config.get("backend_url")
     config["output_language"] = "Chinese"
+    config["research_request_timeout"] = request_timeout
+    config["research_max_retries"] = max_retries
+    if normalized_mode == "fast":
+        # Keep the bull/bear challenge, but use one risk viewpoint before the final manager.
+        config["max_risk_discuss_rounds"] = 0
 
     if on_progress:
-        on_progress("🔧 初始化 TradingAgents 引擎")
+        on_progress("🔧 正在初始化分析引擎")
 
-    graph = TradingAgentsGraph(debug=False, config=config)
+    class BoundedTradingAgentsGraph(TradingAgentsGraph):
+        def _get_provider_kwargs(self) -> dict[str, Any]:
+            kwargs = super()._get_provider_kwargs()
+            kwargs["timeout"] = self.config["research_request_timeout"]
+            kwargs["max_retries"] = self.config["research_max_retries"]
+            return kwargs
 
-    # Use streaming to report per-node progress
+    graph = BoundedTradingAgentsGraph(
+        selected_analysts=selected_analysts,
+        debug=False,
+        config=config,
+    )
+
     graph.ticker = symbol
-    graph._resolve_pending_entries(symbol)
+    if normalized_mode == "full":
+        if on_progress:
+            on_progress("🧠 正在加载并复盘历史投研记录")
+        graph._resolve_pending_entries(symbol)
+    elif on_progress:
+        on_progress("🧠 正在加载历史投研上下文")
+
+    if should_stop and should_stop():
+        raise RuntimeError("投研分析已取消")
 
     if graph.config.get("checkpoint_enabled"):
         from tradingagents.graph.checkpointing import get_checkpointer, checkpoint_step
@@ -266,7 +299,11 @@ def run_tradingagents_analysis(
 
     try:
         past_context = graph.memory_log.get_past_context(symbol)
+        if on_progress:
+            on_progress("🔎 正在识别标的与准备分析上下文")
         instrument_context = graph.resolve_instrument_context(symbol)
+        if should_stop and should_stop():
+            raise RuntimeError("投研分析已取消")
         init_agent_state = graph.propagator.create_initial_state(
             symbol, analysis_date, asset_type="stock",
             past_context=past_context, instrument_context=instrument_context,
@@ -278,17 +315,39 @@ def run_tradingagents_analysis(
             tid = thread_id(symbol, str(analysis_date))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        final_state = {}
-        seen_nodes: set[str] = set()
-        for chunk in graph.graph.stream(init_agent_state, **args):
-            final_state.update(chunk)
-            for node_name in chunk:
-                if node_name not in seen_nodes:
-                    seen_nodes.add(node_name)
-                    label = _NODE_LABEL.get(node_name)
-                    if label and on_progress:
-                        on_progress(label)
+        final_state: dict[str, Any] = {}
+        emitted_stages: set[str] = set()
 
+        def emit_once(key: str, message: str) -> None:
+            if key not in emitted_stages and on_progress:
+                emitted_stages.add(key)
+                on_progress(message)
+
+        first_analyst = selected_analysts[0]
+        emit_once(f"analyst:{first_analyst}", _ANALYST_STAGE[first_analyst][1])
+        for chunk in graph.graph.stream(init_agent_state, **args):
+            if should_stop and should_stop():
+                raise RuntimeError("投研分析已取消")
+            final_state.update(chunk)
+            for index, analyst in enumerate(selected_analysts):
+                report_key, _ = _ANALYST_STAGE[analyst]
+                if chunk.get(report_key):
+                    stage_label = _ANALYST_STAGE[analyst][1]
+                    emit_once(f"complete:{analyst}", f"✅ {stage_label.rstrip('中')}完成")
+                    if index + 1 < len(selected_analysts):
+                        next_analyst = selected_analysts[index + 1]
+                        emit_once(f"analyst:{next_analyst}", _ANALYST_STAGE[next_analyst][1])
+                    else:
+                        emit_once("debate", "🐂🐻 多空研究员辩论中")
+            if chunk.get("investment_plan"):
+                emit_once("trader", "💹 交易员制定执行计划中")
+            if chunk.get("trader_investment_plan"):
+                emit_once("risk", "🛡️ 风险评估中")
+            if chunk.get("final_trade_decision"):
+                emit_once("portfolio", "📝 组合经理生成最终结论中")
+
+        if should_stop and should_stop():
+            raise RuntimeError("投研分析已取消")
         graph.curr_state = final_state
         graph._log_state(analysis_date, final_state)
         graph.memory_log.store_decision(
@@ -321,5 +380,10 @@ def run_tradingagents_analysis(
         "llm_provider": config.get("llm_provider"),
         "quick_think_llm": config.get("quick_think_llm"),
         "deep_think_llm": config.get("deep_think_llm"),
+        "mode": normalized_mode,
+        "selected_analysts": selected_analysts,
+        "request_timeout_seconds": request_timeout,
+        "max_retries": max_retries,
+        "duration_seconds": round(time.monotonic() - started_at, 2),
         "analysis_date": analysis_date,
     }, report_markdown

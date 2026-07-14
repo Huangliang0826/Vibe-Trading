@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -57,6 +57,7 @@ function todayString() {
 export function ResearchAnalysis() {
   const [symbol, setSymbol] = useState("0700.HK");
   const [analysisDate, setAnalysisDate] = useState(() => todayString());
+  const [analysisMode, setAnalysisMode] = useState<"fast" | "full">("fast");
   const [query, setQuery] = useState("");
   const [filterSymbol, setFilterSymbol] = useState("");
   const [filterRating, setFilterRating] = useState<"all" | "buy" | "hold" | "sell">("all");
@@ -67,6 +68,7 @@ export function ResearchAnalysis() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const pendingAnalytics = useRef(new Map<string, { started: number; sessionId: string }>());
 
   const activeRunId = selectedRun?.run_id;
   const activeIsLive = selectedRun?.status === "queued" || selectedRun?.status === "running";
@@ -110,6 +112,23 @@ export function ResearchAnalysis() {
         const run = await api.getResearchAnalysisRun(activeRunId);
         setSelectedRun(run);
         setRuns((prev) => prev.map((item) => (item.run_id === run.run_id ? run : item)));
+        if (run.status === "completed" || run.status === "failed") {
+          const pending = pendingAnalytics.current.get(run.run_id);
+          if (pending) {
+            pendingAnalytics.current.delete(run.run_id);
+            trackProductEvent({
+              feature: "research_analysis",
+              action: "task_complete",
+              outcome: run.status === "completed" ? "success" : "failure",
+              sessionId: pending.sessionId,
+              durationMs: performance.now() - pending.started,
+              metadata: { route: "/research-analysis", source: "multi_agent", mode: run.mode },
+            });
+            if (run.status === "completed") {
+              trackProductEvent({ feature: "research_analysis", action: "result_view", outcome: "success", sessionId: pending.sessionId, metadata: { route: "/research-analysis", source: "multi_agent", mode: run.mode } });
+            }
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -117,7 +136,7 @@ export function ResearchAnalysis() {
     return () => window.clearInterval(timer);
   }, [activeRunId, activeIsLive]);
 
-  const createRun = async (nextSymbol = symbol, nextDate = analysisDate) => {
+  const createRun = async (nextSymbol = symbol, nextDate = analysisDate, nextMode = analysisMode) => {
     const trimmed = nextSymbol.trim();
     if (!trimmed) {
       setError("请输入股票代码，例如 AAPL、NVDA、0700.HK、9988.HK");
@@ -133,11 +152,11 @@ export function ResearchAnalysis() {
         symbol: trimmed,
         market: "auto",
         analysis_date: nextDate || todayString(),
+        mode: nextMode,
       });
       setSelectedRun(run);
       setRuns((prev) => [run, ...prev.filter((item) => item.run_id !== run.run_id)]);
-      trackProductEvent({ feature: "research_analysis", action: "task_complete", outcome: "success", sessionId, durationMs: performance.now() - started, metadata: { route: "/research-analysis", source: "multi_agent" } });
-      trackProductEvent({ feature: "research_analysis", action: "result_view", outcome: "success", sessionId, metadata: { route: "/research-analysis", source: "multi_agent" } });
+      pendingAnalytics.current.set(run.run_id, { started, sessionId });
     } catch (err) {
       trackProductEvent({ feature: "research_analysis", action: "task_complete", outcome: "failure", sessionId, durationMs: performance.now() - started, metadata: { route: "/research-analysis", source: "multi_agent" } });
       setError(err instanceof Error ? err.message : String(err));
@@ -158,7 +177,7 @@ export function ResearchAnalysis() {
   };
 
   const rerun = (run: ResearchAnalysisRun) => {
-    createRun(run.symbol, run.analysis_date || todayString());
+    createRun(run.symbol, run.analysis_date || todayString(), run.mode || "fast");
   };
 
   const report = selectedRun?.report;
@@ -214,6 +233,18 @@ export function ResearchAnalysis() {
                     onChange={(event) => setAnalysisDate(event.target.value)}
                     className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
                   />
+                </label>
+                <label className="block text-xs font-medium text-muted-foreground">
+                  分析模式
+                  <select
+                    value={analysisMode}
+                    onChange={(event) => setAnalysisMode(event.target.value as "fast" | "full")}
+                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  >
+                    <option value="fast">快速分析（推荐）</option>
+                    <option value="full">完整分析</option>
+                  </select>
+                  <span className="mt-1 block font-normal leading-5">快速模式保留技术面、基本面和多空判断，跳过低价值社交数据与重复风控辩论。</span>
                 </label>
                 <button
                   disabled={creating}
@@ -341,7 +372,7 @@ export function ResearchAnalysis() {
                       )}
                     </div>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {selectedRun.market.toUpperCase()} · {selectedRun.analysis_date} · {selectedRun.run_id}
+                      {selectedRun.market.toUpperCase()} · {selectedRun.analysis_date} · {selectedRun.mode === "full" ? "完整分析" : "快速分析"} · {selectedRun.run_id}
                     </p>
                   </div>
                   <div className="flex gap-2">

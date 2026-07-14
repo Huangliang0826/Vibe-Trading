@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.research_analysis.models import ResearchAnalysisReport, ResearchAnalysisStatus
+from src.research_analysis.models import ResearchAnalysisCreate, ResearchAnalysisReport, ResearchAnalysisStatus
 from src.research_analysis.storage import DISCLAIMER, ResearchAnalysisStore, normalize_symbol
 
 
@@ -11,6 +11,10 @@ def test_normalize_symbol_supports_us_and_hk_tickers() -> None:
     assert normalize_symbol("nvda", "us").symbol == "NVDA"
     assert normalize_symbol("00700", "hk").symbol == "0700.HK"
     assert normalize_symbol("9988.HK").symbol == "9988.HK"
+
+
+def test_research_analysis_defaults_to_fast_mode() -> None:
+    assert ResearchAnalysisCreate(symbol="AAPL").mode == "fast"
 
 
 @pytest.mark.parametrize("symbol", ["", "../AAPL", "AA PL", "$TSLA"])
@@ -73,3 +77,20 @@ def test_store_delete_removes_files_and_index(tmp_path) -> None:
     assert not (tmp_path / "research_analyses" / run.run_id).exists()
     assert store.get_run(run.run_id) is None
     assert store.list_runs(symbol="AAPL") == []
+
+
+def test_store_fails_incomplete_runs_after_restart(tmp_path) -> None:
+    store = ResearchAnalysisStore(root=tmp_path / "research_analyses", db_path=tmp_path / "research.db")
+    queued = store.create_run(normalize_symbol("AAPL", "us"))
+    running = store.create_run(normalize_symbol("MSFT", "us"), mode="full")
+    store.update_status(running.run_id, ResearchAnalysisStatus.running, "分析中")
+    completed = store.create_run(normalize_symbol("NVDA", "us"))
+    store.complete_run(completed.run_id, _sample_report(), {"source": "unit-test"})
+
+    failed = store.fail_incomplete_runs("后端已重启，请重新运行分析")
+
+    assert set(failed) == {queued.run_id, running.run_id}
+    assert store.get_run(queued.run_id).status == ResearchAnalysisStatus.failed
+    assert store.get_run(running.run_id).error == "后端已重启，请重新运行分析"
+    assert store.get_run(running.run_id).mode == "full"
+    assert store.get_run(completed.run_id).status == ResearchAnalysisStatus.completed

@@ -7,6 +7,7 @@ type ProductMetadata = {
   market?: string;
   result_count?: number;
   source?: string;
+  mode?: string;
 };
 
 export interface ProductEventInput {
