@@ -23,9 +23,10 @@ function renderLayout() {
 }
 
 describe("Layout mobile navigation", () => {
-  it("links to the analytics dashboard", () => {
+  it("keeps analytics inside settings instead of the primary navigation", () => {
     renderLayout();
-    expect(screen.getByRole("link", { name: "数据洞察" })).toHaveAttribute("href", "/analytics");
+    expect(screen.queryByRole("link", { name: "数据洞察" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("href", "/settings");
   });
 
   it("temporarily hides the HSTECH navigation entry", () => {

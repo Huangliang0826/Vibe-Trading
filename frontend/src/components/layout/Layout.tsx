@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase, Menu, X, Newspaper, BarChart3 } from "lucide-react";
+import { Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Loader2, LayoutDashboard, Radar, LineChart, Cpu, ChevronDown, ChevronRight, FileSearch, Briefcase, Menu, X, Newspaper } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { useApiHealth } from "@/hooks/useApiHealth";
@@ -20,7 +20,6 @@ const NAV = [
   { to: "/scanner", icon: Radar, label: "机会扫描" },
   { to: "/news-center", icon: Newspaper, label: "新闻中心" },
   { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
-  { to: "/analytics", icon: BarChart3, label: "数据洞察" },
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 

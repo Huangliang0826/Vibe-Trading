@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Database, KeyRound, Loader2, RotateCcw, Save, Server, SlidersHorizontal } from "lucide-react";
+import { BarChart3, Database, KeyRound, Loader2, RotateCcw, Save, Server, Settings2, SlidersHorizontal } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, isAuthRequiredError, type DataSourceSettings, type LLMProviderOption, type LLMSettings } from "@/lib/api";
 import { getApiAuthKey, setApiAuthKey } from "@/lib/apiAuth";
+import { Analytics } from "@/pages/Analytics";
+import { cn } from "@/lib/utils";
 
 interface LLMFormState {
   provider: string;
@@ -31,7 +34,7 @@ function toForm(settings: LLMSettings): LLMFormState {
   };
 }
 
-export function Settings() {
+function SettingsConfiguration() {
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [dataSettings, setDataSettings] = useState<DataSourceSettings | null>(null);
   const [form, setForm] = useState<LLMFormState | null>(null);
@@ -477,6 +480,52 @@ export function Settings() {
           </div>
         </div>
       </form>
+    </div>
+  );
+}
+
+export function Settings() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") === "analytics" ? "analytics" : "configuration";
+
+  const selectTab = (tab: "configuration" | "analytics") => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === "analytics") next.set("tab", "analytics");
+    else next.delete("tab");
+    setSearchParams(next, { replace: true });
+  };
+
+  return (
+    <div>
+      <div className="mx-auto max-w-6xl px-5 pt-6">
+        <div role="tablist" aria-label="设置栏目" className="inline-flex rounded-lg border bg-muted/30 p-1">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "configuration"}
+            onClick={() => selectTab("configuration")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
+              activeTab === "configuration" ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Settings2 className="h-4 w-4" />系统设置
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "analytics"}
+            onClick={() => selectTab("analytics")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
+              activeTab === "analytics" ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <BarChart3 className="h-4 w-4" />数据洞察
+          </button>
+        </div>
+      </div>
+      {activeTab === "analytics" ? <Analytics embedded /> : <SettingsConfiguration />}
     </div>
   );
 }

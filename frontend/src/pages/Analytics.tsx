@@ -54,7 +54,7 @@ function formatValue(metric: string, value: number | null): string {
   return Math.round(value).toLocaleString();
 }
 
-export function Analytics() {
+export function Analytics({ embedded = false }: { embedded?: boolean }) {
   const [view, setView] = useState<AnalyticsView>("development");
   const [days, setDays] = useState<AnalyticsDays>(30);
   const [data, setData] = useState<DashboardResponse | null>(null);
@@ -86,7 +86,7 @@ export function Analytics() {
   const noData = view !== "research" && view !== "development" && !loading && (data?.warnings.includes("no_data") || !data?.points.length);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 px-5 py-6">
+    <div className={cn("mx-auto max-w-6xl space-y-5 px-5", embedded ? "pb-6 pt-4" : "py-6")}>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="flex items-center gap-2"><BarChart3 className="h-6 w-6 text-primary" /><h1 className="text-2xl font-semibold">数据洞察</h1></div>
