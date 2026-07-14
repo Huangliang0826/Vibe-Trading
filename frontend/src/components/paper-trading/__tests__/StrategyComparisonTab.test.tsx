@@ -33,11 +33,11 @@ afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 it("defaults to five years and renders honest partial results", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-07-13T12:00:00Z"));
-  vi.useRealTimers();
   apiMock.createStrategyComparison.mockResolvedValue(partialRun);
   render(<StrategyComparisonTab />);
   expect(screen.getByLabelText("开始日期")).toHaveValue("2021-07-13");
   expect(screen.getByLabelText("结束日期")).toHaveValue("2026-07-13");
+  vi.useRealTimers();
 
   await userEvent.click(screen.getByRole("button", { name: "运行统一比较" }));
 

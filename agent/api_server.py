@@ -46,6 +46,7 @@ from src.paper_trading import (
     PaperTradingStore,
     RobustOptimizeCreate,
 )
+from src.scanner.startup_refresh import schedule_startup_refresh
 from src.ui_services import build_run_analysis, load_run_context
 
 # UTF-8 on Windows
@@ -631,6 +632,7 @@ async def _run_startup_preflight() -> None:
         _analytics_runtime.start()
     if _opportunity_runtime is not None:
         _opportunity_runtime.scheduler.start()
+    schedule_startup_refresh()
 
 
 @app.on_event("shutdown")
