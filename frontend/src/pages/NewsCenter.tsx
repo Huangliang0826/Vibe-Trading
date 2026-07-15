@@ -11,17 +11,6 @@ const SECTOR_LABELS: Record<string, string> = {
   tech: "科技互联网", consumer: "消费电子", macro: "财经宏观", science: "前沿科学",
 };
 
-function formatDate(dateStr: string): string {
-  if (!dateStr) return "";
-  const d = new Date(`${dateStr}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diff = (today.getTime() - d.getTime()) / 86_400_000;
-  if (diff === 0) return "今日";
-  if (diff === 1) return "昨日";
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
-}
-
 export function NewsCenter() {
   const [language, setLanguage] = useState<"zh" | "en">("zh");
   const [dates, setDates] = useState<string[]>([]);
@@ -180,7 +169,7 @@ export function NewsCenter() {
       <section className="border-b py-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">{formatDate(date)}投资简报</h2>
+            <h2 className="text-sm font-semibold">今日投资简报</h2>
             {digest?.ai_summary && (
               <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span>
             )}
@@ -203,7 +192,7 @@ export function NewsCenter() {
 
       {digest && (digest.ai_major?.length ?? 0) > 0 ? (
         <section className="border-b py-6">
-          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">{formatDate(date)}重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span></div>
+          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span></div>
           <div className="divide-y">
             {digest.ai_major!.map((item, index) => (
               <article key={index} className="py-3">
@@ -223,7 +212,7 @@ export function NewsCenter() {
           </div>
         </section>
       ) : digest && digest.major_items.length > 0 ? (
-        <section className="border-b py-6"><h2 className="mb-3 text-sm font-semibold">{formatDate(date)}重大新闻</h2><div className="divide-y">{digest.major_items.map((item) => <NewsRow key={item.article_id} item={item} compact />)}</div></section>
+        <section className="border-b py-6"><h2 className="mb-3 text-sm font-semibold">今日重大新闻</h2><div className="divide-y">{digest.major_items.map((item) => <NewsRow key={item.article_id} item={item} compact />)}</div></section>
       ) : null}
 
       <section className="py-6">
