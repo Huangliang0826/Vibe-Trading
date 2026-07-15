@@ -297,6 +297,8 @@ export const api = {
     request<ForecastResponse>(`/forecast/${market}/${encodeURIComponent(code)}?months=${months}&context=${context}&display_history=${displayHistory}${nocache ? "&nocache=1" : ""}`),
   getForecastCalibration: (market: string, code: string, context = 0) =>
     request<CalibrationResponse>(`/forecast/${market}/${encodeURIComponent(code)}/calibration?context=${context}`),
+  getForecastVolatility: (market: string, code: string, horizon = 63, nocache = false) =>
+    request<VolatilityResponse>(`/forecast/${market}/${encodeURIComponent(code)}/volatility?horizon=${horizon}${nocache ? "&nocache=1" : ""}`),
   // costBps omitted → backend resolves the market's real per-side cost
   // (slippage + commission + stamp duty) from its global cost model.
   getForecastStrategy: (market: string, code: string, context = 0, costBps?: number) =>
@@ -1401,6 +1403,47 @@ export interface ForecastResponse {
   context_used?: number | null;
   context_available?: number | null;
   baselines: { random_walk: number[]; drift: number[] };
+  cached?: boolean;
+}
+
+export interface VolatilityForecast {
+  point: number[];
+  p10: number[];
+  p50: number[];
+  p90: number[];
+  context_used: number;
+  vol_window: number;
+  input_unit: string;
+}
+
+export interface VolatilityRegime {
+  current_vol: number;
+  median_vol: number;
+  percentile: number;
+  regime: "low" | "normal" | "high";
+  history_size: number;
+}
+
+export interface VolatilityRiskOverlay {
+  multiplier: number;
+  forecast_vol_peak: number;
+  current_vol: number;
+  median_vol: number;
+  ratio: number;
+  justification: string;
+}
+
+export interface VolatilityResponse {
+  code: string;
+  name: string;
+  market: string;
+  horizon: number;
+  model_available: boolean;
+  model_error?: string;
+  forecast?: VolatilityForecast;
+  regime?: VolatilityRegime;
+  risk_overlay?: VolatilityRiskOverlay;
+  history_vol?: number[];
   cached?: boolean;
 }
 

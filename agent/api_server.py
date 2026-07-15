@@ -2867,6 +2867,54 @@ async def get_forecast_calibration(
     return {**payload, "cached": False}
 
 
+@app.get("/forecast/{market}/{code}/volatility")
+async def get_forecast_volatility(
+    market: str,
+    code: str,
+    horizon: int = Query(63, ge=21, le=252),
+    nocache: int = Query(0),
+):
+    """TimesFM volatility forecast + regime + risk overlay.
+
+    Instead of forecasting price levels (which are near-random walks), this
+    endpoint forecasts *realized volatility* — where time-series models
+    genuinely add value. Returns:
+
+    - ``forecast`` — TimesFM point + quantile forecast of annualized vol
+    - ``regime`` — current vol regime (low / normal / high)
+    - ``risk_overlay`` — suggested position-sizing multiplier
+    - ``history_vol`` — trailing realized-vol series for charting
+    """
+    from src.forecast import volatility
+
+    market = market.lower()
+    key = f"volatility:{market}:{code.upper()}:{horizon}"
+    if not nocache:
+        cached = _FORECAST_CACHE.get(key)
+        if cached and (time.time() - cached[0]) < _FORECAST_TTL:
+            return {**cached[1], "cached": True}
+    try:
+        hist = await asyncio.to_thread(_fetch_price_history, code.strip(), "ALL", market)
+        bars = hist.get("bars", [])
+        if not bars:
+            raise HTTPException(status_code=404, detail=f"no history for {code}")
+        closes = [float(b["close"]) for b in bars if b.get("close") is not None]
+        payload = await asyncio.to_thread(
+            volatility.build_volatility_analysis, closes, horizon,
+        )
+        payload.update({
+            "code": code.strip().upper(),
+            "name": hist.get("name", code),
+            "market": market,
+        })
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"volatility forecast failed: {exc}") from exc
+    _FORECAST_CACHE[key] = (time.time(), payload)
+    return {**payload, "cached": False}
+
+
 @app.get("/forecast/{market}/{code}/strategy")
 async def get_forecast_strategy(
     market: str,
