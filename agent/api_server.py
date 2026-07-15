@@ -7,6 +7,7 @@ V5: ReAct Agent + async /run + CORS env + SSE tool events.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import hashlib
 import hmac
 import ipaddress
@@ -478,12 +479,46 @@ class LiveStatusResponse(BaseModel):
 # FastAPI Application
 # ============================================================================
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Run preflight checks on server startup, clean up on shutdown."""
+    from src.preflight import run_preflight
+
+    run_preflight(console)
+    if _analytics_runtime is not None and os.getenv("ANALYTICS_ENABLED", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }:
+        _analytics_runtime.start()
+    if _opportunity_runtime is not None:
+        _opportunity_runtime.scheduler.start()
+    orphaned = _get_research_analysis_store().fail_incomplete_runs(
+        "后端已重启，原分析任务无法恢复，请重新运行分析"
+    )
+    if orphaned:
+        logger.warning("marked %d orphaned research analysis runs as failed", len(orphaned))
+    schedule_startup_refresh()
+    yield
+    # Shutdown
+    for stop_event in _research_analysis_stop_events.values():
+        stop_event.set()
+    if _research_analysis_tasks:
+        _get_research_analysis_store().fail_incomplete_runs(
+            "后端已停止，分析任务已中断，请重新运行分析"
+        )
+    if _analytics_runtime is not None:
+        await _analytics_runtime.stop()
+    if _opportunity_runtime is not None:
+        await _opportunity_runtime.stop()
+
+
 app = FastAPI(
     title="Vibe-Trading API",
     description="Vibe-Trading API: natural-language finance research, backtesting, and swarm workflows",
     version="5.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 _opportunity_runtime = None
@@ -618,40 +653,6 @@ async def _spa_html_deep_link_fallback(request: Request, call_next):
             if index.exists():
                 return FileResponse(str(index))
     return await call_next(request)
-
-
-@app.on_event("startup")
-async def _run_startup_preflight() -> None:
-    """Run preflight checks on server startup."""
-    from src.preflight import run_preflight
-
-    run_preflight(console)
-    if _analytics_runtime is not None and os.getenv("ANALYTICS_ENABLED", "1").strip().lower() not in {
-        "0", "false", "no", "off",
-    }:
-        _analytics_runtime.start()
-    if _opportunity_runtime is not None:
-        _opportunity_runtime.scheduler.start()
-    orphaned = _get_research_analysis_store().fail_incomplete_runs(
-        "后端已重启，原分析任务无法恢复，请重新运行分析"
-    )
-    if orphaned:
-        logger.warning("marked %d orphaned research analysis runs as failed", len(orphaned))
-    schedule_startup_refresh()
-
-
-@app.on_event("shutdown")
-async def _stop_opportunity_runtime() -> None:
-    for stop_event in _research_analysis_stop_events.values():
-        stop_event.set()
-    if _research_analysis_tasks:
-        _get_research_analysis_store().fail_incomplete_runs(
-            "后端已停止，分析任务已中断，请重新运行分析"
-        )
-    if _analytics_runtime is not None:
-        await _analytics_runtime.stop()
-    if _opportunity_runtime is not None:
-        await _opportunity_runtime.stop()
 
 
 # ============================================================================
