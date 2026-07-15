@@ -116,7 +116,7 @@ Configure them in `config.json` through `optimizer` and `optimizer_params`:
 |------|--------|------|
 | lookback | 60 | Volatility calculation window (trading days) |
 
-**Advantages**: simple and fast, no return forecast required, no correlation matrix required.  
+**Advantages**: simple and fast, no return forecast required, no correlation matrix required.
 **Disadvantages**: ignores cross-asset correlation.
 
 ### 2. `risk_parity`
@@ -136,7 +136,7 @@ Configure them in `config.json` through `optimizer` and `optimizer_params`:
 |------|--------|------|
 | lookback | 60 | Covariance-matrix estimation window |
 
-**Advantages**: accounts for correlation, spreads risk more evenly, and is robust over long horizons.  
+**Advantages**: accounts for correlation, spreads risk more evenly, and is robust over long horizons.
 **Disadvantages**: requires iterative solving and is sensitive to covariance estimates.
 
 ### 3. `mean_variance`
@@ -158,8 +158,8 @@ Configure them in `config.json` through `optimizer` and `optimizer_params`:
 | lookback | 60 | Window for estimating means and covariances |
 | risk_free | 0.0 | Risk-free rate (annualized) |
 
-**Advantages**: theoretically optimal (if inputs are accurate).  
-**Disadvantages**: extremely sensitive to inputs, prone to extreme weights, and often performs poorly out of sample.  
+**Advantages**: theoretically optimal (if inputs are accurate).
+**Disadvantages**: extremely sensitive to inputs, prone to extreme weights, and often performs poorly out of sample.
 **Recommendation**: do not make `lookback` too short (`<30` easily overfits), and add upper/lower weight constraints.
 
 ### 4. `max_diversification`
@@ -179,7 +179,7 @@ Configure them in `config.json` through `optimizer` and `optimizer_params`:
 |------|--------|------|
 | lookback | 60 | Calculation window |
 
-**Advantages**: does not require return forecasts and seeks true diversification.  
+**Advantages**: does not require return forecasts and seeks true diversification.
 **Disadvantages**: effectiveness is limited in highly correlated environments.
 
 ### Optimizer Selection Decision Tree

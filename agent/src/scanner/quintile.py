@@ -6,7 +6,7 @@ The long-short spread (Q1 − Q5) is the core test for cross-sectional alpha.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np

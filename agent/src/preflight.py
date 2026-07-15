@@ -110,6 +110,7 @@ def _check_llm_provider() -> CheckResult:
         if ping_url.endswith("/v1"):
             ping_url = ping_url[:-3]
         resp = requests.get(ping_url, timeout=10)
+        _ = resp  # used for side-effect (connection test)
         return CheckResult(
             name=f"LLM ({provider})",
             status="ready",

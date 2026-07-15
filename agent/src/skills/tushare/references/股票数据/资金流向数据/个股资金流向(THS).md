@@ -4,7 +4,7 @@
 接口：moneyflow_ths
 描述：获取同花顺个股资金流向数据，每日盘后更新
 限量：单次最大6000，可根据日期或股票代码循环提取数据
-积分：6000积分可调取，具体请参阅[积分获取办法](https://tushare.pro/document/1?doc_id=13) 
+积分：6000积分可调取，具体请参阅[积分获取办法](https://tushare.pro/document/1?doc_id=13)
 
 <br>
 <br>

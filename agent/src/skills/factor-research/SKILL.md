@@ -153,4 +153,3 @@ factor_panel.to_csv("factor_alpha101_001.csv")                # ready for factor
 ```
 
 For combining several validated alphas into one composite signal, see the `multi-factor` skill's `ZooSignalEngine` (it z-scores, weights, and ranks alphas for you, with per-alpha skip isolation). For browsing the catalogue and inspecting individual `__alpha_meta__` records, see the `alpha-zoo` skill.
-

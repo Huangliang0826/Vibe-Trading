@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Any
 
 import pandas as pd
 import yfinance as yf
@@ -91,7 +90,6 @@ def _analyst_upgrades(ticker: yf.Ticker, asof: dt.date) -> dict[str, int] | None
         upgrades = int((action == "upgrade").sum() + (action == "up").sum())
         downgrades = int((action == "downgrade").sum() + (action == "down").sum())
         initiations = int((action == "init").sum() + (action.str.contains("init", na=False)).sum())
-        maintains = int(len(recent) - upgrades - downgrades - initiations)
         return {
             "upgrades": upgrades,
             "downgrades": downgrades,

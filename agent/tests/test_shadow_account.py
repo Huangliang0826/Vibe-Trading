@@ -32,7 +32,6 @@ from src.shadow_account import (
     validate_generated,
     write_run_dir,
 )
-from src.shadow_account.models import AttributionBreakdown as _AttrCls
 from src.shadow_account.extractor import MIN_PROFITABLE_ROUNDTRIPS
 
 
@@ -244,7 +243,6 @@ def test_generated_engine_runs_on_mock_data_map(profitable_journal: Path) -> Non
     profile = extract_shadow_profile(profitable_journal)
     source = render_signal_engine(profile)
 
-    module_path = Path("./_shadow_test_engine.py").resolve()
     # Use tmp via test's temp dir proxy — write + exec.
     import tempfile
 

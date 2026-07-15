@@ -43,7 +43,6 @@ from src.paper_trading import (
     PaperTradingCreate,
     PaperTradingList,
     PaperTradingRun,
-    PaperTradingStatus,
     PaperTradingStore,
     RobustOptimizeCreate,
 )

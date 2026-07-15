@@ -17,12 +17,10 @@ from uuid import uuid4
 
 from src.config.paths import get_runtime_root
 from src.paper_trading.models import (
-    PaperHolding,
     PaperTradingCreate,
     PaperTradingRun,
     PaperTradingStatus,
     ExperimentMetadata,
-    StrategyConfig,
 )
 
 HKD_TO_USD = 1.0 / 7.8

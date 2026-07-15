@@ -292,7 +292,7 @@ def run_tradingagents_analysis(
         raise RuntimeError("投研分析已取消")
 
     if graph.config.get("checkpoint_enabled"):
-        from tradingagents.graph.checkpointing import get_checkpointer, checkpoint_step
+        from tradingagents.graph.checkpointing import get_checkpointer
         graph._checkpointer_ctx = get_checkpointer(graph.config["data_cache_dir"], symbol)
         saver = graph._checkpointer_ctx.__enter__()
         graph.graph = graph.workflow.compile(checkpointer=saver)

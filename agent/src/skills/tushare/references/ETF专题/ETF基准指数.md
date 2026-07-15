@@ -28,7 +28,7 @@ ts_code | str | Y | 指数代码
 indx_name | str | Y | 指数全称
 indx_csname | str | Y | 指数简称
 pub_party_name | str | Y | 指数发布机构
-pub_date | str | Y | 指数发布日期 
+pub_date | str | Y | 指数发布日期
 base_date | str | Y | 指数基日
 bp | float | Y | 指数基点(点)
 adj_circle | str | Y | 指数成份证券调整周期

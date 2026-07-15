@@ -64,4 +64,3 @@ Expected: all commands exit 0.
 git add agent/src/scanner/startup_refresh.py agent/tests/scanner/test_startup_refresh.py agent/api_server.py docs/superpowers
 git commit -m "feat: preload daily market content on startup"
 ```
-

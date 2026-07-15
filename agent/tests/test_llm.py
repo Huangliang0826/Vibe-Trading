@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-import pytest
 
 from src.providers.llm import _sync_provider_env, build_llm
 
@@ -237,5 +236,3 @@ class TestReasoningEffortPassthrough:
             "LANGCHAIN_REASONING_EFFORT": "HIGH",
         })
         assert captured["extra_body"]["reasoning"]["effort"] == "high"
-
-

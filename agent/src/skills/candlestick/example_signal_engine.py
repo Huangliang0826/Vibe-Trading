@@ -172,20 +172,7 @@ class SignalEngine:
         """检测十字星（Doji）—— 中性（信号为0）。
 
         条件：实体/振幅 < body_pct 且振幅 > 0。
-
-        Args:
-            o: 开盘价。
-            h: 最高价。
-            l: 最低价。
-            c: 收盘价。
-
-        Returns:
-            信号序列：始终为0（中性形态，不产生方向信号）。
         """
-        bd = _body(o, c)
-        rng = _range(h, l)
-        safe_rng = rng.replace(0, np.nan)
-        cond = (bd / safe_rng < self.body_pct) & (rng > 0)
         # 十字星为中性，不贡献方向分数
         return pd.Series(0, index=o.index)
 
@@ -194,24 +181,7 @@ class SignalEngine:
         """检测纺锤线（Spinning Top）—— 中性（信号为0）。
 
         条件：实体/振幅 < 0.3，上影线 > 实体，下影线 > 实体，且不是十字星。
-
-        Args:
-            o: 开盘价。
-            h: 最高价。
-            l: 最低价。
-            c: 收盘价。
-
-        Returns:
-            信号序列：始终为0（中性形态，不产生方向信号）。
         """
-        bd = _body(o, c)
-        rng = _range(h, l)
-        safe_rng = rng.replace(0, np.nan)
-        us = _upper_shadow(o, c, h)
-        ls = _lower_shadow(o, c, l)
-        is_doji = (bd / safe_rng < self.body_pct) & (rng > 0)
-        cond = ((bd / safe_rng < 0.3) & (us > bd) & (ls > bd)
-                & (rng > 0) & ~is_doji)
         # 纺锤线为中性，不贡献方向分数
         return pd.Series(0, index=o.index)
 

@@ -1,7 +1,6 @@
 """anomaly: detect volume spikes, volatility shifts, and price gaps."""
 from __future__ import annotations
 
-from typing import Any
 
 import numpy as np
 import pandas as pd

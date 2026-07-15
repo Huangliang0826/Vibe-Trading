@@ -23,7 +23,7 @@ description: A股全栈数据工具包 — 行情(mootdx+腾讯+百度)/研报(�
 > 海外或受限网络会超时返回空，回测回退链会自动跳到 tushare/mootdx/akshare。
 
 > 📦 项目主页：https://github.com/simonlin1212/a-stock-data — 更新、反馈、支持作者
-> 
+>
 > 作者：Simon 林 · 抖音「Simon林」· 公众号「硅基世纪」
 
 # A股全栈数据工具包 V3.2.2

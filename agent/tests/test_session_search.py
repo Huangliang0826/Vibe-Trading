@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -28,8 +27,7 @@ class TestIndexing:
     def test_index_session(self, index: SessionSearchIndex) -> None:
         index.index_session("s1", "My first session")
         # No crash, session stored
-        results = index.search("first session")
-        # May or may not match depending on FTS5 availability
+        index.search("first session")  # May or may not match depending on FTS5 availability
         # At minimum: no crash
 
     def test_index_message(self, index: SessionSearchIndex) -> None:

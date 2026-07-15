@@ -19,9 +19,9 @@ from backtest.costs import market_of_code, slipped_price, trade_fee_rate
 from backtest.engines.base import _align
 from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.metrics import by_symbol_stats, calc_metrics
-from backtest.models import EquitySnapshot, TradeRecord
-from src.paper_trading.models import PaperHolding, PaperTradingRun
-from src.paper_trading.storage import PaperTradingStore, HKD_TO_USD
+from backtest.models import TradeRecord
+from src.paper_trading.models import PaperHolding
+from src.paper_trading.storage import PaperTradingStore
 from src.paper_trading.strategies import _to_code, generate_signals
 
 logger = logging.getLogger(__name__)

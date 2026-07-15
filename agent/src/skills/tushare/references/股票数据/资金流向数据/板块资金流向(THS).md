@@ -4,7 +4,7 @@
 接口：moneyflow_cnt_ths
 描述：获取同花顺概念板块每日资金流向
 限量：单次最大可调取5000条数据，可以根据日期和代码循环提取全部数据
-积分：6000积分可以调取，具体请参阅[积分获取办法](https://tushare.pro/document/1?doc_id=13) 
+积分：6000积分可以调取，具体请参阅[积分获取办法](https://tushare.pro/document/1?doc_id=13)
 
 <br>
 <br>
@@ -35,7 +35,7 @@ industry_index | float | Y | 板块指数
 company_num | int | Y | 公司数量
 pct_change_stock | float | Y | 领涨股涨跌幅
 net_buy_amount | float | Y | 流入资金(亿元)
-net_sell_amount | float | Y | 流出资金(亿元)	
+net_sell_amount | float | Y | 流出资金(亿元)
 net_amount | float | Y | 净额(亿元)
 
 <br>
@@ -68,4 +68,3 @@ df = pro.moneyflow_cnt_ths(trade_date='20250320')
 	391   20250320  885975.TI    电子身份证        拓尔思       24.16      -1.40        1438.42           40            -1.40          28.00           39.00     -11.00
 	392   20250320  885874.TI      云游戏      *ST鹏博        1.72      -1.75        1330.68           27            -1.75          67.00           91.00     -23.00
 	393   20250320  886091.TI     华为手机       凯格精机       37.23      -2.25        1183.33           35            -2.25          49.00           68.00     -18.00
-

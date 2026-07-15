@@ -413,7 +413,6 @@ def reconstruct_price_series(run_dir: Path) -> List[Dict[str, Any]]:
     if not signal_path.exists():
         return []
 
-    agent_root = Path(__file__).resolve().parents[1]
     try:
         from src.providers.llm import _ensure_dotenv
 
@@ -437,7 +436,7 @@ def reconstruct_price_series(run_dir: Path) -> List[Dict[str, Any]]:
         return []
 
     if not data_map:
-        print(f"[WARN] reconstruct_price_series: DataLoader returned empty")
+        print("[WARN] reconstruct_price_series: DataLoader returned empty")
         return []
 
     return _flatten_data_map(data_map, start_date=start_date)

@@ -75,4 +75,3 @@ signal_panel = engine.compute_signal(panel)  # DataFrame, same shape as panel["c
 Cross-references:
 - See the `alpha-zoo` skill for browsing the alpha catalogue, filtering by `theme`/`universe`, and inspecting `__alpha_meta__` records.
 - `example_signal_engine.py` is kept for legacy per-symbol workflows that compute factors directly from raw OHLCV; **new code should prefer `zoo_signal_engine.py`** so it benefits from the 450+ zoo alphas, registry-level NaN/inf guardrails, and per-alpha skip isolation.
-

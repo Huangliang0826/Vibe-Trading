@@ -116,6 +116,7 @@ a-stock = [
     "stockstats>=0.6.0",
 ]
 dev = [
+    "pre-commit>=4.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-socket>=0.7.0",
@@ -164,3 +165,26 @@ ignore = ["E501"]
 # to match research-paper formulas. F401 (unused-import) is noise here;
 # F841 (unused-local-variable) stays active to catch real formula bugs.
 "agent/src/factors/zoo/**/*.py" = ["F401"]
+
+# Alpha101 and GTJA191 zoo files follow research-paper formulas verbatim.
+# Unused locals (adv5, dh1, o, etc.) match the original paper variables.
+"agent/src/factors/zoo/alpha101/*.py" = ["F841"]
+"agent/src/factors/zoo/gtja191/*.py" = ["F841", "E741"]
+"agent/src/factors/zoo/qlib158/*.py" = ["F841"]
+
+# Logger-before-import pattern is intentional in these modules.
+"agent/src/session/events.py" = ["E402"]
+"agent/src/session/search.py" = ["E402"]
+"agent/src/session/service.py" = ["E402"]
+"agent/src/research_analysis/tradingagents_adapter.py" = ["E402"]
+"agent/api_server.py" = ["E402"]
+
+# Agent module logger-before-import pattern.
+"agent/src/agent/skills.py" = ["E402"]
+"agent/src/agent/tools.py" = ["E402"]
+
+# Test files that import from inside conditional blocks / after setup.
+"agent/tests/test_shadow_account.py" = ["E402"]
+
+# K线技术分析使用标准记法 l = low price
+"agent/src/skills/candlestick/example_signal_engine.py" = ["E741"]

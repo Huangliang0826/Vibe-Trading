@@ -439,7 +439,7 @@ class SwarmStore:
 
     def _reap_stale(self, run: SwarmRun, *, now: datetime) -> SwarmRun:
         """Pure: mark non-terminal tasks failed; derive run status from tasks."""
-        from src.swarm.models import RunStatus, TaskStatus
+        from src.swarm.models import TaskStatus
 
         terminal_task = {TaskStatus.completed, TaskStatus.failed, TaskStatus.cancelled}
         last_event_at = _last_event_timestamp(self.run_dir(run.id) / "events.jsonl")

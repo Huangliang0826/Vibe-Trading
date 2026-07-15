@@ -80,7 +80,9 @@ def _conformal(p10s, p90s, ys, alpha: float = 0.2, window: int | None = None) ->
     n = len(ys)
     if n < 16:
         return None
-    lo = np.asarray(p10s, float); hi = np.asarray(p90s, float); y = np.asarray(ys, float)
+    lo = np.asarray(p10s, float)
+    hi = np.asarray(p90s, float)
+    y = np.asarray(ys, float)
     w = window or min(16, n // 2)
 
     raw_cov, conf_cov, raw_w, conf_w, qs = [], [], [], [], []
@@ -200,7 +202,9 @@ def calibration(
             is_naive.append(_interval_score(n_lo, n_hi, realized_end))
             if start_price > 0:
                 width_pct.append((p90_end - p10_end) / start_price * 100.0)
-            cqr_lo.append(p10_end); cqr_hi.append(p90_end); cqr_y.append(realized_end)
+            cqr_lo.append(p10_end)
+            cqr_hi.append(p90_end)
+            cqr_y.append(realized_end)
             # representative overlay = the most recent fold
             if t == cutoffs[-1]:
                 fut_idx = list(range(t, t + bt_horizon))

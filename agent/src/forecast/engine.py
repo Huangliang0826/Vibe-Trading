@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Optional
 
 import numpy as np
 

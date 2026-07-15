@@ -10,9 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
-import pytest
 
-import backtest.loaders.alpaca_loader as al
 from backtest.loaders.alpaca_loader import DataLoader, _normalize_bars, _to_alpaca_symbol
 
 

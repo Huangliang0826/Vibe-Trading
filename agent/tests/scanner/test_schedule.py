@@ -4,7 +4,7 @@ from __future__ import annotations
 from src.scanner import schedule
 from src.scanner.core import Candidate, ScanResult
 from src.scanner.store import save_scan
-from src.scanner.tracking import TrackingRecord, load_tracking, save_tracking
+from src.scanner.tracking import TrackingRecord, save_tracking
 
 
 def _scan(asof: str, universe: str = "hstech") -> ScanResult:

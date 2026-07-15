@@ -8,7 +8,6 @@
 
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 
@@ -160,9 +159,6 @@ def _classify_pattern(
     # 更精确的 D 点回撤计算
     ad = abs(d_price - a_price)
     d_retrace = ad / xa
-
-    bc_ratio = bc / ab
-    cd_ratio = cd / bc if bc != 0 else 0.0
 
     for name, rules in PATTERNS.items():
         # Primary validation: B retrace and D retrace (most important)

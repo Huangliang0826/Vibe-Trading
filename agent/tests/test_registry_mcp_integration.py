@@ -290,4 +290,3 @@ def test_warn_callback_omitted_still_logs_collision(
     assert any("foo" in record.message for record in caplog.records), (
         "logger.warning must still fire for the collision even without warn_callback"
     )
-
