@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { LineChart, Loader2, AlertTriangle, TrendingUp } from "lucide-react";
-import { api, type WatchlistMarket, type ForecastResponse, type HSTechBestStrategyResponse, type TradeSignal, type VolatilityResponse } from "@/lib/api";
+import { api, type WatchlistMarket, type ForecastResponse, type HSTechBestStrategyResponse, type TradeSignal } from "@/lib/api";
 import { ForecastChart } from "@/components/charts/ForecastChart";
-import { VolatilityChart } from "@/components/charts/VolatilityChart";
 import { cn } from "@/lib/utils";
 import {
   compactStrategyResponse,
@@ -275,10 +274,6 @@ function ForecastCard({
     ? formatHistoryDuration(bestStrategy.start_date, bestStrategy.end_date)
     : "";
 
-  const [volData, setVolData] = useState<VolatilityResponse | null>(null);
-  const [volLoading, setVolLoading] = useState(false);
-  const [volError, setVolError] = useState<string | null>(null);
-
   // Strategy picker: robust pick vs the user's saved override, plus the menu.
   const robustRecommended = bestStrategy?.robust_recommended || bestStrategy?.best?.strategy?.name || "";
   const isUserSelected = !!bestStrategy?.user_selected;
@@ -307,19 +302,6 @@ function ForecastCard({
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [market, code, context, displayHistory, cacheKey]);
-
-  // Load volatility forecast alongside the price forecast
-  useEffect(() => {
-    if (volData || volLoading) return;
-    let cancelled = false;
-    setVolLoading(true);
-    setVolError(null);
-    api.getForecastVolatility(market, code, 63)
-      .then((d) => { if (!cancelled) setVolData(d); })
-      .catch((e) => { if (!cancelled) setVolError(e?.message || "波动率预测失败"); })
-      .finally(() => { if (!cancelled) setVolLoading(false); });
-    return () => { cancelled = true; };
-  }, [market, code, volData, volLoading]);
 
   return (
     <div id={forecastCardId(market, code)} className="scroll-mt-24 rounded-2xl border bg-card p-4">
@@ -383,140 +365,95 @@ function ForecastCard({
           <AlertTriangle className="h-4 w-4" /> {error}
         </div>
       ) : data ? (
-        <>
-          <ForecastChart data={data} trades={trades.length > 0 ? trades : undefined} />
-          {/* Volatility forecast — auto-loads alongside price forecast */}
-          <div className="mt-4 border-t pt-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-medium text-muted-foreground">波动率预测</span>
-              {volLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-            </div>
-            {volLoading ? (
-              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground" style={{ height: 180 }}>
-                <Loader2 className="h-4 w-4 animate-spin" /> 加载波动率预测…
-              </div>
-            ) : volError ? (
-              <div className="flex items-center justify-center gap-2 text-xs text-red-500" style={{ height: 180 }}>
-                <AlertTriangle className="h-3.5 w-3.5" /> {volError}
-              </div>
-            ) : volData ? (
-              <div>
-                <VolatilityChart data={volData} />
-                {volData.regime && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className={cn(
-                      "inline-block rounded-full px-2 py-0.5 text-[10px] font-medium",
-                      volData.regime.regime === "low"
-                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
-                        : volData.regime.regime === "high"
-                          ? "bg-red-500/10 text-red-600 dark:text-red-400"
-                          : "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
-                    )}>
-                      {volData.regime.regime === "low" ? "低波动" : volData.regime.regime === "high" ? "高波动" : "正常波动"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      当前 {(volData.regime.current_vol * 100).toFixed(1)}% · 中位 {(volData.regime.median_vol * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                )}
-                {volData.risk_overlay && (
-                  <div className="mt-2 rounded-lg border bg-muted/25 px-3 py-2">
-                    <p className="text-[11px] text-muted-foreground leading-5">
-                      {volData.risk_overlay.justification || "基于波动率预测的风控建议"}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>
-          {sortedCandidates.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-muted-foreground">策略</span>
-              <select
-                value={activeStrategy}
-                onChange={(e) => pickStrategy(e.target.value)}
-                disabled={bestStrategyLoading}
-                className="max-w-[16rem] rounded-lg border bg-background px-2 py-1 text-xs disabled:opacity-50"
-              >
-                {sortedCandidates.map((c) => (
-                  <option key={c.strategy.name} value={c.strategy.name}>
-                    {(c.strategy.label || c.strategy.name)}
-                    {c.strategy.name === robustRecommended ? " · 稳健推荐" : ""}
-                  </option>
-                ))}
-              </select>
-              {isUserSelected ? (
-                <>
-                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">手动选择 · 已存为默认</span>
-                  <button
-                    onClick={() => pickStrategy(robustRecommended)}
-                    className="text-[11px] text-primary hover:underline"
-                  >
-                    恢复稳健推荐
-                  </button>
-                </>
-              ) : (
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">稳健推荐</span>
-              )}
-              {bestStrategyLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-            </div>
-          )}
-          {(bestStrategy || bestStrategyError || bestStrategyLoading) && (
-            <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-xs font-medium text-foreground">AI 总结 · {isUserSelected ? "手动选择的策略" : "多时间段最稳健策略"}</p>
-                  {bestStrategy?.best?.metrics && (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {bestStrategy.best.strategy.label || bestStrategy.best.strategy.name}
-                      <span className="mx-1">·</span>
-                      总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}（{historyDuration}）
-                      <span className="mx-1">·</span>
-                      最大亏损 {fmtRet(bestStrategy.best.metrics.max_loss as number | null | undefined)}
-                      <span className="mx-1">·</span>
-                      最大回撤 {fmtRet(bestStrategy.best.metrics.max_drawdown as number | null | undefined)}
-                      <span className="mx-1">·</span>
-                      夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
-                    </p>
-                  )}
-                  {oosMetrics && (
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      样本外收益 {fmtRet(oosMetrics.total_return)}
-                      <span className="mx-1">·</span>
-                      样本外夏普 {Number(oosMetrics.sharpe ?? 0).toFixed(2)}
-                      <span className="mx-1">·</span>
-                      样本外最大亏损 {fmtRet(oosMetrics.max_loss)}
-                      <span className="mx-1">·</span>
-                      样本外最大回撤 {fmtRet(oosMetrics.max_drawdown)}
-                    </p>
-                  )}
-                  {bestStrategy?.selection?.confidence_level === "low" && (
-                    <p className="mt-1 text-[11px] text-amber-600">
-                      低可信度 · {bestStrategy.selection.history_note}
-                    </p>
-                  )}
-                </div>
-                <div className="text-right text-[10px] text-muted-foreground">
-                  {bestStrategy?.selection_cached && <p>年度选择已缓存</p>}
-                  {bestStrategy?.signal_cached && <p>每日信号已缓存</p>}
-                  {bestStrategy?.selection?.valid_until && <p>有效至 {bestStrategy.selection.valid_until.slice(0, 10)}</p>}
-                </div>
-              </div>
-              {bestStrategyLoading ? (
-                <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在运行多时间段策略筛选…
-                </p>
-              ) : bestStrategyError ? (
-                <p className="mt-2 text-xs text-red-500">{bestStrategyError}</p>
-              ) : bestStrategy?.reliable === false ? (
-                <p className="mt-2 text-sm leading-6 text-amber-600">最近一年样本外验证未通过，暂不提供开仓或平仓信号。</p>
-              ) : bestStrategy?.summary ? (
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{bestStrategy.summary}</p>
-              ) : null}
-            </div>
-          )}
-        </>
+        <ForecastChart data={data} trades={trades.length > 0 ? trades : undefined} />
       ) : null}
+
+      {sortedCandidates.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">策略</span>
+          <select
+            value={activeStrategy}
+            onChange={(e) => pickStrategy(e.target.value)}
+            disabled={bestStrategyLoading}
+            className="max-w-[16rem] rounded-lg border bg-background px-2 py-1 text-xs disabled:opacity-50"
+          >
+            {sortedCandidates.map((c) => (
+              <option key={c.strategy.name} value={c.strategy.name}>
+                {(c.strategy.label || c.strategy.name)}
+                {c.strategy.name === robustRecommended ? " · 稳健推荐" : ""}
+              </option>
+            ))}
+          </select>
+          {isUserSelected ? (
+            <>
+              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">手动选择 · 已存为默认</span>
+              <button
+                onClick={() => pickStrategy(robustRecommended)}
+                className="text-[11px] text-primary hover:underline"
+              >
+                恢复稳健推荐
+              </button>
+            </>
+          ) : (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">稳健推荐</span>
+          )}
+          {bestStrategyLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+      )}
+      {(bestStrategy || bestStrategyError || bestStrategyLoading) && (
+        <div className="mt-3 rounded-lg border bg-muted/25 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium text-foreground">AI 总结 · {isUserSelected ? "手动选择的策略" : "多时间段最稳健策略"}</p>
+              {bestStrategy?.best?.metrics && (
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {bestStrategy.best.strategy.label || bestStrategy.best.strategy.name}
+                  <span className="mx-1">·</span>
+                  总收益 {fmtRet(bestStrategy.best.metrics.total_return as number)}（{historyDuration}）
+                  <span className="mx-1">·</span>
+                  最大亏损 {fmtRet(bestStrategy.best.metrics.max_loss as number | null | undefined)}
+                  <span className="mx-1">·</span>
+                  最大回撤 {fmtRet(bestStrategy.best.metrics.max_drawdown as number | null | undefined)}
+                  <span className="mx-1">·</span>
+                  夏普 {Number(bestStrategy.best.metrics.sharpe ?? 0).toFixed(2)}
+                </p>
+              )}
+              {oosMetrics && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  样本外收益 {fmtRet(oosMetrics.total_return)}
+                  <span className="mx-1">·</span>
+                  样本外夏普 {Number(oosMetrics.sharpe ?? 0).toFixed(2)}
+                  <span className="mx-1">·</span>
+                  样本外最大亏损 {fmtRet(oosMetrics.max_loss)}
+                  <span className="mx-1">·</span>
+                  样本外最大回撤 {fmtRet(oosMetrics.max_drawdown)}
+                </p>
+              )}
+              {bestStrategy?.selection?.confidence_level === "low" && (
+                <p className="mt-1 text-[11px] text-amber-600">
+                  低可信度 · {bestStrategy.selection.history_note}
+                </p>
+              )}
+            </div>
+            <div className="text-right text-[10px] text-muted-foreground">
+              {bestStrategy?.selection_cached && <p>年度选择已缓存</p>}
+              {bestStrategy?.signal_cached && <p>每日信号已缓存</p>}
+              {bestStrategy?.selection?.valid_until && <p>有效至 {bestStrategy.selection.valid_until.slice(0, 10)}</p>}
+            </div>
+          </div>
+          {bestStrategyLoading ? (
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> 正在运行多时间段策略筛选…
+            </p>
+          ) : bestStrategyError ? (
+            <p className="mt-2 text-xs text-red-500">{bestStrategyError}</p>
+          ) : bestStrategy?.reliable === false ? (
+            <p className="mt-2 text-sm leading-6 text-amber-600">最近一年样本外验证未通过，暂不提供开仓或平仓信号。</p>
+          ) : bestStrategy?.summary ? (
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{bestStrategy.summary}</p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
