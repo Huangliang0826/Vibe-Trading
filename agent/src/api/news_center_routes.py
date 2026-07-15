@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Awaitable, Callable, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Response
@@ -10,6 +11,7 @@ from src.news_center.models import NewsCenterDigest, NewsCenterList, NewsCenterR
 from src.news_center.service import NewsCenterService
 
 AuthDep = Callable[..., Awaitable[Any] | Any]
+logger = logging.getLogger(__name__)
 
 
 def register_news_center_routes(
@@ -19,6 +21,26 @@ def register_news_center_routes(
     service: NewsCenterService | None = None,
 ) -> None:
     service = service or NewsCenterService()
+    ai_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
+
+    def with_generation_state(digest: NewsCenterDigest, date_key: str, language: str) -> NewsCenterDigest:
+        task = ai_tasks.get((date_key, language))
+        digest.ai_enriching = bool(task and not task.done())
+        return digest
+
+    async def run_enrichment(date_key: str, language: str) -> None:
+        try:
+            await asyncio.to_thread(service.enrich_ai_digest, date_key, language)
+        except Exception:  # noqa: BLE001 — local digest remains available on enrichment failure
+            logger.exception("news AI web enrichment failed for %s/%s", date_key, language)
+        finally:
+            ai_tasks.pop((date_key, language), None)
+
+    def schedule_enrichment(date_key: str, language: str) -> None:
+        key = (date_key, language)
+        task = ai_tasks.get(key)
+        if task is None or task.done():
+            ai_tasks[key] = asyncio.create_task(run_enrichment(date_key, language))
     router = APIRouter(prefix="/news-center", dependencies=[Depends(require_auth)])
 
     @router.get("/articles", response_model=NewsCenterList)
@@ -52,7 +74,9 @@ def register_news_center_routes(
         language: Literal["zh", "en"] = "zh",
     ) -> NewsCenterDigest:
         response.headers["Cache-Control"] = "no-store"
-        return service.get_digest(date_key, language=language)
+        return with_generation_state(
+            service.get_digest(date_key, language=language), date_key, language,
+        )
 
     @router.post("/ai-digest", response_model=NewsCenterDigest)
     async def ai_digest(
@@ -61,12 +85,15 @@ def register_news_center_routes(
         language: Literal["zh", "en"] = "zh",
         force: bool = False,
     ) -> NewsCenterDigest:
-        """Generate the Doubao web-search briefing (cached per date+language)."""
+        """Return a fast local digest, then verify it with web search in background."""
         response.headers["Cache-Control"] = "no-store"
         try:
-            return await asyncio.to_thread(
+            digest_result = await asyncio.to_thread(
                 service.generate_ai_digest, date_key, language, force,
             )
+            if language == "zh" and digest_result.ai_source != "web":
+                schedule_enrichment(date_key, language)
+            return with_generation_state(digest_result, date_key, language)
         except ArkDigestError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 

@@ -22,6 +22,11 @@ class FakeService:
     def refresh(self):
         return NewsCenterRefreshResult(fetched=1, total=10, latest_date="2026-07-01")
 
+    def enrich_ai_digest(self, date_key, language="zh"):
+        digest = self.get_digest(date_key, language)
+        digest.ai_source = "web"
+        return digest
+
 
 def test_articles_pass_filters_to_service():
     app = FastAPI()
@@ -58,6 +63,7 @@ def test_ai_digest_route_generates_and_maps_ark_errors_to_503():
                 raise ArkDigestError("ARK_API_KEY 未配置")
             digest = self.get_digest(date_key, language)
             digest.ai_summary = "AI 简报"
+            digest.ai_source = "local"
             digest.ai_major = [NewsAiMajorItem(title="大新闻", impact="positive")]
             return digest
 

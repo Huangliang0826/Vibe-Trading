@@ -4,7 +4,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 const apiMock = vi.hoisted(() => ({
   getNewsCenterDates: vi.fn(), getNewsCenterArticles: vi.fn(),
-  getNewsCenterDigest: vi.fn(), refreshNewsCenter: vi.fn(),
+  getNewsCenterDigest: vi.fn(), refreshNewsCenter: vi.fn(), generateNewsAiDigest: vi.fn(),
 }));
 vi.mock("@/lib/api", async (original) => ({ ...(await original<object>()), api: apiMock }));
 
@@ -31,6 +31,11 @@ beforeEach(() => {
   apiMock.getNewsCenterDigest.mockResolvedValue({
     date: "2026-07-01", article_count: 1, watchlist_count: 1,
     positive_count: 1, negative_count: 0, summary: "今日重点关注腾讯。", major_items: [],
+  });
+  apiMock.generateNewsAiDigest.mockResolvedValue({
+    date: TODAY, article_count: 1, watchlist_count: 1,
+    positive_count: 1, negative_count: 0, summary: "模板摘要", major_items: [],
+    ai_summary: "快速 AI 简报", ai_major: [], ai_source: "local", ai_enriching: true,
   });
 });
 
@@ -63,8 +68,21 @@ it("does not auto-refresh when today's news already exists", async () => {
   });
   render(<NewsCenter />);
 
-  await screen.findByText("今日无重点。");
+  await screen.findByText("快速 AI 简报");
   expect(apiMock.refreshNewsCenter).not.toHaveBeenCalled();
+});
+
+it("returns a fast digest before background web enrichment finishes", async () => {
+  apiMock.getNewsCenterDates.mockResolvedValue([TODAY]);
+  apiMock.getNewsCenterDigest.mockResolvedValue({
+    date: TODAY, article_count: 1, watchlist_count: 0,
+    positive_count: 0, negative_count: 0, summary: "模板摘要", major_items: [],
+  });
+  render(<NewsCenter />);
+
+  expect(await screen.findByText("快速 AI 简报")).toBeInTheDocument();
+  expect(screen.getAllByText("AI 快速总结").length).toBeGreaterThan(0);
+  expect(screen.getByText("快速摘要已完成，正在后台联网核实…")).toBeInTheDocument();
 });
 
 it("switches the article list and digest to English", async () => {

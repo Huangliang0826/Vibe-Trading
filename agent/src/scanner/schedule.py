@@ -66,9 +66,17 @@ def refresh_news() -> dict[str, Any]:
     click. Runs every day (news happens on weekends too)."""
     from src.news_center.service import NewsCenterService
 
-    result = NewsCenterService().refresh()
+    service = NewsCenterService()
+    result = service.refresh()
     log.info("news refresh: fetched %d, total %d, latest %s",
              result.fetched, result.total, result.latest_date)
+    if result.latest_date:
+        try:
+            digest = service.generate_ai_digest(result.latest_date, language="zh")
+            log.info("news fast AI digest ready for %s via %s",
+                     result.latest_date, digest.ai_model)
+        except Exception as exc:  # noqa: BLE001 — RSS refresh remains successful
+            log.warning("news fast AI digest unavailable for %s: %s", result.latest_date, exc)
     return {"fetched": result.fetched, "total": result.total,
             "latest_date": result.latest_date}
 

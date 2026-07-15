@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from pathlib import Path
+import logging
 import re
+import threading
+import time
 from typing import Any
 
 from src.news_center.ai_digest import (
     ArkDigestClient,
-    build_digest_prompt,
+    build_local_digest_prompt,
+    build_web_enrichment_prompt,
     parse_digest_output,
 )
 from src.news_center.models import (
@@ -20,8 +24,15 @@ from src.news_center.models import (
 from src.opportunity_center.feeds import FeedIngestor
 from src.opportunity_center.storage import OpportunityStore
 
+logger = logging.getLogger(__name__)
+
 
 class NewsCenterService:
+    # Shared across service instances so startup pre-generation and HTTP
+    # requests cannot launch duplicate model calls for the same day.
+    _shared_digest_locks: dict[tuple[str, str], Any] = {}
+    _shared_digest_locks_guard = threading.Lock()
+
     def __init__(
         self,
         *,
@@ -113,30 +124,81 @@ class NewsCenterService:
         digest.ai_major = [NewsAiMajorItem(**row) for row in cached.get("major") or []]
         digest.ai_generated_at = cached.get("generated_at")
         digest.ai_model = cached.get("model")
+        digest.ai_source = str(cached.get("source") or "web")
         return digest
+
+    def _digest_lock(self, date_key: str, language: str) -> Any:
+        key = (date_key, language)
+        with self._shared_digest_locks_guard:
+            return self._shared_digest_locks.setdefault(key, threading.RLock())
+
+    def _prompt_articles(self, date_key: str, language: str) -> list[dict[str, str]]:
+        result = self.list_articles(date_key=date_key, language=language, limit=100)
+        return [
+            {"title": item.title, "summary": item.summary, "source": item.source}
+            for item in result.items
+        ]
 
     def generate_ai_digest(
         self, date_key: str, language: str = "zh", force: bool = False,
     ) -> NewsCenterDigest:
-        """Generate (or reuse) the Doubao web-search briefing for a day.
+        """Generate a fast digest from articles already collected for the day.
 
-        Chinese tab only — the briefing is sourced purely from Ark's web
-        search (collected articles are not fed in), and the English tab keeps
-        the template digest. Slow path — one Ark call (minutes); cached per
-        date, so subsequent ``get_digest`` calls are instant. ``force``
-        regenerates over an existing cache.
+        The slower web verification is handled separately by
+        :meth:`enrich_ai_digest` so this method can return quickly.
         """
         if language != "zh":
             return self.get_digest(date_key, language=language)
-        if not force:
+        with self._digest_lock(date_key, language):
+            if not force:
+                cached = self.store.get_news_ai_digest(date_key, language)
+                if cached:
+                    return self.get_digest(date_key, language=language)
+            articles = self._prompt_articles(date_key, language)
+            prompt = build_local_digest_prompt(date_key, articles)
+            started = time.monotonic()
+            briefing, major = parse_digest_output(
+                self.ai_client.generate(prompt, web_search=False), date_key,
+            )
+            logger.info(
+                "news AI local digest completed for %s in %.2fs (%d articles)",
+                date_key, time.monotonic() - started, len(articles),
+            )
+            self.store.save_news_ai_digest(
+                date_key, language,
+                {"briefing": briefing, "major": major, "source": "local"},
+                self.ai_client.model,
+            )
+        return self.get_digest(date_key, language=language)
+
+    def enrich_ai_digest(self, date_key: str, language: str = "zh") -> NewsCenterDigest:
+        """Verify and enrich a cached local digest with focused web search."""
+        if language != "zh":
+            return self.get_digest(date_key, language=language)
+        with self._digest_lock(date_key, language):
             cached = self.store.get_news_ai_digest(date_key, language)
-            if cached:
+            if cached and cached.get("source") == "web":
                 return self.get_digest(date_key, language=language)
-        prompt = build_digest_prompt(date_key)
-        briefing, major = parse_digest_output(self.ai_client.generate(prompt), date_key)
-        self.store.save_news_ai_digest(
-            date_key, language, {"briefing": briefing, "major": major}, self.ai_client.model,
-        )
+            if not cached:
+                self.generate_ai_digest(date_key, language=language)
+                cached = self.store.get_news_ai_digest(date_key, language) or {}
+            articles = self._prompt_articles(date_key, language)
+            prompt = build_web_enrichment_prompt(
+                date_key, str(cached.get("briefing") or ""), articles,
+            )
+            started = time.monotonic()
+            briefing, major = parse_digest_output(
+                self.ai_client.generate(prompt, web_search=True), date_key,
+            )
+            logger.info(
+                "news AI web enrichment completed for %s in %.2fs (%d candidates)",
+                date_key, time.monotonic() - started, min(len(articles), 10),
+            )
+            self.store.save_news_ai_digest(
+                date_key, language,
+                {"briefing": briefing, "major": major, "source": "web"},
+                self.ai_client.model,
+            )
         return self.get_digest(date_key, language=language)
 
     def refresh(self) -> NewsCenterRefreshResult:

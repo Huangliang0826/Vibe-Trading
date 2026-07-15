@@ -1,10 +1,8 @@
-"""AI daily digest via Volcengine Ark (Doubao) with server-side web search.
+"""AI daily digest via Volcengine Ark (Doubao).
 
-Replaces the mechanical template summary for 今日投资简报 / 今日重大新闻 with a
-model-written briefing sourced purely from Ark's built-in ``web_search`` tool
-(the site's collected articles are NOT fed into the prompt). Chinese only —
-the English tab keeps the original template digest. Results are cached per
-(date, language) by the caller — this module only speaks to the API.
+The fast path summarizes articles already collected by the news center. A
+second background pass can use Ark's ``web_search`` tool to verify and enrich
+the briefing without blocking the page.
 """
 
 from __future__ import annotations
@@ -19,6 +17,7 @@ import httpx
 ARK_DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_DEFAULT_MODEL = "doubao-seed-2-1-pro-260628"
 _TIMEOUT_SECONDS = 300.0  # pro model + web search regularly exceeds two minutes
+_FAST_TIMEOUT_SECONDS = 75.0
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -60,21 +59,22 @@ class ArkDigestClient:
         _ensure_project_env()
         return os.getenv("ARK_API_KEY", "")
 
-    def generate(self, prompt: str) -> str:
-        """One-shot responses call with web_search enabled; returns output text."""
+    def generate(self, prompt: str, *, web_search: bool = True) -> str:
+        """One-shot responses call, optionally enabling server-side web search."""
         if not self.api_key:
             raise ArkDigestError("ARK_API_KEY 未配置（请写入 ~/.vibe-trading/.env）")
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "input": [{"role": "user", "content": prompt}],
-            "tools": [{"type": "web_search", "max_keyword": 2}],
         }
+        if web_search:
+            payload["tools"] = [{"type": "web_search", "max_keyword": 1}]
         try:
             response = httpx.post(
                 f"{self.base_url}/responses",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json=payload,
-                timeout=_TIMEOUT_SECONDS,
+                timeout=_TIMEOUT_SECONDS if web_search else _FAST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -130,6 +130,49 @@ def build_digest_prompt(date_key: str) -> str:
         "全部输出使用简体中文。\n"
         '只返回一个 JSON 对象，不要 Markdown 代码块：{"briefing":"...",'
         '"major":[{"title":"...","summary":"...","news_date":"YYYY-MM-DD","impact":"positive|negative|neutral"}]}'
+    )
+
+
+def build_local_digest_prompt(date_key: str, articles: list[dict[str, str]]) -> str:
+    """Build a fast summarization prompt from already collected daily articles."""
+    rows = []
+    for index, article in enumerate(articles[:25], start=1):
+        title = str(article.get("title") or "").strip()[:180]
+        summary = str(article.get("summary") or "").strip()[:260]
+        source = str(article.get("source") or "").strip()[:60]
+        rows.append(f"{index}. [{source}] {title}\n   {summary}")
+    article_text = "\n".join(rows) or "（当天暂未收录新闻）"
+    return (
+        f"你是严谨的投资新闻编辑。以下是新闻中心在 {date_key} 已收录的当日新闻。"
+        "只依据给定材料生成简体中文投资简报，不进行联网搜索，不补充材料中没有的事实或数字。\n"
+        "输出一段 120~200 字 briefing，并选出最多 6 条重大新闻 major。每条包含 title、"
+        "40~80 字 summary 和 impact（positive/negative/neutral）。\n"
+        '只返回 JSON：{"briefing":"...","major":[{"title":"...","summary":"...",'
+        '"impact":"positive|negative|neutral"}]}\n\n新闻列表：\n'
+        f"{article_text}"
+    )
+
+
+def build_web_enrichment_prompt(
+    date_key: str,
+    local_briefing: str,
+    articles: list[dict[str, str]],
+) -> str:
+    """Build a focused web-verification prompt anchored by the local digest."""
+    headlines = "\n".join(
+        f"- {str(row.get('title') or '').strip()[:180]}"
+        for row in articles[:10]
+        if str(row.get("title") or "").strip()
+    )
+    return (
+        f"你是严谨的投资新闻编辑。今天是 {date_key}（北京时间）。下面已有一份基于本地新闻源的简报。"
+        "请联网核实其中最重要的事件，并只补充当天确实发生、对市场有直接影响的重大财经或科技新闻。"
+        "不要重新进行泛化的全市场搜索；无法确认日期的内容不要收录。\n"
+        f"本地简报：{local_briefing}\n候选标题：\n{headlines}\n"
+        "返回 120~200 字 briefing 和最多 6 条 major；每条包含 title、summary、news_date、impact。"
+        f"news_date 必须为 {date_key}。"
+        '只返回 JSON：{"briefing":"...","major":[{"title":"...","summary":"...",'
+        '"news_date":"YYYY-MM-DD","impact":"positive|negative|neutral"}]}'
     )
 
 

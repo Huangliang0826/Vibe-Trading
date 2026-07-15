@@ -6,6 +6,8 @@ from src.news_center.ai_digest import (
     ArkDigestClient,
     ArkDigestError,
     build_digest_prompt,
+    build_local_digest_prompt,
+    build_web_enrichment_prompt,
     extract_output_text,
     parse_digest_output,
 )
@@ -74,6 +76,18 @@ def test_build_digest_prompt_is_web_search_only_chinese() -> None:
     assert "新闻列表" not in prompt
 
 
+def test_two_stage_prompts_anchor_on_collected_articles() -> None:
+    articles = [{"source": "Tech", "title": "腾讯发布新模型", "summary": "模型能力提升"}]
+
+    local = build_local_digest_prompt("2026-07-09", articles)
+    web = build_web_enrichment_prompt("2026-07-09", "本地简报", articles)
+
+    assert "不进行联网搜索" in local
+    assert "腾讯发布新模型" in local
+    assert "本地简报" in web
+    assert "不要重新进行泛化的全市场搜索" in web
+
+
 def test_parse_digest_output_drops_items_dated_before_the_target_day() -> None:
     text = (
         '{"briefing": "总结", "major": ['
@@ -125,9 +139,11 @@ class FakeAiClient:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.web_search_calls: list[bool] = []
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, *, web_search: bool = True) -> str:
         self.calls += 1
+        self.web_search_calls.append(web_search)
         return '{"briefing": "AI 简报正文", "major": [{"title": "大新闻", "summary": "摘要", "impact": "positive"}]}'
 
 
@@ -148,6 +164,8 @@ def test_generate_ai_digest_caches_and_merges_into_digest(tmp_path) -> None:
     assert digest.ai_major[0].title == "大新闻"
     assert digest.ai_major[0].impact == "positive"
     assert digest.ai_model == "doubao-test"
+    assert digest.ai_source == "local"
+    assert client.web_search_calls == [False]
     assert client.calls == 1
 
     # Second call is served from cache — no new Ark call.
@@ -161,6 +179,20 @@ def test_generate_ai_digest_caches_and_merges_into_digest(tmp_path) -> None:
 
     # force=True regenerates.
     service.generate_ai_digest("2026-07-09", language="zh", force=True)
+    assert client.calls == 2
+
+
+def test_web_enrichment_replaces_local_cache(tmp_path) -> None:
+    service, client = _service(tmp_path)
+    service.generate_ai_digest("2026-07-09", language="zh")
+
+    enriched = service.enrich_ai_digest("2026-07-09", language="zh")
+
+    assert enriched.ai_source == "web"
+    assert client.web_search_calls == [False, True]
+
+    # Once web-verified, another enrichment request is served from cache.
+    service.enrich_ai_digest("2026-07-09", language="zh")
     assert client.calls == 2
 
 

@@ -64,10 +64,10 @@ export function NewsCenter() {
       ]);
       setData(articles);
       setDigest(daily);
-      // 仅中文 Tab、且查看的是今天时自动生成 AI 联网简报（纯联网搜索，
-      // 历史日期无法回溯当天热点，只展示当天已缓存的版本）。
+      // 中文当天先生成本地快速摘要，再由后端在后台联网核实。
+      // 历史日期只展示已经缓存的版本，避免用今天的搜索结果回填历史。
       const today = new Date().toISOString().slice(0, 10);
-      if (language === "zh" && selectedDate === today && !daily.ai_summary) {
+      if (language === "zh" && selectedDate === today && daily.ai_source !== "web") {
         void generateAi(selectedDate, language);
       }
     } catch (reason) {
@@ -96,6 +96,20 @@ export function NewsCenter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { void load(date); }, [date, load]);
+
+  useEffect(() => {
+    if (!date || language !== "zh" || !digest?.ai_enriching) return;
+    const key = `${date}:${language}`;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await api.getNewsCenterDigest(date, language);
+        if (currentViewKey.current === key) setDigest(next);
+      } catch {
+        // Keep the fast local digest visible if a background status poll fails.
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [date, language, digest?.ai_enriching]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -157,7 +171,7 @@ export function NewsCenter() {
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">今日投资简报</h2>
             {digest?.ai_summary && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />AI 联网总结</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span>
             )}
             {digest?.ai_summary && !aiLoading && (
               <button aria-label="重新生成 AI 简报" title="重新生成" onClick={() => void generateAi(date, language, true)} className="text-muted-foreground hover:text-foreground"><RefreshCw className="h-3 w-3" /></button>
@@ -170,14 +184,15 @@ export function NewsCenter() {
             || digest?.summary
             || (autoRefreshing ? "正在获取今日新闻…(每天首次打开自动更新)" : loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。")}
         </p>
-        {language === "zh" && aiLoading && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />AI 正在联网总结当日新闻…</p>}
+        {language === "zh" && aiLoading && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />AI 正在快速总结已收录新闻…</p>}
+        {language === "zh" && !aiLoading && digest?.ai_enriching && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />快速摘要已完成，正在后台联网核实…</p>}
         {language === "zh" && aiError && !aiLoading && <p className="mt-2 text-xs text-amber-600">AI 总结暂不可用：{aiError}</p>}
         {digest && <div className="mt-3 flex gap-4 text-xs text-muted-foreground"><span>自选股 {digest.watchlist_count}</span><span className="text-red-500">利好 {digest.positive_count}</span><span className="text-emerald-600">利空 {digest.negative_count}</span></div>}
       </section>
 
       {digest && (digest.ai_major?.length ?? 0) > 0 ? (
         <section className="border-b py-6">
-          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />AI 联网总结</span></div>
+          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span></div>
           <div className="divide-y">
             {digest.ai_major!.map((item, index) => (
               <article key={index} className="py-3">

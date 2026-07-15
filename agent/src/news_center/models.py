@@ -50,6 +50,8 @@ class NewsCenterDigest(BaseModel):
     ai_major: list[NewsAiMajorItem] = Field(default_factory=list)
     ai_generated_at: str | None = None
     ai_model: str | None = None
+    ai_source: str | None = None
+    ai_enriching: bool = False
 
 
 class NewsCenterRefreshResult(BaseModel):
