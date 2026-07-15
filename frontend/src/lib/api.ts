@@ -671,7 +671,7 @@ export interface NewsCenterDigest {
   negative_count: number; summary: string; major_items: NewsCenterArticle[];
   ai_summary?: string | null; ai_major?: NewsAiMajorItem[];
   ai_generated_at?: string | null; ai_model?: string | null;
-  ai_source?: "local" | "web" | null; ai_enriching?: boolean;
+  ai_source?: "local" | "web" | "fallback" | null; ai_enriching?: boolean;
 }
 export interface NewsCenterRefreshResult { fetched: number; total: number; latest_date?: string | null; }
 export interface NewsCenterFilters {

@@ -17,7 +17,7 @@ import httpx
 ARK_DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_DEFAULT_MODEL = "doubao-seed-2-1-pro-260628"
 _TIMEOUT_SECONDS = 300.0  # pro model + web search regularly exceeds two minutes
-_FAST_TIMEOUT_SECONDS = 75.0
+_FAST_TIMEOUT_SECONDS = 30.0  # the synchronous path must fail over quickly
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -119,7 +119,7 @@ def build_digest_prompt(date_key: str) -> str:
     return (
         f"你是严谨的投资新闻编辑。今天是 {date_key}（北京时间）。请用联网搜索获取当日重要财经与科技动态"
         "（覆盖宏观政策、A股/港股/美股大盘与行业、大宗商品与汇率、重要公司事件），完成两件事：\n"
-        "1. briefing：写一段 120~200 字的当日投资简报，概括对投资者最重要的主线（宏观、行业、个股），"
+        "1. briefing：写一段 300 字以内的当日投资简报，概括对投资者最重要的主线（宏观、行业、个股），"
         "语气克制、只陈述事实与直接影响，不编造数字或消息，不给买卖建议。\n"
         f"2. major：挑选 3~8 条发生在 {date_key} 当天的最重大新闻，每条给出简短标题 title、"
         "40~80 字摘要 summary、事件发生日期 news_date（YYYY-MM-DD）、"
@@ -145,7 +145,7 @@ def build_local_digest_prompt(date_key: str, articles: list[dict[str, str]]) -> 
     return (
         f"你是严谨的投资新闻编辑。以下是新闻中心在 {date_key} 已收录的当日新闻。"
         "只依据给定材料生成简体中文投资简报，不进行联网搜索，不补充材料中没有的事实或数字。\n"
-        "输出一段 120~200 字 briefing，并选出最多 6 条重大新闻 major。每条包含 title、"
+        "输出一段 300 字以内的 briefing，并选出最多 6 条重大新闻 major。每条包含 title、"
         "40~80 字 summary 和 impact（positive/negative/neutral）。\n"
         '只返回 JSON：{"briefing":"...","major":[{"title":"...","summary":"...",'
         '"impact":"positive|negative|neutral"}]}\n\n新闻列表：\n'
@@ -169,11 +169,43 @@ def build_web_enrichment_prompt(
         "请联网核实其中最重要的事件，并只补充当天确实发生、对市场有直接影响的重大财经或科技新闻。"
         "不要重新进行泛化的全市场搜索；无法确认日期的内容不要收录。\n"
         f"本地简报：{local_briefing}\n候选标题：\n{headlines}\n"
-        "返回 120~200 字 briefing 和最多 6 条 major；每条包含 title、summary、news_date、impact。"
+        "返回 300 字以内的 briefing 和最多 6 条 major；每条包含 title、summary、news_date、impact。"
         f"news_date 必须为 {date_key}。"
         '只返回 JSON：{"briefing":"...","major":[{"title":"...","summary":"...",'
         '"news_date":"YYYY-MM-DD","impact":"positive|negative|neutral"}]}'
     )
+
+
+def build_fallback_digest(
+    date_key: str,
+    articles: list[dict[str, str]],
+) -> tuple[str, list[dict[str, str]]]:
+    """Build a deterministic digest when the fast Ark request is unavailable.
+
+    The fallback deliberately uses only already-collected article fields.  It
+    gives the page useful content immediately while the web-enrichment task
+    retries Ark in the background.
+    """
+    usable = [row for row in articles if str(row.get("title") or "").strip()]
+    if not usable:
+        return (
+            f"{date_key} 当日暂无足够的已收录中文新闻，正在后台联网核实。",
+            [],
+        )
+    titles = "；".join(str(row["title"]).strip() for row in usable[:3])
+    briefing = (
+        f"{date_key} 已收录 {len(usable)} 条中文新闻。重点关注：{titles}。"
+        "以上为基于已收录来源生成的本地摘要，联网核实将在后台继续。"
+    )
+    major = [
+        {
+            "title": str(row["title"]).strip(),
+            "summary": re.sub(r"\s+", " ", str(row.get("summary") or "")).strip()[:220],
+            "impact": str(row.get("impact") or "neutral"),
+        }
+        for row in usable[:6]
+    ]
+    return briefing, major
 
 
 def parse_digest_output(text: str, date_key: str | None = None) -> tuple[str, list[dict[str, str]]]:

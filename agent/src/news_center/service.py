@@ -10,6 +10,8 @@ from typing import Any
 
 from src.news_center.ai_digest import (
     ArkDigestClient,
+    ArkDigestError,
+    build_fallback_digest,
     build_local_digest_prompt,
     build_web_enrichment_prompt,
     parse_digest_output,
@@ -134,10 +136,21 @@ class NewsCenterService:
 
     def _prompt_articles(self, date_key: str, language: str) -> list[dict[str, str]]:
         result = self.list_articles(date_key=date_key, language=language, limit=100)
-        return [
-            {"title": item.title, "summary": item.summary, "source": item.source}
-            for item in result.items
-        ]
+        articles: list[dict[str, str]] = []
+        for item in result.items:
+            directions = {match.direction for match in item.matches if match.direction}
+            impact = (
+                "positive" if "positive" in directions
+                else "negative" if "negative" in directions
+                else "neutral"
+            )
+            articles.append({
+                "title": item.title,
+                "summary": item.summary,
+                "source": item.source,
+                "impact": impact,
+            })
+        return articles
 
     def generate_ai_digest(
         self, date_key: str, language: str = "zh", force: bool = False,
@@ -157,17 +170,28 @@ class NewsCenterService:
             articles = self._prompt_articles(date_key, language)
             prompt = build_local_digest_prompt(date_key, articles)
             started = time.monotonic()
-            briefing, major = parse_digest_output(
-                self.ai_client.generate(prompt, web_search=False), date_key,
-            )
-            logger.info(
-                "news AI local digest completed for %s in %.2fs (%d articles)",
-                date_key, time.monotonic() - started, len(articles),
-            )
+            source = "local"
+            model = self.ai_client.model
+            try:
+                briefing, major = parse_digest_output(
+                    self.ai_client.generate(prompt, web_search=False), date_key,
+                )
+                logger.info(
+                    "news AI local digest completed for %s in %.2fs (%d articles)",
+                    date_key, time.monotonic() - started, len(articles),
+                )
+            except ArkDigestError as exc:
+                logger.warning(
+                    "news AI local digest unavailable for %s after %.2fs; using local fallback: %s",
+                    date_key, time.monotonic() - started, exc,
+                )
+                briefing, major = build_fallback_digest(date_key, articles)
+                source = "fallback"
+                model = "local-fallback"
             self.store.save_news_ai_digest(
                 date_key, language,
-                {"briefing": briefing, "major": major, "source": "local"},
-                self.ai_client.model,
+                {"briefing": briefing, "major": major, "source": source},
+                model,
             )
         return self.get_digest(date_key, language=language)
 

@@ -6,6 +6,7 @@ from src.news_center.ai_digest import (
     ArkDigestClient,
     ArkDigestError,
     build_digest_prompt,
+    build_fallback_digest,
     build_local_digest_prompt,
     build_web_enrichment_prompt,
     extract_output_text,
@@ -86,6 +87,19 @@ def test_two_stage_prompts_anchor_on_collected_articles() -> None:
     assert "腾讯发布新模型" in local
     assert "本地简报" in web
     assert "不要重新进行泛化的全市场搜索" in web
+
+
+def test_fallback_digest_uses_only_collected_articles() -> None:
+    briefing, major = build_fallback_digest("2026-07-09", [{
+        "source": "Tech", "title": "腾讯发布新模型", "summary": "模型能力提升",
+        "impact": "positive",
+    }])
+
+    assert "腾讯发布新模型" in briefing
+    assert "本地摘要" in briefing
+    assert major == [{
+        "title": "腾讯发布新模型", "summary": "模型能力提升", "impact": "positive",
+    }]
 
 
 def test_parse_digest_output_drops_items_dated_before_the_target_day() -> None:
@@ -203,6 +217,26 @@ def test_generate_ai_digest_is_a_noop_for_english(tmp_path) -> None:
 
     assert digest.ai_summary is None
     assert client.calls == 0
+
+
+def test_generate_ai_digest_falls_back_when_ark_times_out(tmp_path) -> None:
+    class FailingAiClient(FakeAiClient):
+        def generate(self, prompt: str, *, web_search: bool = True) -> str:
+            self.calls += 1
+            self.web_search_calls.append(web_search)
+            raise ArkDigestError("Ark 接口请求失败: The read operation timed out")
+
+    store = OpportunityStore(db_path=tmp_path / "news.db")
+    store.list_news_center_articles = FakeArticleStoreMixin().list_news_center_articles  # type: ignore[method-assign]
+    client = FailingAiClient()
+    service = NewsCenterService(store=store, feed_ingestor=object(), ai_client=client)
+
+    digest = service.generate_ai_digest("2026-07-09", language="zh")
+
+    assert digest.ai_source == "fallback"
+    assert digest.ai_model == "local-fallback"
+    assert "腾讯发布新模型" in (digest.ai_summary or "")
+    assert digest.ai_major[0].title == "腾讯发布新模型"
 
 
 def test_digest_without_ai_cache_keeps_template_summary(tmp_path) -> None:

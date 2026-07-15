@@ -11,6 +11,12 @@ const SECTOR_LABELS: Record<string, string> = {
   tech: "科技互联网", consumer: "消费电子", macro: "财经宏观", science: "前沿科学",
 };
 
+function aiSourceLabel(source: NewsCenterDigest["ai_source"]): string {
+  if (source === "web") return "AI 联网总结";
+  if (source === "fallback") return "本地摘要";
+  return "AI 快速总结";
+}
+
 export function NewsCenter() {
   const [language, setLanguage] = useState<"zh" | "en">("zh");
   const [dates, setDates] = useState<string[]>([]);
@@ -171,7 +177,7 @@ export function NewsCenter() {
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">今日投资简报</h2>
             {digest?.ai_summary && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{aiSourceLabel(digest.ai_source)}</span>
             )}
             {digest?.ai_summary && !aiLoading && (
               <button aria-label="重新生成 AI 简报" title="重新生成" onClick={() => void generateAi(date, language, true)} className="text-muted-foreground hover:text-foreground"><RefreshCw className="h-3 w-3" /></button>
@@ -192,7 +198,7 @@ export function NewsCenter() {
 
       {digest && (digest.ai_major?.length ?? 0) > 0 ? (
         <section className="border-b py-6">
-          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{digest.ai_source === "web" ? "AI 联网总结" : "AI 快速总结"}</span></div>
+          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{aiSourceLabel(digest.ai_source)}</span></div>
           <div className="divide-y">
             {digest.ai_major!.map((item, index) => (
               <article key={index} className="py-3">
