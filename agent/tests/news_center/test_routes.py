@@ -22,7 +22,7 @@ class FakeService:
     def refresh(self):
         return NewsCenterRefreshResult(fetched=1, total=10, latest_date="2026-07-01")
 
-    def enrich_ai_digest(self, date_key, language="zh"):
+    def enrich_ai_digest(self, date_key, language="zh", force=False):
         digest = self.get_digest(date_key, language)
         digest.ai_source = "web"
         return digest
@@ -52,20 +52,10 @@ def test_digest_and_refresh_contracts():
     assert client.post("/news-center/refresh").json()["fetched"] == 1
 
 
-def test_ai_digest_route_generates_and_maps_ark_errors_to_503():
-    from src.news_center.ai_digest import ArkDigestError
-    from src.news_center.models import NewsAiMajorItem
-
+def test_ai_digest_route_returns_immediately_and_schedules_web_summary():
     class AiService(FakeService):
         def generate_ai_digest(self, date_key, language="zh", force=False):
-            self.ai_args = (date_key, language, force)
-            if force:
-                raise ArkDigestError("ARK_API_KEY 未配置")
-            digest = self.get_digest(date_key, language)
-            digest.ai_summary = "AI 简报"
-            digest.ai_source = "local"
-            digest.ai_major = [NewsAiMajorItem(title="大新闻", impact="positive")]
-            return digest
+            raise AssertionError("route must not wait for local AI generation")
 
     app = FastAPI()
     service = AiService()
@@ -74,9 +64,8 @@ def test_ai_digest_route_generates_and_maps_ark_errors_to_503():
 
     ok = client.post("/news-center/ai-digest?date=2026-07-09&language=zh")
     assert ok.status_code == 200
-    assert ok.json()["ai_summary"] == "AI 简报"
-    assert service.ai_args == ("2026-07-09", "zh", False)
+    assert ok.json()["summary"] == "暂无"
+    assert ok.json()["ai_enriching"] is True
 
-    err = client.post("/news-center/ai-digest?date=2026-07-09&force=true")
-    assert err.status_code == 503
-    assert "ARK_API_KEY" in err.json()["detail"]
+    forced = client.post("/news-center/ai-digest?date=2026-07-09&force=true")
+    assert forced.status_code == 200

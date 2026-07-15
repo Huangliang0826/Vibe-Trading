@@ -62,6 +62,7 @@ export default defineConfig(({ mode }) => {
         "/opportunities": apiProxy,
         "/historical-events": apiProxy,
         "^/news-center/": apiProxy,
+        "^/video-generation/": apiProxy,
         "^/scan/": apiProxy,
         "^/research-analysis/": apiProxy,
         "^/paper-trading/": apiProxy,

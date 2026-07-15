@@ -72,8 +72,8 @@ def refresh_news() -> dict[str, Any]:
              result.fetched, result.total, result.latest_date)
     if result.latest_date:
         try:
-            digest = service.generate_ai_digest(result.latest_date, language="zh")
-            log.info("news fast AI digest ready for %s via %s",
+            digest = service.enrich_ai_digest(result.latest_date, language="zh")
+            log.info("news direct web digest ready for %s via %s",
                      result.latest_date, digest.ai_model)
         except Exception as exc:  # noqa: BLE001 — RSS refresh remains successful
             log.warning("news fast AI digest unavailable for %s: %s", result.latest_date, exc)

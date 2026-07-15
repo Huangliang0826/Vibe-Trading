@@ -5,6 +5,9 @@ import { expect, it, vi } from "vitest";
 vi.mock("@/pages/Analytics", () => ({
   Analytics: () => <div>数据洞察面板</div>,
 }));
+vi.mock("@/pages/VideoGeneration", () => ({
+  VideoGeneration: () => <div>视频生成面板</div>,
+}));
 
 import { Settings } from "../Settings";
 
@@ -20,4 +23,17 @@ it("shows data insights as a settings tab", () => {
   expect(screen.getByRole("tab", { name: "系统设置" })).toHaveAttribute("aria-selected", "false");
   expect(screen.getByRole("tab", { name: "数据洞察" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("数据洞察面板")).toBeInTheDocument();
+});
+
+it("shows video generation inside settings", () => {
+  render(
+    <MemoryRouter initialEntries={["/settings?tab=video-generation"]}>
+      <Routes>
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  expect(screen.getByRole("tab", { name: "视频生成" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("视频生成面板")).toBeInTheDocument();
 });

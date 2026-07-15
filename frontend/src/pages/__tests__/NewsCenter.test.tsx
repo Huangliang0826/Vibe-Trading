@@ -35,7 +35,7 @@ beforeEach(() => {
   apiMock.generateNewsAiDigest.mockResolvedValue({
     date: TODAY, article_count: 1, watchlist_count: 1,
     positive_count: 1, negative_count: 0, summary: "模板摘要", major_items: [],
-    ai_summary: "快速 AI 简报", ai_major: [], ai_source: "local", ai_enriching: true,
+    ai_summary: null, ai_major: [], ai_source: null, ai_enriching: true,
   });
 });
 
@@ -68,11 +68,11 @@ it("does not auto-refresh when today's news already exists", async () => {
   });
   render(<NewsCenter />);
 
-  await screen.findByText("快速 AI 简报");
+  await screen.findByText("模板摘要");
   expect(apiMock.refreshNewsCenter).not.toHaveBeenCalled();
 });
 
-it("returns a fast digest before background web enrichment finishes", async () => {
+it("returns the local digest while background web generation runs", async () => {
   apiMock.getNewsCenterDates.mockResolvedValue([TODAY]);
   apiMock.getNewsCenterDigest.mockResolvedValue({
     date: TODAY, article_count: 1, watchlist_count: 0,
@@ -80,9 +80,24 @@ it("returns a fast digest before background web enrichment finishes", async () =
   });
   render(<NewsCenter />);
 
-  expect(await screen.findByText("快速 AI 简报")).toBeInTheDocument();
-  expect(screen.getAllByText("AI 快速总结").length).toBeGreaterThan(0);
-  expect(screen.getByText("快速摘要已完成，正在后台联网核实…")).toBeInTheDocument();
+  expect(await screen.findByText("模板摘要")).toBeInTheDocument();
+  expect(screen.getByText("正在后台生成 AI 联网总结…")).toBeInTheDocument();
+});
+
+it("renders the online investment briefing as three bullet points", async () => {
+  apiMock.getNewsCenterDigest.mockResolvedValue({
+    date: "2026-07-01", article_count: 1, watchlist_count: 0,
+    positive_count: 0, negative_count: 0, summary: "模板摘要", major_items: [],
+    ai_summary: "地缘政治：地区局势变化\n金融：市场利率变化\n科技：新模型发布",
+    ai_source: "web", ai_enriching: false,
+  });
+
+  render(<NewsCenter />);
+
+  expect(await screen.findByText("地缘政治：")).toBeInTheDocument();
+  expect(screen.getByText("金融：")).toBeInTheDocument();
+  expect(screen.getByText("科技：")).toBeInTheDocument();
+  expect(screen.getAllByRole("listitem")).toHaveLength(3);
 });
 
 it("switches the article list and digest to English", async () => {

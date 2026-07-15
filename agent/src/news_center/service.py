@@ -12,9 +12,10 @@ from src.news_center.ai_digest import (
     ArkDigestClient,
     ArkDigestError,
     build_fallback_digest,
+    build_digest_prompt,
     build_local_digest_prompt,
-    build_web_enrichment_prompt,
     parse_digest_output,
+    parse_structured_briefing_output,
 )
 from src.news_center.models import (
     NewsAiMajorItem,
@@ -122,8 +123,20 @@ class NewsCenterService:
         cached = getter(date_key, language) if callable(getter) else None
         if not cached:
             return digest
-        digest.ai_summary = str(cached.get("briefing") or "") or None
-        digest.ai_major = [NewsAiMajorItem(**row) for row in cached.get("major") or []]
+        digest.ai_summary = str(cached.get("briefing") or "").strip()[:600] or None
+        digest.ai_major = [
+            NewsAiMajorItem(
+                title=str(row.get("title") or "").strip()[:120],
+                summary=re.sub(r"\s+", " ", str(row.get("summary") or "")).strip()[:160],
+                impact=(
+                    str(row.get("impact") or "neutral")
+                    if str(row.get("impact") or "neutral") in {"positive", "negative", "neutral"}
+                    else "neutral"
+                ),
+            )
+            for row in (cached.get("major") or [])[:6]
+            if isinstance(row, dict) and str(row.get("title") or "").strip()
+        ]
         digest.ai_generated_at = cached.get("generated_at")
         digest.ai_model = cached.get("model")
         digest.ai_source = str(cached.get("source") or "web")
@@ -195,32 +208,28 @@ class NewsCenterService:
             )
         return self.get_digest(date_key, language=language)
 
-    def enrich_ai_digest(self, date_key: str, language: str = "zh") -> NewsCenterDigest:
-        """Verify and enrich a cached local digest with focused web search."""
+    def enrich_ai_digest(
+        self, date_key: str, language: str = "zh", force: bool = False,
+    ) -> NewsCenterDigest:
+        """Generate the online briefing directly, without feeding Ark local news."""
         if language != "zh":
             return self.get_digest(date_key, language=language)
         with self._digest_lock(date_key, language):
             cached = self.store.get_news_ai_digest(date_key, language)
-            if cached and cached.get("source") == "web":
+            if not force and cached and cached.get("source") == "web":
                 return self.get_digest(date_key, language=language)
-            if not cached:
-                self.generate_ai_digest(date_key, language=language)
-                cached = self.store.get_news_ai_digest(date_key, language) or {}
-            articles = self._prompt_articles(date_key, language)
-            prompt = build_web_enrichment_prompt(
-                date_key, str(cached.get("briefing") or ""), articles,
-            )
+            prompt = build_digest_prompt(date_key)
             started = time.monotonic()
-            briefing, major = parse_digest_output(
-                self.ai_client.generate(prompt, web_search=True), date_key,
+            briefing = parse_structured_briefing_output(
+                self.ai_client.generate(prompt, web_search=True),
             )
             logger.info(
-                "news AI web enrichment completed for %s in %.2fs (%d candidates)",
-                date_key, time.monotonic() - started, min(len(articles), 10),
+                "news AI direct web briefing completed for %s in %.2fs",
+                date_key, time.monotonic() - started,
             )
             self.store.save_news_ai_digest(
                 date_key, language,
-                {"briefing": briefing, "major": major, "source": "web"},
+                {"briefing": briefing, "major": [], "source": "web"},
                 self.ai_client.model,
             )
         return self.get_digest(date_key, language=language)

@@ -115,22 +115,36 @@ def extract_output_text(data: Any) -> str:
 
 
 def build_digest_prompt(date_key: str) -> str:
-    """Chinese-only prompt asking for a web-searched briefing + major-news JSON."""
+    """Ask Ark directly for today's web-searched investment briefing."""
     return (
-        f"你是严谨的投资新闻编辑。今天是 {date_key}（北京时间）。请用联网搜索获取当日重要财经与科技动态"
-        "（覆盖宏观政策、A股/港股/美股大盘与行业、大宗商品与汇率、重要公司事件），完成两件事：\n"
-        "1. briefing：写一段 300 字以内的当日投资简报，概括对投资者最重要的主线（宏观、行业、个股），"
-        "语气克制、只陈述事实与直接影响，不编造数字或消息，不给买卖建议。\n"
-        f"2. major：挑选 3~8 条发生在 {date_key} 当天的最重大新闻，每条给出简短标题 title、"
-        "40~80 字摘要 summary、事件发生日期 news_date（YYYY-MM-DD）、"
-        "以及对市场的影响 impact（positive=利好 / negative=利空 / neutral=中性）。\n"
-        f"【日期硬性要求】搜索结果常混入旧新闻：只收录事件发生日或官方发布日为 {date_key} 当天的新闻；"
-        "前一天或更早的新闻一律不要，即使它很重要；无法确认发生日期的也不要。宁可少于 6 条，不要凑数。"
-        "美股隔夜行情（北京时间今天凌晨收盘）视为当天新闻。\n"
-        "全部输出使用简体中文。\n"
-        '只返回一个 JSON 对象，不要 Markdown 代码块：{"briefing":"...",'
-        '"major":[{"title":"...","summary":"...","news_date":"YYYY-MM-DD","impact":"positive|negative|neutral"}]}'
+        f"今天是 {date_key}（北京时间）。请联网搜索并总结今天最重要的金融、科技和地缘政治新闻。"
+        "用简体中文把今日投资简报分成三个部分：地缘政治、金融、科技。"
+        "每部分不超过 190 字，说明最重要的事件及其对市场的直接影响。"
+        "只写当天能够确认的事实，不编造信息，不给出买卖建议。"
+        '只返回 JSON，不要 Markdown：{"geopolitics":"...","finance":"...","technology":"..."}'
     )
+
+
+def parse_structured_briefing_output(text: str) -> str:
+    """Normalize Ark's three briefing sections into display-ready lines."""
+    try:
+        parsed = json.loads(_FENCE_RE.sub("", text).strip())
+    except json.JSONDecodeError as exc:
+        raise ArkDigestError(f"Ark 返回的不是有效 JSON: {text[:120]}") from exc
+    if not isinstance(parsed, dict):
+        raise ArkDigestError("Ark 返回的 JSON 不是对象")
+    sections = [
+        ("地缘政治", "geopolitics"),
+        ("金融", "finance"),
+        ("科技", "technology"),
+    ]
+    lines: list[str] = []
+    for label, key in sections:
+        value = re.sub(r"\s+", " ", str(parsed.get(key) or "")).strip()[:190]
+        if not value:
+            raise ArkDigestError(f"Ark 返回缺少 {key}")
+        lines.append(f"{label}：{value}")
+    return "\n".join(lines)
 
 
 def build_local_digest_prompt(date_key: str, articles: list[dict[str, str]]) -> str:
@@ -169,7 +183,7 @@ def build_web_enrichment_prompt(
         "请联网核实其中最重要的事件，并只补充当天确实发生、对市场有直接影响的重大财经或科技新闻。"
         "不要重新进行泛化的全市场搜索；无法确认日期的内容不要收录。\n"
         f"本地简报：{local_briefing}\n候选标题：\n{headlines}\n"
-        "返回 300 字以内的 briefing 和最多 6 条 major；每条包含 title、summary、news_date、impact。"
+        "返回 600 字以内的 briefing 和最多 6 条 major；每条包含 title、summary、news_date、impact。"
         f"news_date 必须为 {date_key}。"
         '只返回 JSON：{"briefing":"...","major":[{"title":"...","summary":"...",'
         '"news_date":"YYYY-MM-DD","impact":"positive|negative|neutral"}]}'
@@ -199,8 +213,8 @@ def build_fallback_digest(
     )
     major = [
         {
-            "title": str(row["title"]).strip(),
-            "summary": re.sub(r"\s+", " ", str(row.get("summary") or "")).strip()[:220],
+            "title": str(row["title"]).strip()[:120],
+            "summary": re.sub(r"\s+", " ", str(row.get("summary") or "")).strip()[:160],
             "impact": str(row.get("impact") or "neutral"),
         }
         for row in usable[:6]
@@ -230,7 +244,7 @@ def parse_digest_output(text: str, date_key: str | None = None) -> tuple[str, li
     for row in parsed.get("major") or []:
         if not isinstance(row, dict):
             continue
-        title = str(row.get("title", "")).strip()
+        title = str(row.get("title", "")).strip()[:120]
         if not title:
             continue
         news_date = str(row.get("news_date", "")).strip()
@@ -241,7 +255,9 @@ def parse_digest_output(text: str, date_key: str | None = None) -> tuple[str, li
             impact = "neutral"
         major.append({
             "title": title,
-            "summary": str(row.get("summary", "")).strip(),
+            "summary": re.sub(r"\s+", " ", str(row.get("summary", ""))).strip()[:160],
             "impact": impact,
         })
+        if len(major) >= 6:
+            break
     return briefing, major

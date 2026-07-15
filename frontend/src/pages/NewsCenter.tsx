@@ -17,6 +17,19 @@ function aiSourceLabel(source: NewsCenterDigest["ai_source"]): string {
   return "AI 快速总结";
 }
 
+const BRIEFING_CATEGORIES = ["地缘政治", "金融", "科技"] as const;
+
+function briefingPoints(summary: string | null | undefined): Array<{ label: string; text: string }> | null {
+  if (!summary) return null;
+  const points = summary.split(/\n+/).map((line) => {
+    const match = line.trim().match(/^(?:[-•]\s*)?(地缘政治|金融|科技)[：:]\s*(.+)$/);
+    return match ? { label: match[1], text: match[2] } : null;
+  }).filter((point): point is { label: string; text: string } => point !== null);
+  return BRIEFING_CATEGORIES.every((label) => points.some((point) => point.label === label))
+    ? BRIEFING_CATEGORIES.map((label) => points.find((point) => point.label === label)!)
+    : null;
+}
+
 export function NewsCenter() {
   const [language, setLanguage] = useState<"zh" | "en">("zh");
   const [dates, setDates] = useState<string[]>([]);
@@ -70,7 +83,7 @@ export function NewsCenter() {
       ]);
       setData(articles);
       setDigest(daily);
-      // 中文当天先生成本地快速摘要，再由后端在后台联网核实。
+      // 中文当天直接在后端启动联网总结；页面先展示本地普通简报。
       // 历史日期只展示已经缓存的版本，避免用今天的搜索结果回填历史。
       const today = new Date().toISOString().slice(0, 10);
       if (language === "zh" && selectedDate === today && daily.ai_source !== "web") {
@@ -135,6 +148,10 @@ export function NewsCenter() {
   };
 
   const sectors = data?.sectors ?? [];
+  const displayedBriefing = digest?.ai_summary
+    || digest?.summary
+    || (autoRefreshing ? "正在获取今日新闻…(每天首次打开自动更新)" : loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。");
+  const structuredBriefing = briefingPoints(digest?.ai_summary);
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-5">
@@ -185,39 +202,18 @@ export function NewsCenter() {
           </div>
           <span className="text-xs text-muted-foreground">{digest?.article_count ?? 0} 条新闻</span>
         </div>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground">
-          {digest?.ai_summary
-            || digest?.summary
-            || (autoRefreshing ? "正在获取今日新闻…(每天首次打开自动更新)" : loading ? "正在整理今日新闻…" : "当日暂无已收录新闻。")}
-        </p>
-        {language === "zh" && aiLoading && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />AI 正在快速总结已收录新闻…</p>}
-        {language === "zh" && !aiLoading && digest?.ai_enriching && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />快速摘要已完成，正在后台联网核实…</p>}
+        {structuredBriefing ? (
+          <ul className="mt-3 max-w-3xl list-disc space-y-2 pl-5 text-sm leading-7 text-foreground">
+            {structuredBriefing.map((point) => <li key={point.label}><span className="font-medium">{point.label}：</span>{point.text}</li>)}
+          </ul>
+        ) : <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground">{displayedBriefing}</p>}
+        {language === "zh" && aiLoading && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />正在启动 AI 联网总结…</p>}
+        {language === "zh" && !aiLoading && digest?.ai_enriching && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" />正在后台生成 AI 联网总结…</p>}
         {language === "zh" && aiError && !aiLoading && <p className="mt-2 text-xs text-amber-600">AI 总结暂不可用：{aiError}</p>}
         {digest && <div className="mt-3 flex gap-4 text-xs text-muted-foreground"><span>自选股 {digest.watchlist_count}</span><span className="text-red-500">利好 {digest.positive_count}</span><span className="text-emerald-600">利空 {digest.negative_count}</span></div>}
       </section>
 
-      {digest && (digest.ai_major?.length ?? 0) > 0 ? (
-        <section className="border-b py-6">
-          <div className="mb-3 flex items-center gap-2"><h2 className="text-sm font-semibold">今日重大新闻</h2><span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary"><Sparkles className="h-3 w-3" />{aiSourceLabel(digest.ai_source)}</span></div>
-          <div className="divide-y">
-            {digest.ai_major!.map((item, index) => (
-              <article key={index} className="py-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{item.title}</p>
-                    {item.summary && <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.summary}</p>}
-                  </div>
-                  <div className="shrink-0 text-[11px]">
-                    {item.impact === "positive" ? <span className="text-red-500">利好</span>
-                      : item.impact === "negative" ? <span className="text-emerald-600">利空</span>
-                      : <span className="text-muted-foreground">中性</span>}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : digest && digest.major_items.length > 0 ? (
+      {digest && digest.major_items.length > 0 ? (
         <section className="border-b py-6"><h2 className="mb-3 text-sm font-semibold">今日重大新闻</h2><div className="divide-y">{digest.major_items.map((item) => <NewsRow key={item.article_id} item={item} compact />)}</div></section>
       ) : null}
 

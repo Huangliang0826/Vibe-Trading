@@ -11,6 +11,7 @@ from src.news_center.ai_digest import (
     build_web_enrichment_prompt,
     extract_output_text,
     parse_digest_output,
+    parse_structured_briefing_output,
 )
 from src.news_center.service import NewsCenterService
 from src.opportunity_center.storage import OpportunityStore
@@ -68,13 +69,35 @@ def test_build_digest_prompt_is_web_search_only_chinese() -> None:
 
     assert "2026-07-09" in prompt
     assert "联网搜索" in prompt
-    assert "3~8" in prompt
+    assert "地缘政治、金融、科技" in prompt
     assert "简体中文" in prompt
-    # Hard same-day constraint: stale search results must be rejected.
-    assert "news_date" in prompt
-    assert "前一天或更早的新闻一律不要" in prompt
-    # Collected articles are never fed in — the prompt carries no article list.
+    assert "190 字" in prompt
+    assert '"geopolitics"' in prompt
+    assert '"finance"' in prompt
+    assert '"technology"' in prompt
+    assert '"briefing"' not in prompt
+    assert '"major"' not in prompt
+    # No local briefing, collected headline, or article list is fed to Ark.
+    assert "本地简报" not in prompt
+    assert "候选标题" not in prompt
     assert "新闻列表" not in prompt
+
+
+def test_parse_structured_briefing_output_returns_three_labeled_lines() -> None:
+    result = parse_structured_briefing_output(
+        '{"geopolitics":"地缘事件","finance":"金融事件","technology":"科技事件"}'
+    )
+
+    assert result.splitlines() == [
+        "地缘政治：地缘事件",
+        "金融：金融事件",
+        "科技：科技事件",
+    ]
+
+
+def test_parse_structured_briefing_output_requires_every_section() -> None:
+    with pytest.raises(ArkDigestError, match="technology"):
+        parse_structured_briefing_output('{"geopolitics":"a","finance":"b"}')
 
 
 def test_two_stage_prompts_anchor_on_collected_articles() -> None:
@@ -87,6 +110,7 @@ def test_two_stage_prompts_anchor_on_collected_articles() -> None:
     assert "腾讯发布新模型" in local
     assert "本地简报" in web
     assert "不要重新进行泛化的全市场搜索" in web
+    assert "600 字以内" in web
 
 
 def test_fallback_digest_uses_only_collected_articles() -> None:
@@ -127,6 +151,19 @@ def test_parse_digest_output_keeps_all_items_without_date_key() -> None:
     assert len(major) == 1
 
 
+def test_parse_digest_output_limits_item_count_and_text_size() -> None:
+    rows = ",".join(
+        '{"title":"' + ("标题" * 80) + '","summary":"' + ("摘要" * 200) + '","impact":"neutral"}'
+        for _ in range(8)
+    )
+
+    _briefing, major = parse_digest_output('{"briefing":"b","major":[' + rows + "]}")
+
+    assert len(major) == 6
+    assert all(len(item["title"]) <= 120 for item in major)
+    assert all(len(item["summary"]) <= 160 for item in major)
+
+
 # ── client guard ─────────────────────────────────────────────────────────────
 
 def test_client_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,10 +191,14 @@ class FakeAiClient:
     def __init__(self) -> None:
         self.calls = 0
         self.web_search_calls: list[bool] = []
+        self.prompts: list[str] = []
 
     def generate(self, prompt: str, *, web_search: bool = True) -> str:
         self.calls += 1
         self.web_search_calls.append(web_search)
+        self.prompts.append(prompt)
+        if web_search:
+            return '{"geopolitics":"地缘事件","finance":"金融事件","technology":"科技事件"}'
         return '{"briefing": "AI 简报正文", "major": [{"title": "大新闻", "summary": "摘要", "impact": "positive"}]}'
 
 
@@ -196,17 +237,22 @@ def test_generate_ai_digest_caches_and_merges_into_digest(tmp_path) -> None:
     assert client.calls == 2
 
 
-def test_web_enrichment_replaces_local_cache(tmp_path) -> None:
+def test_web_enrichment_queries_ark_directly_and_only_saves_briefing(tmp_path) -> None:
     service, client = _service(tmp_path)
-    service.generate_ai_digest("2026-07-09", language="zh")
 
     enriched = service.enrich_ai_digest("2026-07-09", language="zh")
 
     assert enriched.ai_source == "web"
-    assert client.web_search_calls == [False, True]
+    assert enriched.ai_summary == "地缘政治：地缘事件\n金融：金融事件\n科技：科技事件"
+    assert enriched.ai_major == []
+    assert client.web_search_calls == [True]
+    assert "地缘政治、金融、科技" in client.prompts[0]
+    assert "腾讯发布新模型" not in client.prompts[0]
 
-    # Once web-verified, another enrichment request is served from cache.
+    # Once generated, another request is served from cache unless forced.
     service.enrich_ai_digest("2026-07-09", language="zh")
+    assert client.calls == 1
+    service.enrich_ai_digest("2026-07-09", language="zh", force=True)
     assert client.calls == 2
 
 
