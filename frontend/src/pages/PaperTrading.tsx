@@ -1183,8 +1183,8 @@ export function PaperTrading() {
           <div className="mb-2">
             <h2 className="text-sm font-semibold">多时间段稳健性测试</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              在 {robustResult.windows.filter((w) => !w.is_full).length} 个 {robustResult.window_years} 年窗口（每 {robustResult.step_years} 年滚动）+ 全历史上分别按平衡得分排名，取
-              <span className="font-medium text-foreground">平均排名</span>最优。共同数据区间 {robustResult.data_start} ~ {robustResult.data_end}
+              在 {robustResult.windows.filter((w) => !w.is_full).length} 个 {robustResult.window_years} 年窗口（每 {robustResult.step_years} 年滚动）+ 全历史上，等权综合
+              <span className="font-medium text-foreground">年化收益、最大回撤、相对买入持有的年化超额</span>，取平均综合分最高者。共同数据区间 {robustResult.data_start} ~ {robustResult.data_end}
               （最多 {robustResult.history_cap_years} 年）
               {robustResult.limiting_symbols.length > 0 && `，受 ${robustResult.limiting_symbols.join("、")} 的历史长度限制`}。
               这是稳健性筛选，降低对单一时段的过拟合，但仍基于历史、不代表未来。
@@ -1192,10 +1192,10 @@ export function PaperTrading() {
           </div>
           {robustResult.best_strategy && (
             <div className="mb-3 rounded-lg border bg-primary/10 px-3 py-2 text-sm">
-              最稳健策略：<span className="font-semibold">{STRATEGY_LABELS[robustResult.best_strategy as StrategyName] || robustResult.best_strategy}</span>
+              综合冠军：<span className="font-semibold">{STRATEGY_LABELS[robustResult.best_strategy as StrategyName] || robustResult.best_strategy}</span>
               {(() => {
                 const b = robustResult.strategies.find((s) => s.name === robustResult.best_strategy);
-                return b ? <span className="ml-2 text-xs text-muted-foreground">平均排名 {b.mean_rank}（最差 {b.worst_rank} · 波动 {b.rank_std}）</span> : null;
+                return b ? <span className="ml-2 text-xs text-muted-foreground">综合分 {b.mean_composite_score?.toFixed(3) ?? "—"} · 年化收益 {pct(b.mean_annual_return)} · 最大回撤 {pct(b.mean_max_drawdown)} · 年化超额 {pct(b.mean_annual_excess_vs_hold)}</span> : null;
               })()}
             </div>
           )}
@@ -1212,7 +1212,7 @@ export function PaperTrading() {
                     <span className="ml-2 text-muted-foreground">平均收益 <span className="font-semibold tabular-nums text-foreground">{pct(robustResult.baseline.mean_return)}</span> · 平均排名 {robustResult.baseline.mean_rank}</span>
                     {winner && beat != null && (
                       <div className={cn("mt-0.5", winnerBeatsHold ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-400")}>
-                        最稳健策略跑赢持有 <span className="font-semibold tabular-nums">{beat.beating}/{beat.total}</span> 个窗口
+                        综合冠军跑赢持有 <span className="font-semibold tabular-nums">{beat.beating}/{beat.total}</span> 个窗口
                         {excess != null && <>，窗口平均超额 <span className="font-semibold tabular-nums">{pct(excess)}</span></>}
                         {!winnerBeatsHold && "——策略优势不明显，直接持有可能更省心"}
                       </div>
@@ -1263,6 +1263,10 @@ export function PaperTrading() {
                   {robustResult.windows.map((w) => (
                     <th key={w.label} className="px-2 py-2 text-center font-medium whitespace-nowrap" title={`${w.start} ~ ${w.end}`}>{w.label}</th>
                   ))}
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">综合分</th>
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">年化收益</th>
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">最大回撤</th>
+                  <th className="px-2 py-2 text-right font-medium whitespace-nowrap">年化超额</th>
                   <th className="px-2 py-2 text-right font-medium whitespace-nowrap">平均排名</th>
                   <th className="px-2 py-2 text-right font-medium whitespace-nowrap">最差</th>
                   <th className="px-2 py-2 text-right font-medium whitespace-nowrap">波动</th>
@@ -1281,7 +1285,7 @@ export function PaperTrading() {
                     <tr key={s.name} className={cn("border-b last:border-0 hover:bg-muted/30", isBest && "bg-primary/10")}>
                       <td className="px-3 py-2 font-medium whitespace-nowrap">
                         {STRATEGY_LABELS[s.name as StrategyName] || s.name}
-                        {isBest && <span className="ml-2 text-primary">最稳健</span>}
+                        {isBest && <span className="ml-2 text-primary">综合冠军</span>}
                       </td>
                       {s.cells.map((c, i) => (
                         <td key={i} className="px-2 py-2 text-center tabular-nums">
@@ -1299,7 +1303,11 @@ export function PaperTrading() {
                           )}
                         </td>
                       ))}
-                      <td className="px-2 py-2 text-right font-semibold tabular-nums">{s.mean_rank}</td>
+                      <td className="px-2 py-2 text-right font-semibold tabular-nums">{s.mean_composite_score?.toFixed(3) ?? "—"}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{pct(s.mean_annual_return)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-red-600 dark:text-red-400">{pct(s.mean_max_drawdown)}</td>
+                      <td className={cn("px-2 py-2 text-right tabular-nums", (s.mean_annual_excess_vs_hold ?? 0) > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-red-600 dark:text-red-400")}>{pct(s.mean_annual_excess_vs_hold)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.mean_rank}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.worst_rank}</td>
                       <td className="px-2 py-2 text-right tabular-nums text-muted-foreground">{s.rank_std}</td>
                       {robustResult.baseline && (
@@ -1324,7 +1332,7 @@ export function PaperTrading() {
             </table>
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground/80">
-            单元格为该策略在对应窗口内的排名（1=最佳，绿色越深越靠前；“—”=该窗口数据不足或回测失败）。平均排名越低越稳健；最差/波动反映一致性。
+            单元格为该策略在对应窗口内的综合分排名（同分策略使用并列平均名次；“—”=该窗口数据不足或回测失败）。综合分越高越好；平均排名、最差和波动只用于观察跨时段一致性。
             超额vs持有 = 各窗口收益减去买入持有的平均值；赢持有 = 平衡得分胜过买入持有的窗口数——跑不赢持有的策略，复杂度本身就是成本。
           </p>
         </div>

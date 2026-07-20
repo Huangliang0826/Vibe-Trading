@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from src.news_center.ai_digest import (
@@ -170,6 +171,24 @@ def test_client_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ARK_API_KEY", raising=False)
     with pytest.raises(ArkDigestError, match="ARK_API_KEY"):
         ArkDigestClient(api_key="").generate("hi")
+
+
+def test_client_disables_thinking_and_caps_web_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, request=request, json={"output_text": "完成"})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = ArkDigestClient(api_key="test-key").generate("今日新闻", web_search=True)
+
+    assert result == "完成"
+    assert captured["json"]["thinking"] == {"type": "disabled"}
+    assert captured["json"]["tools"] == [{"type": "web_search", "max_keyword": 1}]
+    assert captured["timeout"] == 90.0
 
 
 # ── service round-trip with real sqlite cache ────────────────────────────────

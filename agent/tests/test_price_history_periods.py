@@ -76,3 +76,42 @@ def test_all_history_keeps_the_earliest_available_bar(monkeypatch):
 
     assert len(result["bars"]) == len(frame)
     assert result["bars"][0]["date"] == "2000-01-03"
+
+
+def test_cn_history_prefers_yfinance_over_slow_empty_primary(monkeypatch):
+    today = date.today()
+    primary = _install_loader(monkeypatch, _daily_frame(today, today).iloc[0:0])
+    fallback_frame = _daily_frame(today - timedelta(days=500), today)
+    calls = []
+
+    def fallback(code, start_date, end_date, interval):
+        calls.append((code, start_date, end_date, interval))
+        return fallback_frame.loc[start_date:end_date]
+
+    monkeypatch.setattr(api_server, "_fetch_cn_yfinance_history", fallback)
+
+    result = api_server._fetch_price_history("300750", "1Y", "cn")
+
+    assert primary.calls == []
+    assert calls[-1][0] == "300750"
+    assert calls[-1][3] == "1D"
+    assert len(result["bars"]) > 200
+
+
+def test_cn_history_uses_domestic_source_when_yfinance_is_empty(monkeypatch):
+    today = date.today()
+    primary_frame = _daily_frame(today - timedelta(days=500), today)
+    primary = _install_loader(monkeypatch, primary_frame)
+    monkeypatch.setattr(api_server, "_fetch_cn_yfinance_history", lambda *_args: None)
+
+    result = api_server._fetch_price_history("300750", "1Y", "cn")
+
+    assert primary.calls[-1][2] == "1D"
+    assert len(result["bars"]) > 200
+
+
+def test_cn_yfinance_code_normalization():
+    assert api_server._normalize_cn_yfinance_code("300750") == "300750.SZ"
+    assert api_server._normalize_cn_yfinance_code("159559") == "159559.SZ"
+    assert api_server._normalize_cn_yfinance_code("688017") == "688017.SS"
+    assert api_server._normalize_cn_yfinance_code("600519.SH") == "600519.SS"

@@ -2340,6 +2340,64 @@ def _cn_raw_daily(code: str, start_str: str, end_str: str):
     return df.sort_index()
 
 
+def _normalize_cn_yfinance_code(code: str) -> str:
+    """Convert an A-share display code to Yahoo's exchange suffix format."""
+    upper = code.strip().upper()
+    if upper.endswith(".SS"):
+        return upper
+    if upper.endswith(".SH"):
+        return f"{upper[:-3]}.SS"
+    if upper.endswith((".SZ", ".BJ")):
+        return upper
+    digits = "".join(ch for ch in upper if ch.isdigit())
+    if digits.startswith(("6", "9")):
+        return f"{digits}.SS"
+    if digits.startswith(("4", "8")):
+        return f"{digits}.BJ"
+    return f"{digits}.SZ"
+
+
+def _fetch_cn_yfinance_history(code: str, start_str: str, end_str: str, interval: str):
+    """Reliable A-share history fallback when the domestic sources are empty."""
+    from backtest.loaders.yfinance_loader import DataLoader as YFinanceLoader
+
+    yf_code = _normalize_cn_yfinance_code(code)
+    result = _fetch_with_analytics(
+        YFinanceLoader(),
+        codes=[yf_code],
+        start_date=start_str,
+        end_date=end_str,
+        interval=interval,
+        market="a_share",
+    )
+    return result.get(yf_code) if result else None
+
+
+def _fetch_history_frame(loader, code: str, start_str: str, end_str: str, interval: str, market: str):
+    """Fetch one history frame, preferring fast Yahoo data for A shares.
+
+    The domestic Baidu/mootdx chain remains the fallback, but it currently
+    spends roughly 13 seconds before returning empty. Trying Yahoo first keeps
+    overview charts fast while retaining a second independent source.
+    """
+    if market == "a_share":
+        try:
+            frame = _fetch_cn_yfinance_history(code, start_str, end_str, interval)
+            if frame is not None and not frame.empty:
+                return frame
+        except Exception as exc:  # noqa: BLE001 - continue to the domestic source
+            logger.warning("A-share yfinance history failed for %s: %s", code, exc)
+    result = _fetch_with_analytics(
+        loader,
+        codes=[code],
+        start_date=start_str,
+        end_date=end_str,
+        interval=interval,
+        market=market,
+    )
+    return result.get(code) if result else None
+
+
 def _fetch_with_analytics(loader, *, codes, start_date, end_date, interval, market):
     started = time.perf_counter()
     provider = type(loader).__module__.rsplit(".", 1)[-1]
@@ -2442,15 +2500,7 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         start_str = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
         end_str = today.strftime("%Y-%m-%d")
         try:
-            result = _fetch_with_analytics(
-                loader,
-                codes=[code],
-                start_date=start_str,
-                end_date=end_str,
-                interval="15m",
-                market=market,
-            )
-            df = result.get(code)
+            df = _fetch_history_frame(loader, code, start_str, end_str, "15m", market)
         except Exception:
             df = None
         if df is not None and not df.empty:
@@ -2465,15 +2515,7 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         fb_days = {"1D": 4}[period]
         start_str = (today - timedelta(days=fb_days)).strftime("%Y-%m-%d")
         end_str = today.strftime("%Y-%m-%d")
-        result = _fetch_with_analytics(
-            loader,
-            codes=[code],
-            start_date=start_str,
-            end_date=end_str,
-            interval="1D",
-            market=market,
-        )
-        df = result.get(code)
+        df = _fetch_history_frame(loader, code, start_str, end_str, "1D", market)
         if df is None or df.empty:
             return {"name": name, "bars": []}
         df = df.sort_index()
@@ -2492,15 +2534,7 @@ def _fetch_price_history(code: str, period: str, market_hint: str | None = None)
         start_str = (today - timedelta(days=400)).strftime("%Y-%m-%d")
     end_str = today.strftime("%Y-%m-%d")
 
-    result = _fetch_with_analytics(
-        loader,
-        codes=[code],
-        start_date=start_str,
-        end_date=end_str,
-        interval="1D",
-        market=market,
-    )
-    df = result.get(code)
+    df = _fetch_history_frame(loader, code, start_str, end_str, "1D", market)
     if df is None or df.empty:
         return {"name": name, "bars": []}
 
@@ -2533,6 +2567,11 @@ async def get_watchlist_history(
     try:
         data = await asyncio.to_thread(_fetch_price_history, code.strip(), period, market)
         bars = data["bars"]
+        if not bars:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Price history temporarily unavailable for {code.strip().upper()}",
+            )
         return {
             "code": code.strip().upper(),
             "name": data["name"],
@@ -2540,6 +2579,8 @@ async def get_watchlist_history(
             "bars": bars,
             "metrics": _history_metrics_from_bars(bars),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Price history fetch failed: {exc}")
 
@@ -5194,9 +5235,6 @@ _opportunity_runtime = register_opportunity_routes(
 
 from src.api.news_center_routes import register_news_center_routes  # noqa: E402
 register_news_center_routes(app, require_auth=require_local_or_auth)
-
-from src.api.video_generation_routes import register_video_generation_routes  # noqa: E402
-register_video_generation_routes(app, require_auth=require_local_or_auth)
 
 from src.api.historical_event_routes import register_historical_event_routes  # noqa: E402
 register_historical_event_routes(app, require_auth=require_local_or_auth)

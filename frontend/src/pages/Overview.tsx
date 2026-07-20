@@ -434,7 +434,10 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
     const activePeriod = view === "historical_events" ? historicalPeriod : period;
     const historyKey = historyCacheKey(market, code, activePeriod);
     const quoteKey = quoteCacheKey(market, code);
-    const historyCache = readOverviewCache<WatchlistHistoryResponse>(historyKey, HISTORY_CACHE_TTL);
+    const cachedHistory = readOverviewCache<WatchlistHistoryResponse>(historyKey, HISTORY_CACHE_TTL);
+    // Never treat a prior provider outage (HTTP 200 with bars=[]) as usable
+    // history. Retry it immediately so a recovered source can repopulate the chart.
+    const historyCache = cachedHistory?.value.bars?.length ? cachedHistory : null;
     const quoteCache = readOverviewCache<WatchlistQuote>(quoteKey, QUOTE_CACHE_TTL);
     let cancelled = false;
     if (historyCache) {
@@ -460,6 +463,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
       .then(([res, nextQuote]) => {
         if (cancelled) return;
         if (res) {
+          if (!res.bars?.length) throw new Error(`${code} 暂无可用历史行情`);
           setBars(res.bars);
           setHistoryMetrics(res.metrics);
           if (res.name) setName(res.name);

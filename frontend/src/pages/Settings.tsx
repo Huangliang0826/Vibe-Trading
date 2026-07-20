@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { BarChart3, Clapperboard, Database, KeyRound, Loader2, RotateCcw, Save, Server, Settings2, SlidersHorizontal } from "lucide-react";
+import { BarChart3, Database, KeyRound, Loader2, RotateCcw, Save, Server, Settings2, SlidersHorizontal } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, isAuthRequiredError, type DataSourceSettings, type LLMProviderOption, type LLMSettings } from "@/lib/api";
 import { getApiAuthKey, setApiAuthKey } from "@/lib/apiAuth";
 import { Analytics } from "@/pages/Analytics";
-import { VideoGeneration } from "@/pages/VideoGeneration";
 import { cn } from "@/lib/utils";
 
 interface LLMFormState {
@@ -487,14 +486,11 @@ function SettingsConfiguration() {
 
 export function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTab = searchParams.get("tab");
-  const activeTab = requestedTab === "analytics" || requestedTab === "video-generation"
-    ? requestedTab
-    : "configuration";
+  const activeTab = searchParams.get("tab") === "analytics" ? "analytics" : "configuration";
 
-  const selectTab = (tab: "configuration" | "analytics" | "video-generation") => {
+  const selectTab = (tab: "configuration" | "analytics") => {
     const next = new URLSearchParams(searchParams);
-    if (tab !== "configuration") next.set("tab", tab);
+    if (tab === "analytics") next.set("tab", "analytics");
     else next.delete("tab");
     setSearchParams(next, { replace: true });
   };
@@ -527,25 +523,9 @@ export function Settings() {
           >
             <BarChart3 className="h-4 w-4" />数据洞察
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "video-generation"}
-            onClick={() => selectTab("video-generation")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
-              activeTab === "video-generation" ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Clapperboard className="h-4 w-4" />视频生成
-          </button>
         </div>
       </div>
-      {activeTab === "analytics"
-        ? <Analytics embedded />
-        : activeTab === "video-generation"
-          ? <VideoGeneration embedded />
-          : <SettingsConfiguration />}
+      {activeTab === "analytics" ? <Analytics embedded /> : <SettingsConfiguration />}
     </div>
   );
 }

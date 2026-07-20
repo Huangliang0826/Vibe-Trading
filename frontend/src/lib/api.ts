@@ -94,32 +94,6 @@ export interface UploadResult {
   filename: string;
 }
 
-export interface VideoGenerationCreate {
-  prompt: string;
-  image_urls: string[];
-  reference_video_url?: string;
-  reference_audio_url?: string;
-  ratio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9";
-  resolution: "480p" | "720p" | "1080p";
-  duration: number;
-  generate_audio: boolean;
-  watermark: boolean;
-}
-
-export interface VideoGenerationTask {
-  id: string;
-  model?: string;
-  status?: "queued" | "running" | "in_progress" | "succeeded" | "failed" | "expired";
-  video_url?: string;
-  content?: { video_url?: string };
-  error?: { message?: string; code?: string } | string;
-  created_at?: number;
-  updated_at?: number;
-  duration?: number;
-  ratio?: string;
-  resolution?: string;
-}
-
 async function uploadFile(file: File): Promise<UploadResult> {
   const form = new FormData();
   form.append("file", file);
@@ -128,23 +102,6 @@ async function uploadFile(file: File): Promise<UploadResult> {
     throw await errorFromResponse(res);
   }
   return res.json();
-}
-
-async function downloadGeneratedVideo(taskId: string): Promise<void> {
-  const res = await fetch(
-    `${BASE}/video-generation/tasks/${encodeURIComponent(taskId)}/download`,
-    { headers: authHeaders(), cache: "no-store" },
-  );
-  if (!res.ok) throw await errorFromResponse(res);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `seedance-${taskId}.mp4`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 function appendQueryParam(url: string, key: string, value: string): string {
@@ -318,15 +275,6 @@ export const api = {
       `/news-center/ai-digest?date=${encodeURIComponent(date)}&language=${language}${force ? "&force=true" : ""}`,
       { method: "POST" },
     ),
-
-  createVideoGenerationTask: (body: VideoGenerationCreate) =>
-    request<VideoGenerationTask>("/video-generation/tasks", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  getVideoGenerationTask: (taskId: string) =>
-    request<VideoGenerationTask>(`/video-generation/tasks/${encodeURIComponent(taskId)}`),
-  downloadGeneratedVideo,
 
   // 行业研报库
   getIndustryReports: () =>
@@ -1234,6 +1182,10 @@ export interface RobustCell {
   score?: number;
   total_return?: number;
   max_loss?: number;
+  annual_return?: number;
+  max_drawdown?: number;
+  annual_excess_vs_hold?: number | null;
+  composite_score?: number;
 }
 
 export interface RobustBeatCount {
@@ -1251,6 +1203,10 @@ export interface RobustStrategyRow {
   mean_score: number | null;
   mean_return: number;
   mean_max_loss: number;
+  mean_composite_score?: number | null;
+  mean_annual_return?: number;
+  mean_max_drawdown?: number;
+  mean_annual_excess_vs_hold?: number | null;
   mean_excess_vs_hold?: number | null;
   windows_beating_hold?: RobustBeatCount | null;
 }

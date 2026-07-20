@@ -2,10 +2,9 @@
 
 Instead of crowning the single-window winner (which overfits to one regime),
 this evaluates every strategy across several fixed-length rolling windows plus
-the full history, ranks the strategies *within each window* by the balance
-score (total_return − 2×|max_loss|), and picks the strategy with the best
-**average rank**. Consistency (worst rank, rank spread) is surfaced alongside
-so the user can see robustness, not just a single champion.
+the full history.  The overall champion maximises an equal-weight composite of
+annualised return, drawdown control, and annualised excess return versus buy &
+hold.  Per-window ranks remain visible as a consistency diagnostic.
 """
 
 from __future__ import annotations
@@ -172,7 +171,7 @@ def _windows_beating(
     row: List[Optional[Dict[str, Any]]],
     bh_row: List[Optional[Dict[str, Any]]],
 ) -> Optional[Dict[str, int]]:
-    """Count windows where the strategy's balance score beats buy & hold's."""
+    """Count windows with positive annual excess, falling back to legacy score."""
     paired = [
         (c, b)
         for c, b in zip(row, bh_row)
@@ -180,8 +179,105 @@ def _windows_beating(
     ]
     if not paired:
         return None
-    beating = sum(1 for c, b in paired if c["score"] > b["score"])
+    beating = sum(
+        1
+        for c, b in paired
+        if (
+            c.get("annual_excess_vs_hold", c.get("score", 0.0) - b.get("score", 0.0))
+            > 0
+        )
+    )
     return {"beating": beating, "total": len(paired)}
+
+
+def _apply_composite_scores_and_ranks(
+    cells: Dict[str, List[Optional[Dict[str, Any]]]],
+    strategy_specs: List[Dict[str, Any]],
+) -> None:
+    """Add magnitude-aware composite scores and tie-aware window ranks.
+
+    Each component is standardised across all successful strategy/window
+    observations so annual return, drawdown, and benchmark-relative excess can
+    contribute equally without an arbitrary unit-dependent coefficient.
+    """
+    bh_cells = cells.get(_BASELINE_STRATEGY)
+    for wi in range(len(next(iter(cells.values()), []))):
+        bh = bh_cells[wi] if bh_cells and wi < len(bh_cells) else None
+        bh_annual = (
+            float(bh["annual_return"])
+            if bh and bh.get("status") == "ok" and bh.get("annual_return") is not None
+            else None
+        )
+        for spec in strategy_specs:
+            cell = cells[spec["name"]][wi]
+            if not cell or cell.get("status") != "ok":
+                continue
+            cell["annual_excess_vs_hold"] = (
+                None if bh_annual is None else round(float(cell["annual_return"]) - bh_annual, 6)
+            )
+
+    ok_cells = [
+        cell
+        for row in cells.values()
+        for cell in row
+        if cell and cell.get("status") == "ok"
+    ]
+
+    def standardise(key: str, *, invert_abs: bool = False) -> Dict[int, float]:
+        selected = [cell for cell in ok_cells if cell.get(key) is not None]
+        values = np.asarray([
+            -abs(float(cell[key])) if invert_abs else float(cell[key])
+            for cell in selected
+        ], dtype=float)
+        if not len(values):
+            return {}
+        mean = float(np.mean(values))
+        std = float(np.std(values))
+        if std <= 1e-12:
+            return {id(cell): 0.0 for cell in selected}
+        return {
+            id(cell): float((value - mean) / std)
+            for cell, value in zip(selected, values)
+        }
+
+    annual_z = standardise("annual_return")
+    drawdown_z = standardise("max_drawdown", invert_abs=True)
+    excess_z = standardise("annual_excess_vs_hold")
+    for cell in ok_cells:
+        components = [annual_z[id(cell)], drawdown_z[id(cell)]]
+        if id(cell) in excess_z:
+            components.append(excess_z[id(cell)])
+        cell["composite_score"] = round(float(np.mean(components)), 6)
+
+    # Standard competition ranking with average ranks for exact ties.  This
+    # prevents identical single-asset strategies from being ordered merely by
+    # their position in STRATEGY_OPTIONS.
+    for wi in range(len(next(iter(cells.values()), []))):
+        scored = [
+            (spec["name"], cells[spec["name"]][wi])
+            for spec in strategy_specs
+            if cells[spec["name"]][wi]
+            and cells[spec["name"]][wi].get("status") == "ok"
+        ]
+        scored.sort(key=lambda kv: kv[1]["composite_score"], reverse=True)
+        start = 0
+        while start < len(scored):
+            end = start + 1
+            while (
+                end < len(scored)
+                and scored[end][1]["composite_score"] == scored[start][1]["composite_score"]
+            ):
+                end += 1
+            tied_rank = ((start + 1) + end) / 2.0
+            for _, cell in scored[start:end]:
+                cell["rank"] = tied_rank
+            start = end
+        worst = len(scored) + 1
+        for spec in strategy_specs:
+            cell = cells[spec["name"]][wi]
+            if cell and cell.get("status") == "ok":
+                continue
+            cells[spec["name"]][wi] = {**(cell or {"status": "failed"}), "rank": worst}
 
 
 def _perturbed_value(base: Any, factor: float) -> Any:
@@ -417,6 +513,8 @@ def run_robust_optimize(
                     "score": round(_balance_score(m), 6),
                     "total_return": round(float(m["total_return"]), 6),
                     "max_loss": round(float(m["max_loss"]), 6),
+                    "annual_return": round(float(m["annual_return"]), 6),
+                    "max_drawdown": round(float(m["max_drawdown"]), 6),
                     "status": "ok",
                 }
                 curves[(name, wi)] = equity_series.astype(float)
@@ -424,24 +522,11 @@ def run_robust_optimize(
                 logger.debug("robust: %s failed on window %s: %s", name, w["label"], exc)
                 cells[name][wi] = {"status": "failed"}
 
-    # Rank within each window (1 = best by balance score). Failed cells get the
-    # worst rank for that window so chronic failures are penalised.
+    # Composite scores use annualised return, true peak-to-trough drawdown, and
+    # annualised excess versus buy & hold.  Ranks are diagnostic; the winner is
+    # chosen by the magnitude-aware composite itself.
     n_strats = len(strategy_specs)
-    for wi in range(len(windows)):
-        scored = [
-            (spec["name"], cells[spec["name"]][wi])
-            for spec in strategy_specs
-            if cells[spec["name"]][wi] and cells[spec["name"]][wi]["status"] == "ok"
-        ]
-        scored.sort(key=lambda kv: kv[1]["score"], reverse=True)
-        for rank, (name, cell) in enumerate(scored, start=1):
-            cell["rank"] = rank
-        worst = len(scored) + 1
-        for spec in strategy_specs:
-            cell = cells[spec["name"]][wi]
-            if cell and cell.get("status") == "ok":
-                continue
-            cells[spec["name"]][wi] = {**(cell or {"status": "failed"}), "rank": worst}
+    _apply_composite_scores_and_ranks(cells, strategy_specs)
 
     strategies: List[Dict[str, Any]] = []
     for spec in strategy_specs:
@@ -451,27 +536,42 @@ def run_robust_optimize(
         ok_cells = [c for c in row if c and c.get("status") == "ok"]
         ok_count = len(ok_cells)
         mean_rank = float(np.mean(ranks)) if ranks else float(n_strats)
-        worst_rank = int(max(ranks)) if ranks else n_strats
+        worst_rank = float(max(ranks)) if ranks else float(n_strats)
         rank_std = float(np.std(ranks)) if len(ranks) > 1 else 0.0
         mean_score = float(np.mean([c["score"] for c in ok_cells])) if ok_cells else float("-inf")
         mean_return = float(np.mean([c["total_return"] for c in ok_cells])) if ok_cells else 0.0
         mean_loss = float(np.mean([c["max_loss"] for c in ok_cells])) if ok_cells else 0.0
+        mean_composite = float(np.mean([c["composite_score"] for c in ok_cells])) if ok_cells else float("-inf")
+        mean_annual_return = float(np.mean([c["annual_return"] for c in ok_cells])) if ok_cells else 0.0
+        mean_max_drawdown = float(np.mean([c["max_drawdown"] for c in ok_cells])) if ok_cells else 0.0
+        annual_excesses = [
+            c["annual_excess_vs_hold"] for c in ok_cells
+            if c.get("annual_excess_vs_hold") is not None
+        ]
         strategies.append({
             "name": name,
             "cells": row,
             "mean_rank": round(mean_rank, 3),
-            "worst_rank": worst_rank,
+            "worst_rank": round(worst_rank, 3),
             "rank_std": round(rank_std, 3),
             "ok_count": ok_count,
             "mean_score": None if mean_score == float("-inf") else round(mean_score, 6),
             "mean_return": round(mean_return, 6),
             "mean_max_loss": round(mean_loss, 6),
+            "mean_composite_score": None if mean_composite == float("-inf") else round(mean_composite, 6),
+            "mean_annual_return": round(mean_annual_return, 6),
+            "mean_max_drawdown": round(mean_max_drawdown, 6),
+            "mean_annual_excess_vs_hold": (
+                round(float(np.mean(annual_excesses)), 6) if annual_excesses else None
+            ),
         })
 
-    # Winner: lowest average rank, tiebreak by lowest worst-rank, then highest
-    # mean balance score.
+    # Winner: highest magnitude-aware composite.  Average/worst ranks are only
+    # tie-breakers and visible stability diagnostics.
     def sort_key(s: Dict[str, Any]):
-        return (s["mean_rank"], s["worst_rank"], -(s["mean_score"] if s["mean_score"] is not None else -1e9))
+        composite = s["mean_composite_score"] if s["mean_composite_score"] is not None else -1e9
+        annual_excess = s["mean_annual_excess_vs_hold"] if s["mean_annual_excess_vs_hold"] is not None else -1e9
+        return (-composite, s["mean_rank"], s["worst_rank"], -annual_excess)
 
     strategies.sort(key=sort_key)
     best_name = strategies[0]["name"] if strategies else None

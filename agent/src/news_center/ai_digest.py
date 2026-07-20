@@ -16,7 +16,7 @@ import httpx
 
 ARK_DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 ARK_DEFAULT_MODEL = "doubao-seed-2-1-pro-260628"
-_TIMEOUT_SECONDS = 300.0  # pro model + web search regularly exceeds two minutes
+_TIMEOUT_SECONDS = 90.0  # keep the background web briefing responsive
 _FAST_TIMEOUT_SECONDS = 30.0  # the synchronous path must fail over quickly
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
@@ -66,6 +66,7 @@ class ArkDigestClient:
         payload: dict[str, Any] = {
             "model": self.model,
             "input": [{"role": "user", "content": prompt}],
+            "thinking": {"type": "disabled"},
         }
         if web_search:
             payload["tools"] = [{"type": "web_search", "max_keyword": 1}]

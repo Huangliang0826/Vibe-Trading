@@ -73,7 +73,6 @@ export const router = createBrowserRouter([
       { path: "/forecast", element: wrap(Forecast) },
       { path: "/hstech", element: wrap(HSTech) },
       { path: "/paper-trading", element: wrap(PaperTrading) },
-      { path: "/video-generation", element: <Navigate to="/settings?tab=video-generation" replace /> },
       { path: "/analytics", element: <Navigate to="/settings?tab=analytics" replace /> },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },

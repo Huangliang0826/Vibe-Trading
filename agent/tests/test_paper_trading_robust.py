@@ -62,10 +62,43 @@ def test_common_data_span_rejects_missing_portfolio_symbols() -> None:
 # ── Baseline comparison & top-k ensemble ────────────────────────────────────
 
 from src.paper_trading.robust import (  # noqa: E402
+    _apply_composite_scores_and_ranks,
     _build_ensemble,
     _mean_excess_vs_cells,
     _windows_beating,
 )
+
+
+def test_composite_ranking_gives_identical_results_the_same_average_rank() -> None:
+    specs = [{"name": name, "params": {}} for name in ("buy_and_hold", "same_a", "same_b", "weak")]
+    cells = {
+        "buy_and_hold": [{"status": "ok", "annual_return": 0.08, "max_drawdown": -0.20}],
+        "same_a": [{"status": "ok", "annual_return": 0.14, "max_drawdown": -0.10}],
+        "same_b": [{"status": "ok", "annual_return": 0.14, "max_drawdown": -0.10}],
+        "weak": [{"status": "ok", "annual_return": 0.05, "max_drawdown": -0.30}],
+    }
+
+    _apply_composite_scores_and_ranks(cells, specs)
+
+    assert cells["same_a"][0]["composite_score"] == cells["same_b"][0]["composite_score"]
+    assert cells["same_a"][0]["rank"] == pytest.approx(1.5)
+    assert cells["same_b"][0]["rank"] == pytest.approx(1.5)
+    assert cells["weak"][0]["rank"] == 4
+
+
+def test_composite_score_rewards_return_drawdown_and_excess_vs_hold() -> None:
+    specs = [{"name": name, "params": {}} for name in ("buy_and_hold", "strong", "risky")]
+    cells = {
+        "buy_and_hold": [{"status": "ok", "annual_return": 0.08, "max_drawdown": -0.20}],
+        "strong": [{"status": "ok", "annual_return": 0.14, "max_drawdown": -0.10}],
+        "risky": [{"status": "ok", "annual_return": 0.16, "max_drawdown": -0.45}],
+    }
+
+    _apply_composite_scores_and_ranks(cells, specs)
+
+    assert cells["strong"][0]["annual_excess_vs_hold"] == pytest.approx(0.06)
+    assert cells["strong"][0]["composite_score"] > cells["risky"][0]["composite_score"]
+    assert cells["strong"][0]["rank"] == 1
 
 
 def _ok(score: float, total_return: float, max_loss: float = 0.0) -> dict:
@@ -87,6 +120,16 @@ def test_mean_excess_vs_cells_returns_none_without_paired_windows() -> None:
 def test_windows_beating_counts_score_wins_over_buy_and_hold() -> None:
     row = [_ok(1.0, 0.3), _ok(0.4, 0.1), {"status": "failed"}]
     bh = [_ok(0.5, 0.2), _ok(0.5, 0.2), _ok(0.5, 0.2)]
+
+    assert _windows_beating(row, bh) == {"beating": 1, "total": 2}
+
+
+def test_windows_beating_uses_positive_annual_excess_when_available() -> None:
+    row = [
+        {**_ok(-1.0, 0.1), "annual_excess_vs_hold": 0.02},
+        {**_ok(1.0, 0.2), "annual_excess_vs_hold": -0.01},
+    ]
+    bh = [_ok(0.0, 0.1), _ok(0.0, 0.1)]
 
     assert _windows_beating(row, bh) == {"beating": 1, "total": 2}
 
