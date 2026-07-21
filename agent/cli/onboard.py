@@ -52,10 +52,10 @@ class Provider:
 
 PROVIDERS: Final[tuple[Provider, ...]] = (
     Provider("openrouter", "OpenRouter", "recommended — 200+ models, one key",
-             "deepseek/deepseek-v4-pro",
+             "deepseek/deepseek-v4-flash",
              "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL",
              "https://openrouter.ai/api/v1", "sk-or-",
-             ("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash",
+             ("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
               "openai/gpt-5.5-pro", "google/gemini-3.5-flash")),
     Provider("openai", "OpenAI", "GPT-5.5 direct",
              "gpt-5.5-instant", "OPENAI_API_KEY", "OPENAI_BASE_URL",

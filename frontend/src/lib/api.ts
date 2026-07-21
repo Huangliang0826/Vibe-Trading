@@ -223,6 +223,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  getLatestAssetManagementPlan: () =>
+    request<AssetManagementPlan | null>("/asset-management/latest"),
+  calculateAssetManagementPlan: (body: AssetManagementRequest) =>
+    request<AssetManagementPlan>("/asset-management/calculate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // Scanner API
   runScan: (universe = "sp500", top = 20) =>
@@ -1040,6 +1047,57 @@ export interface PaperHolding {
   symbol: string;
   market: "us" | "hk" | "cn";
   allocation_pct: number;
+}
+
+export type ManagedAssetType = "stock" | "fund" | "bond";
+
+export interface AssetManagementCandidate {
+  symbol: string;
+  market: "us" | "hk" | "cn";
+  name: string;
+  asset_type: ManagedAssetType;
+}
+
+export interface AssetManagementRequest {
+  candidates: AssetManagementCandidate[];
+  target_return: number;
+  max_drawdown: number;
+  lookback_years?: number;
+}
+
+export interface AssetManagementAllocation {
+  symbol: string;
+  market: "us" | "hk" | "cn" | "cash";
+  name: string;
+  asset_type: ManagedAssetType | "cash";
+  weight: number;
+  range_min: number;
+  range_max: number;
+  risk_contribution: number;
+  expected_return: number;
+  reason: string;
+}
+
+export interface AssetManagementPlan {
+  plan_id: string;
+  status: "feasible" | "closest";
+  created_at: string;
+  data_through: string;
+  provider: string;
+  model: string;
+  optimizer_version: string;
+  request: AssetManagementRequest;
+  allocations: AssetManagementAllocation[];
+  metrics: {
+    expected_return: number;
+    annual_volatility: number;
+    historical_max_drawdown: number;
+    stress_drawdown: number;
+    target_return: number;
+    max_drawdown_limit: number;
+  };
+  summary: string;
+  warnings: string[];
 }
 
 export interface PaperStrategyConfig {

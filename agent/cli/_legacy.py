@@ -4135,7 +4135,7 @@ _PROVIDER_CHOICES: list[dict[str, str | None]] = [
         "key_env": "OPENROUTER_API_KEY",
         "base_env": "OPENROUTER_BASE_URL",
         "base_url": "https://openrouter.ai/api/v1",
-        "model": "deepseek/deepseek-v4-pro",
+        "model": "deepseek/deepseek-v4-flash",
         "key_prefix": "sk-or-",
         "key_placeholder": "sk-or-v1-...",
     },

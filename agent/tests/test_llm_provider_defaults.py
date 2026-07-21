@@ -10,7 +10,7 @@ from cli.onboard import PROVIDERS as ONBOARD_PROVIDERS
 
 
 EXPECTED_PROVIDER_DEFAULTS = {
-    "openrouter": "deepseek/deepseek-v4-pro",
+    "openrouter": "deepseek/deepseek-v4-flash",
     "openai": "gpt-5.5-instant",
     "deepseek": "deepseek-v4-pro",
     "gemini": "gemini-3.5-flash",
@@ -48,6 +48,6 @@ def test_cli_init_provider_choices_match_registry_defaults() -> None:
 def test_interactive_onboard_suggests_current_primary_models() -> None:
     onboard_defaults = {provider.key: provider.default_model for provider in ONBOARD_PROVIDERS}
 
-    assert onboard_defaults["openrouter"] == "deepseek/deepseek-v4-pro"
+    assert onboard_defaults["openrouter"] == "deepseek/deepseek-v4-flash"
     assert onboard_defaults["openai"] == "gpt-5.5-instant"
     assert onboard_defaults["deepseek"] == "deepseek-v4-pro"

@@ -16,9 +16,10 @@ from pydantic import PrivateAttr
 from src.providers.capabilities import get_provider_capabilities, provider_env_names
 
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values, load_dotenv
 except ImportError:
     load_dotenv = None  # type: ignore
+    dotenv_values = None  # type: ignore
 
 try:
     from langchain_openai import ChatOpenAI
@@ -296,6 +297,7 @@ _ENV_CANDIDATES = [
 # which slot won - the entire P08 R1 signal - using compile-time
 # constants only.
 _ENV_LABELS = ("~/.vibe-trading/.env", "<AGENT_DIR>/.env", "<CWD>/.env")
+PROJECT_ENV_PATH = AGENT_DIR / ".env"
 
 logger = logging.getLogger(__name__)
 
@@ -635,3 +637,51 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
     if caps.default_headers:
         kwargs["default_headers"] = dict(caps.default_headers)
     return ChatOpenAIWithReasoning(**kwargs)
+
+
+def build_official_deepseek_llm(
+    *,
+    model_name: str = "deepseek-v4-pro",
+    callbacks: Any = None,
+) -> Any:
+    """Build a DeepSeek client using only the official DeepSeek credentials.
+
+    This deliberately does not inherit ``LANGCHAIN_PROVIDER`` or fall back to
+    ``OPENAI_API_KEY`` so feature-specific DeepSeek calls cannot accidentally
+    be routed through OpenRouter or another OpenAI-compatible provider.
+    """
+    _ensure_dotenv()
+    # The Web settings page persists provider credentials to agent/.env. Read
+    # that file explicitly so an older ~/.vibe-trading/.env (which wins the
+    # general dotenv search order) cannot shadow a newly saved DeepSeek key
+    # after the backend restarts.
+    project_values: dict[str, Any] = {}
+    if PROJECT_ENV_PATH.exists():
+        if dotenv_values is not None:
+            project_values = dict(dotenv_values(PROJECT_ENV_PATH))
+        else:
+            for raw in PROJECT_ENV_PATH.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    project_values[key.strip()] = value.strip().strip('"').strip("'")
+
+    api_key = str(project_values.get("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")).strip()
+    if not api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+    if ChatOpenAI is None:
+        raise RuntimeError("langchain-openai is not installed")
+
+    base_url = str(
+        project_values.get("DEEPSEEK_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL", "")
+    ).strip() or "https://api.deepseek.com/v1"
+    return ChatOpenAIWithReasoning(
+        model=model_name,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=float(os.getenv("LANGCHAIN_TEMPERATURE", "0.0")),
+        timeout=int(os.getenv("TIMEOUT_SECONDS", "120")),
+        max_retries=int(os.getenv("MAX_RETRIES", "2")),
+        callbacks=callbacks,
+        vibe_provider="deepseek",
+    )

@@ -5151,6 +5151,11 @@ async def delete_paper_trading_run(run_id: str):
     return {"status": "deleted", "run_id": run_id}
 
 
+from src.api.asset_management_routes import register_asset_management_routes  # noqa: E402
+
+register_asset_management_routes(app, require_auth=require_local_or_auth)
+
+
 # ============================================================================
 # Alpha Zoo routes (Web UI) — defined in src/api/alpha_routes.py
 # ============================================================================
