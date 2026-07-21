@@ -6,9 +6,6 @@ import { PaperHoldingPriceChart } from "@/components/charts/PaperHoldingPriceCha
 import { cn } from "@/lib/utils";
 import { buildRobustWinnerRunRequest } from "@/lib/paper-trading-robust";
 import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
-import { StrategyComparisonTab } from "@/components/paper-trading/StrategyComparisonTab";
-
-type PaperTradingTab = "history" | "comparison";
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | "neutral" }) {
   const color = tone === "good" ? "text-emerald-600 dark:text-emerald-400"
@@ -381,7 +378,6 @@ function WatchlistQuickAdd({
 }
 
 export function PaperTrading() {
-  const [tab, setTab] = useState<PaperTradingTab>("history");
   // ── Holdings state ──
   const [holdings, setHoldings] = useState<PaperHolding[]>([]);
   const [holdingNames, setHoldingNames] = useState<Record<string, string>>({});
@@ -828,14 +824,6 @@ export function PaperTrading() {
         <Briefcase className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-bold">模拟盘</h1>
       </div>
-
-      <div className="flex gap-2">
-        <button type="button" onClick={() => setTab("history")} className={cn("rounded-lg border px-3 py-2 text-sm", tab === "history" && "border-primary bg-primary/10 text-primary")}>历史回测</button>
-        <button type="button" onClick={() => setTab("comparison")} className={cn("rounded-lg border px-3 py-2 text-sm", tab === "comparison" && "border-primary bg-primary/10 text-primary")}>策略比较</button>
-      </div>
-
-      {tab === "comparison" && <StrategyComparisonTab />}
-      {tab === "history" && <>
 
       <div className="space-y-4 rounded-xl border bg-card p-4">
         <div className="flex items-center justify-between">
@@ -1659,7 +1647,6 @@ export function PaperTrading() {
           )}
         </div>
       )}
-      </>}
     </div>
   );
 }
