@@ -492,19 +492,21 @@ async def lifespan(_app: FastAPI):
         _analytics_runtime.start()
     if _opportunity_runtime is not None:
         _opportunity_runtime.scheduler.start()
-    orphaned = _get_research_analysis_store().fail_incomplete_runs(
-        "后端已重启，原分析任务无法恢复，请重新运行分析"
+    resumable = _get_research_analysis_store().requeue_incomplete_runs(
+        "后端已重启，正在自动重新执行分析"
     )
-    if orphaned:
-        logger.warning("marked %d orphaned research analysis runs as failed", len(orphaned))
+    for run_id in resumable:
+        _schedule_research_analysis(run_id)
+    if resumable:
+        logger.warning("resumed %d interrupted research analysis runs", len(resumable))
     schedule_startup_refresh()
     yield
     # Shutdown
     for stop_event in _research_analysis_stop_events.values():
         stop_event.set()
     if _research_analysis_tasks:
-        _get_research_analysis_store().fail_incomplete_runs(
-            "后端已停止，分析任务已中断，请重新运行分析"
+        _get_research_analysis_store().requeue_incomplete_runs(
+            "后端正在重启，分析任务将在启动后自动继续"
         )
     if _analytics_runtime is not None:
         await _analytics_runtime.stop()
@@ -4902,6 +4904,22 @@ async def _execute_research_analysis(run_id: str) -> None:
         _research_analysis_stop_events.pop(run_id, None)
 
 
+def _schedule_research_analysis(run_id: str) -> "asyncio.Task[Any]":
+    """Schedule one persistent analysis unless it is already active."""
+    existing = _research_analysis_tasks.get(run_id)
+    if existing is not None and not existing.done():
+        return existing
+    _research_analysis_stop_events.pop(run_id, None)
+    task = asyncio.create_task(_execute_research_analysis(run_id))
+    _research_analysis_tasks[run_id] = task
+    task.add_done_callback(
+        lambda finished, rid=run_id: _research_analysis_tasks.pop(rid, None)
+        if _research_analysis_tasks.get(rid) is finished
+        else None
+    )
+    return task
+
+
 @app.post(
     "/research-analysis/runs",
     response_model=ResearchAnalysisRun,
@@ -4916,13 +4934,7 @@ async def create_research_analysis_run(payload: ResearchAnalysisCreate):
 
     store = _get_research_analysis_store()
     run = store.create_run(normalized, payload.analysis_date, payload.mode)
-    task = asyncio.create_task(_execute_research_analysis(run.run_id))
-    _research_analysis_tasks[run.run_id] = task
-    task.add_done_callback(
-        lambda t, rid=run.run_id: _research_analysis_tasks.pop(rid, None)
-        if _research_analysis_tasks.get(rid) is t
-        else None
-    )
+    _schedule_research_analysis(run.run_id)
     return run
 
 

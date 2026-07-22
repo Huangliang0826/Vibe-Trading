@@ -1305,8 +1305,9 @@ def _to_code(holding: PaperHolding) -> str:
         if symbol.endswith((".SS", ".SZ", ".BJ")):
             return symbol
         digits = "".join(ch for ch in symbol if ch.isdigit())
-        # 6xxxxx/9xxxxx → Shanghai; 4xxxxx/8xxxxx → Beijing; else Shenzhen.
-        if digits.startswith(("6", "9")):
+        # 5xxxxx/6xxxxx/9xxxxx → Shanghai; 4xxxxx/8xxxxx → Beijing; else Shenzhen.
+        # The 5-prefix matters for exchange-listed funds such as 510300.
+        if digits.startswith(("5", "6", "9")):
             return f"{digits}.SS"
         if digits.startswith(("4", "8")):
             return f"{digits}.BJ"

@@ -8,39 +8,60 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 
-from src.asset_management import AssetManagementPlan, AssetManagementRequest, AssetManagementService
+from src.asset_management import (
+    PortfolioBacktestRequest,
+    PortfolioBacktestResult,
+    PortfolioBacktestService,
+    PortfolioDefinition,
+    TrackingPortfolio,
+    TrackingStore,
+)
 
 
 def register_asset_management_routes(
     app: FastAPI,
     *,
     require_auth: Callable[..., Any],
-    service: AssetManagementService | None = None,
 ) -> None:
-    planner = service or AssetManagementService()
+    backtester = PortfolioBacktestService()
+    tracking = TrackingStore()
 
-    async def get_latest_asset_plan() -> AssetManagementPlan | None:
-        return planner.get_latest()
-
-    async def calculate_asset_plan(payload: AssetManagementRequest) -> AssetManagementPlan:
+    async def backtest_portfolio(payload: PortfolioBacktestRequest) -> PortfolioBacktestResult:
         try:
-            return await asyncio.to_thread(planner.calculate, payload)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            return await asyncio.to_thread(backtester.run, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def start_tracking(payload: PortfolioDefinition) -> TrackingPortfolio:
+        try:
+            return await asyncio.to_thread(tracking.create, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def latest_tracking() -> TrackingPortfolio | None:
+        try:
+            return await asyncio.to_thread(tracking.latest)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     app.add_api_route(
-        "/asset-management/latest",
-        get_latest_asset_plan,
-        methods=["GET"],
-        response_model=AssetManagementPlan | None,
+        "/asset-management/backtest",
+        backtest_portfolio,
+        methods=["POST"],
+        response_model=PortfolioBacktestResult,
         dependencies=[Depends(require_auth)],
     )
     app.add_api_route(
-        "/asset-management/calculate",
-        calculate_asset_plan,
+        "/asset-management/tracking",
+        start_tracking,
         methods=["POST"],
-        response_model=AssetManagementPlan,
+        response_model=TrackingPortfolio,
+        dependencies=[Depends(require_auth)],
+    )
+    app.add_api_route(
+        "/asset-management/tracking/latest",
+        latest_tracking,
+        methods=["GET"],
+        response_model=TrackingPortfolio | None,
         dependencies=[Depends(require_auth)],
     )

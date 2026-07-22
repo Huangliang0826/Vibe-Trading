@@ -94,3 +94,21 @@ def test_store_fails_incomplete_runs_after_restart(tmp_path) -> None:
     assert store.get_run(running.run_id).error == "后端已重启，请重新运行分析"
     assert store.get_run(running.run_id).mode == "full"
     assert store.get_run(completed.run_id).status == ResearchAnalysisStatus.completed
+
+
+def test_store_requeues_incomplete_runs_after_restart(tmp_path) -> None:
+    store = ResearchAnalysisStore(root=tmp_path / "research_analyses", db_path=tmp_path / "research.db")
+    queued = store.create_run(normalize_symbol("AAPL", "us"))
+    running = store.create_run(normalize_symbol("MSFT", "us"), mode="full")
+    store.update_status(running.run_id, ResearchAnalysisStatus.running, "分析中")
+    completed = store.create_run(normalize_symbol("NVDA", "us"))
+    store.complete_run(completed.run_id, _sample_report(), {"source": "unit-test"})
+
+    requeued = store.requeue_incomplete_runs("后端已重启，正在自动重新执行分析")
+
+    assert set(requeued) == {queued.run_id, running.run_id}
+    assert store.get_run(queued.run_id).status == ResearchAnalysisStatus.queued
+    assert store.get_run(running.run_id).status == ResearchAnalysisStatus.queued
+    assert store.get_run(running.run_id).error is None
+    assert store.get_run(running.run_id).summary == "后端已重启，正在自动重新执行分析"
+    assert store.get_run(completed.run_id).status == ResearchAnalysisStatus.completed

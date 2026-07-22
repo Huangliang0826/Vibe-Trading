@@ -223,13 +223,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  getLatestAssetManagementPlan: () =>
-    request<AssetManagementPlan | null>("/asset-management/latest"),
-  calculateAssetManagementPlan: (body: AssetManagementRequest) =>
-    request<AssetManagementPlan>("/asset-management/calculate", {
+  backtestAssetPortfolio: (body: PortfolioBacktestRequest) =>
+    request<PortfolioBacktestResult>("/asset-management/backtest", {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  startAssetTracking: (body: PortfolioDefinition) =>
+    request<TrackingPortfolio>("/asset-management/tracking", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getLatestAssetTracking: () =>
+    request<TrackingPortfolio | null>("/asset-management/tracking/latest"),
 
   // Scanner API
   runScan: (universe = "sp500", top = 20) =>
@@ -1058,46 +1063,44 @@ export interface AssetManagementCandidate {
   asset_type: ManagedAssetType;
 }
 
-export interface AssetManagementRequest {
-  candidates: AssetManagementCandidate[];
-  target_return: number;
-  max_drawdown: number;
-  lookback_years?: number;
-}
-
-export interface AssetManagementAllocation {
+export interface ManualAllocation {
   symbol: string;
   market: "us" | "hk" | "cn" | "cash";
   name: string;
   asset_type: ManagedAssetType | "cash";
   weight: number;
-  range_min: number;
-  range_max: number;
-  risk_contribution: number;
-  expected_return: number;
-  reason: string;
 }
 
-export interface AssetManagementPlan {
-  plan_id: string;
-  status: "feasible" | "closest";
-  created_at: string;
-  data_through: string;
-  provider: string;
-  model: string;
-  optimizer_version: string;
-  request: AssetManagementRequest;
-  allocations: AssetManagementAllocation[];
-  metrics: {
-    expected_return: number;
-    annual_volatility: number;
-    historical_max_drawdown: number;
-    stress_drawdown: number;
-    target_return: number;
-    max_drawdown_limit: number;
-  };
-  summary: string;
-  warnings: string[];
+export interface PortfolioDefinition {
+  allocations: ManualAllocation[];
+  initial_capital?: number;
+  installments?: number;
+  interval_days?: number;
+}
+
+export interface PortfolioBacktestRequest extends PortfolioDefinition { years?: number; rebalance_months?: number }
+export interface AssetEquityPoint { date: string; value: number; cumulative_return: number }
+export interface PortfolioBacktestResult {
+  start_date: string; end_date: string; initial_capital: number; final_value: number;
+  total_profit: number; total_return: number; cagr: number; annual_average_return: number; max_drawdown: number;
+  annual_volatility: number; installments: number; investment_completed_date: string;
+  rebalances: number; rebalance_dates: string[];
+  annual_returns: Array<{ year: number; return_rate: number }>;
+  curve: AssetEquityPoint[]; warnings: string[];
+}
+export interface TrackerPosition {
+  symbol: string; market: string; name: string; target_weight: number; quantity: number;
+  price_native: number; currency: string; fx_to_usd: number; value_usd: number;
+  actual_weight: number; price_date: string;
+}
+export interface TrackingPortfolio {
+  tracker_id: string; status: "building" | "active" | "stopped"; created_at: string;
+  initial_capital: number; current_value: number; cumulative_return: number; today_return: number;
+  completed_installments: number; total_installments: number; next_installment_date: string | null;
+  investment_completed_date: string | null; completed_rebalances: number;
+  last_rebalance_date: string | null; next_rebalance_date: string | null;
+  strategic_cash: number; deployment_cash: number; positions: TrackerPosition[];
+  curve: AssetEquityPoint[]; last_updated: string; warnings: string[];
 }
 
 export interface PaperStrategyConfig {

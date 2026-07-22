@@ -57,7 +57,7 @@ class AssetManagementPlan(BaseModel):
     data_through: str
     provider: str
     model: str
-    optimizer_version: str = "asset-allocation.deepseek.v2"
+    optimizer_version: str = "asset-allocation.deterministic.v3"
     request: AssetManagementRequest
     allocations: list[AllocationItem]
     metrics: PortfolioMetrics

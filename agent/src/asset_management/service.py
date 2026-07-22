@@ -1,9 +1,7 @@
-"""DeepSeek-led portfolio allocation with local data and risk measurement."""
+"""Deterministic portfolio allocation with local data and risk measurement."""
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -11,6 +9,7 @@ from uuid import uuid4
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 
 from src.asset_management.models import (
@@ -38,46 +37,79 @@ def _default_history_loader(codes: list[str], start: str, end: str) -> dict[str,
     return DataLoader().fetch(codes, start, end, interval="1D")
 
 
-def _extract_json(text: str) -> dict[str, Any]:
-    cleaned = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
-    if fenced:
-        cleaned = fenced.group(1)
-    else:
-        start, end = cleaned.find("{"), cleaned.rfind("}")
-        if start >= 0 and end > start:
-            cleaned = cleaned[start:end + 1]
-    parsed = json.loads(cleaned)
-    return parsed if isinstance(parsed, dict) else {}
-
-
 def _review_model() -> tuple[str, str]:
-    return "deepseek", "deepseek-v4-pro"
+    return "deterministic", "mean-variance-v1"
 
 
 def _default_allocator(payload: dict[str, Any]) -> dict[str, Any]:
-    from src.providers.llm import build_official_deepseek_llm
-
-    _provider, model = _review_model()
-    prompt = (
-        "你是本人的投资组合决策者。请基于候选资产、历史统计、相关性、目标年化收益和最大可接受回撤，"
-        "直接决定最终仓位；本地程序不会预先替你优化仓位。不得添加或替换候选资产，但必须额外包含现金CASH。"
-        "禁止做空和杠杆，除此之外不预设单资产上限、最低现金或最小仓位。"
-        "只返回JSON对象，格式严格为："
-        '{"summary":"不超过160字",' 
-        '"allocations":[{"symbol":"代码","market":"us|hk|cn|cash","weight":0.25,'
-        '"range_min":0.20,"range_max":0.30,"reason":"理由"}],' 
-        '"warnings":["风险提示"]}。'
-        "weight、range_min、range_max必须使用0到1的小数；所有weight之和必须等于1；"
-        "allocations必须逐项覆盖输入的每一个候选资产，并包含一项symbol=CASH、market=cash。"
-        "请让结果尽量满足目标，但不能承诺收益；若目标不现实，应在summary和warnings中明确说明。\n"
-        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    assets = payload["assets"]
+    count = len(assets)
+    expected = np.array([float(item["model_expected_return"]) for item in assets] + [float(payload["cash_assumed_return"])])
+    volatilities = np.array([float(item["annual_volatility"]) for item in assets])
+    covariance = np.diag(np.square(volatilities))
+    symbol_indexes: dict[str, list[int]] = {}
+    for position, item in enumerate(assets):
+        symbol_indexes.setdefault(str(item["symbol"]), []).append(position)
+    for pair in payload.get("correlations", []):
+        left_matches = symbol_indexes.get(str(pair["left"]), [])
+        right_matches = symbol_indexes.get(str(pair["right"]), [])
+        if len(left_matches) == 1 and len(right_matches) == 1:
+            left, right = left_matches[0], right_matches[0]
+            covariance[left, right] = covariance[right, left] = float(pair["correlation"]) * volatilities[left] * volatilities[right]
+    covariance_all = np.zeros((count + 1, count + 1))
+    covariance_all[:count, :count] = covariance
+    target = float(payload["target_return"])
+    volatility_limit = float(payload["max_drawdown"]) / 1.8
+    x0 = np.full(count + 1, 1.0 / (count + 1))
+    constraints = [
+        {"type": "eq", "fun": lambda weights: float(weights.sum() - 1.0)},
+        {"type": "ineq", "fun": lambda weights: float(volatility_limit**2 - weights @ covariance_all @ weights)},
+        {"type": "ineq", "fun": lambda weights: float(weights @ expected - target)},
+    ]
+    result = minimize(
+        lambda weights: float(weights @ covariance_all @ weights) + 0.01 * float(np.square(weights[:-1]).sum()),
+        x0,
+        method="SLSQP",
+        bounds=[(0.0, 1.0)] * (count + 1),
+        constraints=constraints,
+        options={"maxiter": 800, "ftol": 1e-11},
     )
-    response = build_official_deepseek_llm(model_name=model).invoke(prompt)
-    content = getattr(response, "content", response)
-    if isinstance(content, list):
-        content = "".join(str(part.get("text", "") if isinstance(part, dict) else part) for part in content)
-    return _extract_json(str(content))
+    warnings: list[str] = []
+    if not result.success:
+        fallback = minimize(
+            lambda weights: -float(weights @ expected) + 0.05 * float(weights @ covariance_all @ weights),
+            x0,
+            method="SLSQP",
+            bounds=[(0.0, 1.0)] * (count + 1),
+            constraints=constraints[:2],
+            options={"maxiter": 800, "ftol": 1e-11},
+        )
+        weights = fallback.x if fallback.success else x0
+        warnings.append("当前候选资产可能无法同时满足收益与回撤目标，已返回最接近方案。")
+    else:
+        weights = result.x
+    weights = np.maximum(weights, 0.0)
+    weights /= weights.sum()
+    allocations = []
+    for position, item in enumerate(assets):
+        weight = float(weights[position])
+        band = max(0.02, weight * 0.20)
+        allocations.append({
+            "symbol": item["symbol"], "market": item["market"], "weight": weight,
+            "range_min": max(0.0, weight - band), "range_max": min(1.0, weight + band),
+            "reason": "确定性均值-方差优化器根据收益、波动与相关性计算。",
+        })
+    cash_weight = float(weights[-1])
+    allocations.append({
+        "symbol": "CASH", "market": "cash", "weight": cash_weight,
+        "range_min": max(0.0, cash_weight - 0.05), "range_max": min(1.0, cash_weight + 0.05),
+        "reason": "现金用于降低组合波动并保留流动性。",
+    })
+    return {
+        "summary": "仓位由确定性均值-方差优化器计算，可由用户在回测和追踪前手动调整。",
+        "allocations": allocations,
+        "warnings": warnings,
+    }
 
 
 def _historical_drawdown(daily_returns: np.ndarray, weights: np.ndarray) -> float:
@@ -105,35 +137,35 @@ def _parse_decision(
 ) -> tuple[dict[tuple[str, str], dict[str, Any]], str, list[str]]:
     raw_allocations = decision.get("allocations")
     if not isinstance(raw_allocations, list):
-        raise ValueError("DeepSeek 未返回有效的 allocations 数组")
+        raise ValueError("组合优化器未返回有效的 allocations 数组")
 
     expected_keys = {_asset_key(item.market, item.symbol) for item in candidates}
     expected_keys.add(("cash", "CASH"))
     parsed: dict[tuple[str, str], dict[str, Any]] = {}
     for raw in raw_allocations:
         if not isinstance(raw, dict):
-            raise ValueError("DeepSeek 返回了无效的仓位条目")
+            raise ValueError("组合优化器返回了无效的仓位条目")
         key = _asset_key(str(raw.get("market", "")), str(raw.get("symbol", "")))
         if key not in expected_keys:
-            raise ValueError(f"DeepSeek 返回了候选池之外的资产：{key[1] or 'unknown'}")
+            raise ValueError(f"组合优化器返回了候选池之外的资产：{key[1] or 'unknown'}")
         if key in parsed:
-            raise ValueError(f"DeepSeek 重复返回资产：{key[1]}")
+            raise ValueError(f"组合优化器重复返回资产：{key[1]}")
         try:
             weight = float(raw["weight"])
             range_min = float(raw.get("range_min", weight))
             range_max = float(raw.get("range_max", weight))
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"DeepSeek 返回的 {key[1]} 仓位不是有效数字") from exc
+            raise ValueError(f"组合优化器返回的 {key[1]} 仓位不是有效数字") from exc
         parsed[key] = {
             "weight": weight,
             "range_min": range_min,
             "range_max": range_max,
-            "reason": str(raw.get("reason", "DeepSeek未提供配置理由")).strip()[:200],
+            "reason": str(raw.get("reason", "组合优化器未提供配置理由")).strip()[:200],
         }
 
     missing = expected_keys - set(parsed)
     if missing:
-        raise ValueError(f"DeepSeek 未覆盖全部输入资产：{'、'.join(sorted(symbol for _, symbol in missing))}")
+        raise ValueError(f"组合优化器未覆盖全部输入资产：{'、'.join(sorted(symbol for _, symbol in missing))}")
 
     weights = np.array([entry["weight"] for entry in parsed.values()], dtype=float)
     percent_mode = bool((weights > 1.0).any()) and 99.0 <= float(weights.sum()) <= 101.0
@@ -148,19 +180,19 @@ def _parse_decision(
         lower = entry["range_min"]
         upper = entry["range_max"]
         if not all(np.isfinite(value) for value in (weight, lower, upper)):
-            raise ValueError(f"DeepSeek 返回的 {key[1]} 仓位包含无效数值")
+            raise ValueError(f"组合优化器返回的 {key[1]} 仓位包含无效数值")
         if not 0.0 <= lower <= weight <= upper <= 1.0:
-            raise ValueError(f"DeepSeek 返回的 {key[1]} 仓位或允许区间不合法")
+            raise ValueError(f"组合优化器返回的 {key[1]} 仓位或允许区间不合法")
 
     total = float(sum(entry["weight"] for entry in parsed.values()))
     if not 0.98 <= total <= 1.02:
-        raise ValueError(f"DeepSeek 返回的仓位合计为 {total:.1%}，不是100%")
+        raise ValueError(f"组合优化器返回的仓位合计为 {total:.1%}，不是100%")
     # Only correct harmless decimal rounding; this is validation, not optimisation.
     if total != 1.0:
         for entry in parsed.values():
             entry["weight"] /= total
 
-    summary = str(decision.get("summary", "DeepSeek已生成资产配置。")).strip()[:300]
+    summary = str(decision.get("summary", "确定性组合优化器已生成资产配置。")).strip()[:300]
     warnings = decision.get("warnings", [])
     clean_warnings = (
         [str(value).strip()[:200] for value in warnings if str(value).strip()]
@@ -187,7 +219,7 @@ class AssetManagementService:
 
     def calculate(self, request: AssetManagementRequest) -> AssetManagementPlan:
         if self.allocator is None:
-            raise RuntimeError("DeepSeek 资产配置服务未启用")
+            raise RuntimeError("确定性组合优化器未启用")
 
         today = pd.Timestamp.now(tz="UTC").tz_localize(None).normalize()
         start = (today - pd.DateOffset(years=request.lookback_years)).date().isoformat()
@@ -349,13 +381,13 @@ class AssetManagementService:
             reason=cash["reason"],
         ))
 
-        warnings = ["仓位由DeepSeek直接生成；收益和回撤为本地基于历史数据的事后估计，不代表未来表现。"]
+        warnings = ["仓位由确定性优化器计算；收益和回撤为基于历史数据的估计，不代表未来表现。"]
         warnings.extend(model_warnings)
         if excluded:
             warnings.append(f"以下资产历史数据不足，相关风险指标使用类型代理估计：{'、'.join(excluded)}")
         if not feasible:
             warnings.append(
-                f"DeepSeek方案按本地风险复核未同时达到所选目标：预计年化 {expected_return:.1%}、压力回撤 {stress_drawdown:.1%}。"
+                f"优化方案未同时达到所选目标：预计年化 {expected_return:.1%}、压力回撤 {stress_drawdown:.1%}。"
             )
 
         provider, model = _review_model()

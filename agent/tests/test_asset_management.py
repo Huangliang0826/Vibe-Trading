@@ -3,12 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from src.api.asset_management_routes import register_asset_management_routes
-from src.asset_management import AssetManagementRequest, AssetManagementService, AssetManagementStore
-from src.asset_management.service import _review_model
+from src.asset_management.models import AssetManagementRequest
+from src.asset_management.service import AssetManagementService, _review_model
+from src.asset_management.storage import AssetManagementStore
 
 
 def _history(codes: list[str], start: str, end: str):
@@ -47,7 +44,7 @@ def _deepseek_decision() -> dict:
     }
 
 
-def test_deepseek_weights_are_used_without_local_position_caps(tmp_path):
+def test_injected_allocator_weights_are_preserved_without_position_caps(tmp_path):
     store = AssetManagementStore(tmp_path / "latest.json")
     service = AssetManagementService(
         store,
@@ -65,6 +62,18 @@ def test_deepseek_weights_are_used_without_local_position_caps(tmp_path):
     assert plan.summary == "DeepSeek直接生成组合仓位。"
     assert "关注科技资产集中度。" in plan.warnings
     assert store.get_latest() == plan
+
+
+def test_default_calculation_uses_deterministic_optimizer(tmp_path):
+    plan = AssetManagementService(
+        AssetManagementStore(tmp_path / "latest.json"),
+        history_loader=_history,
+    ).calculate(_request())
+
+    assert plan.provider == "deterministic"
+    assert plan.model == "mean-variance-v1"
+    assert abs(sum(item.weight for item in plan.allocations) - 1.0) < 1e-6
+    assert "确定性" in plan.summary
 
 
 def test_candidates_without_history_remain_visible_at_zero_weight(tmp_path):
@@ -109,42 +118,6 @@ def test_missing_history_uses_proxy_metrics_when_deepseek_allocates_it(tmp_path)
     assert any("类型代理估计" in warning for warning in plan.warnings)
 
 
-def test_routes_return_latest_successful_plan(tmp_path):
-    service = AssetManagementService(
-        AssetManagementStore(tmp_path / "latest.json"),
-        history_loader=_history,
-        allocator=lambda payload: _deepseek_decision(),
-    )
-    app = FastAPI()
-    register_asset_management_routes(app, require_auth=lambda: None, service=service)
-    client = TestClient(app)
-
-    assert client.get("/asset-management/latest").json() is None
-    response = client.post("/asset-management/calculate", json=_request().model_dump(mode="json"))
-    assert response.status_code == 200
-    latest = client.get("/asset-management/latest")
-    assert latest.status_code == 200
-    assert latest.json()["plan_id"] == response.json()["plan_id"]
-
-
-def test_route_requires_deepseek_allocator(tmp_path):
-    service = AssetManagementService(
-        AssetManagementStore(tmp_path / "latest.json"),
-        history_loader=_history,
-        allocator=None,
-    )
-    app = FastAPI()
-    register_asset_management_routes(app, require_auth=lambda: None, service=service)
-
-    response = TestClient(app).post(
-        "/asset-management/calculate",
-        json=_request().model_dump(mode="json"),
-    )
-
-    assert response.status_code == 503
-    assert "DeepSeek" in response.json()["detail"]
-
-
 def test_duplicate_candidates_are_rejected():
     try:
         AssetManagementRequest.model_validate({
@@ -161,8 +134,8 @@ def test_duplicate_candidates_are_rejected():
         raise AssertionError("duplicate candidates should fail validation")
 
 
-def test_asset_review_always_uses_official_deepseek():
-    assert _review_model() == ("deepseek", "deepseek-v4-pro")
+def test_asset_plan_uses_deterministic_optimizer_identity():
+    assert _review_model() == ("deterministic", "mean-variance-v1")
 
 
 def test_official_deepseek_builder_never_falls_back_to_openai_key(monkeypatch, tmp_path):

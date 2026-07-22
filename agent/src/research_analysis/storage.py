@@ -239,6 +239,22 @@ class ResearchAnalysisStore:
                 failed.append(run_id)
         return failed
 
+    def requeue_incomplete_runs(self, message: str) -> list[str]:
+        """Move interrupted queued/running work back to a resumable queue."""
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT run_id FROM runs WHERE status IN (?, ?)",
+                (ResearchAnalysisStatus.queued.value, ResearchAnalysisStatus.running.value),
+            ).fetchall()
+        requeued: list[str] = []
+        for row in rows:
+            run_id = row["run_id"]
+            run = self.get_run(run_id)
+            if run and run.status in {ResearchAnalysisStatus.queued, ResearchAnalysisStatus.running}:
+                self.update_status(run_id, ResearchAnalysisStatus.queued, message, error=None)
+                requeued.append(run_id)
+        return requeued
+
     def complete_run(
         self,
         run_id: str,
