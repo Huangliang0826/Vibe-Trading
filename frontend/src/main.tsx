@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import { Toaster } from "sonner";
+import "@fontsource-variable/geist/wght.css";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { router } from "./router";
 import "highlight.js/styles/github-dark-dimmed.min.css";

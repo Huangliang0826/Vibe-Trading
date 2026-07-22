@@ -23,6 +23,14 @@ const NAV = [
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 
+function BrandMark({ small = false }: { small?: boolean }) {
+  return (
+    <span className={cn("brand-mark-relief", small && "brand-mark-relief-sm")}>
+      <img src="/logo.png" alt="Alpha Mind logo" className="brand-mark-image" />
+    </span>
+  );
+}
+
 export function Layout() {
   const { pathname } = useLocation();
   const [searchParams] = useSearchParams();
@@ -108,15 +116,15 @@ export function Layout() {
       )}
       {/* Sidebar */}
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r bg-card transition-all duration-200 md:static md:z-auto md:translate-x-0",
+        "fixed inset-y-0 left-0 z-50 flex shrink-0 flex-col border-r border-border/80 bg-card/95 shadow-[10px_0_35px_rgba(32,57,58,0.035)] backdrop-blur-xl transition-all duration-200 md:static md:z-auto md:translate-x-0 dark:shadow-none",
         mobileOpen ? "translate-x-0" : "-translate-x-full",
-        compactSidebar ? "w-12" : "w-64"
+        compactSidebar ? "w-14" : "w-[248px]"
       )}>
         {/* Brand */}
-        <div className={cn("border-b", compactSidebar ? "p-2 flex justify-center" : "flex items-center gap-2 p-4")}>
-          <Link to="/overview" onClick={() => setMobileOpen(false)} className={cn("flex min-w-0 flex-1 items-center font-bold text-base tracking-tight", compactSidebar ? "justify-center" : "gap-2")}>
-            <img src="/logo.png" alt="Alpha Mind logo" className="h-8 w-8 shrink-0" />
-            {!compactSidebar && <span className="truncate brand-wordmark">Alpha Mind</span>}
+        <div className={cn(compactSidebar ? "flex justify-center px-2 py-5" : "flex items-center gap-2 px-5 pb-5 pt-7")}>
+          <Link to="/overview" onClick={() => setMobileOpen(false)} className={cn("flex min-w-0 flex-1 items-center text-base tracking-tight", compactSidebar ? "justify-center" : "gap-3")}>
+            <BrandMark small={compactSidebar} />
+            {!compactSidebar && <span className="truncate brand-wordmark text-[20px]">Alpha Mind</span>}
           </Link>
           {!compactSidebar && (
             <button type="button" aria-label="关闭导航" className="p-1 text-muted-foreground md:hidden" onClick={() => setMobileOpen(false)}>
@@ -126,7 +134,7 @@ export function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className={cn("space-y-0.5", compactSidebar ? "p-1" : "p-2")}>
+        <nav className={cn("space-y-1.5", compactSidebar ? "px-1.5" : "px-4 pb-4 pt-1")}>
           {NAV.filter((item) => !("hidden" in item && item.hidden)).map(({ to, icon: Icon, label }) => {
             const text = label;
             return (
@@ -135,15 +143,15 @@ export function Layout() {
                 to={to}
                 onClick={() => setMobileOpen(false)}
                 className={cn(
-                  "flex items-center rounded-md text-sm transition-colors",
-                  compactSidebar ? "justify-center p-2" : "gap-3 px-3 py-2",
+                  "flex h-11 items-center rounded-xl text-sm font-medium transition-[color,background-color,box-shadow]",
+                  compactSidebar ? "justify-center px-2" : "gap-3 px-4",
                   (to === "/" ? pathname === "/" : pathname.startsWith(to))
-                    ? "bg-primary/10 text-primary font-medium"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    ? "bg-accent/10 text-accent shadow-[inset_0_0_0_1px_hsl(var(--accent)/0.04)] dark:bg-primary/15 dark:text-primary"
+                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                 )}
                 title={compactSidebar ? text : undefined}
               >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} aria-hidden="true" />
                 {!compactSidebar && text}
               </Link>
             );
@@ -152,8 +160,8 @@ export function Layout() {
 
         {/* Sessions — hidden when collapsed */}
         {!compactSidebar && (
-          <div className={cn("border-t mt-2 flex flex-col", sessionsCollapsed ? "shrink-0" : "flex-1 overflow-auto")}>
-            <div className="flex items-center justify-between px-4 py-2">
+          <div className={cn("mx-4 mt-2 flex flex-col border-t border-border/70", sessionsCollapsed ? "shrink-0" : "flex-1 overflow-auto")}>
+            <div className="flex items-center justify-between px-1 py-3">
               <button
                 onClick={() => setSessionsCollapsed((v) => !v)}
                 className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
@@ -171,7 +179,7 @@ export function Layout() {
               </Link>
             </div>
 
-            {!sessionsCollapsed && <div className="px-2 pb-2 space-y-0.5 overflow-auto flex-1">
+            {!sessionsCollapsed && <div className="space-y-1 overflow-auto pb-2 flex-1">
               {sessionsLoading ? (
                 <div className="space-y-1.5 px-2 py-1">
                   {[1, 2, 3].map((i) => (
@@ -254,7 +262,7 @@ export function Layout() {
         {compactSidebar && <div className="flex-1" />}
 
         {/* Footer */}
-        <div className={cn("border-t", compactSidebar ? "p-1 flex flex-col items-center gap-1" : "p-3 space-y-2")}>
+        <div className={cn("border-t border-border/70", compactSidebar ? "mx-1.5 p-1.5 flex flex-col items-center gap-1" : "mx-4 px-1 py-4 space-y-2")}>
           {compactSidebar ? (
             <>
               <button onClick={toggle} className="p-1.5 text-muted-foreground hover:text-foreground rounded transition-colors" title={dark ? "亮色" : "暗色"}>
@@ -292,13 +300,13 @@ export function Layout() {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-3 md:hidden">
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-card/90 px-4 backdrop-blur-xl md:hidden">
           <button type="button" aria-label="打开导航" className="p-1.5 text-muted-foreground" onClick={() => setMobileOpen(true)}>
             <Menu className="h-5 w-5" />
           </button>
           <Link to="/overview" className="flex min-w-0 items-center gap-2 font-semibold">
-            <img src="/logo.png" alt="Alpha Mind logo" className="h-7 w-7 shrink-0" />
-            <span className="truncate brand-wordmark">Alpha Mind</span>
+            <BrandMark small />
+            <span className="truncate brand-wordmark text-lg">Alpha Mind</span>
           </Link>
         </div>
         <ConnectionBanner
@@ -314,7 +322,7 @@ export function Layout() {
             </div>
             <footer className="mt-10 flex flex-col items-center gap-1.5 pb-6">
               <div className="flex items-center gap-2.5">
-                <img src="/logo.png" alt="Alpha Mind logo" className="h-8 w-8" />
+                <BrandMark small />
                 <span className="brand-wordmark text-sm">Alpha Mind</span>
               </div>
               <p className="text-[11px] text-muted-foreground/70">

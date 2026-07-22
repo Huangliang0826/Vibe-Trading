@@ -76,28 +76,30 @@ function IndexCard({ idx, flash }: { idx: MarketIndex; flash: boolean }) {
   const color = changeColor(idx.change_pct);
   return (
     <div className={cn(
-      "rounded-2xl border bg-card p-4 flex flex-col gap-1 shadow-sm transition-colors duration-700",
+      "soft-card-interactive flex min-h-32 flex-col justify-between rounded-[20px] p-5 transition-colors duration-700",
       flash && "bg-primary/5 border-primary/20"
     )}>
-      <div className="flex h-3.5 items-center justify-end">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium leading-tight text-foreground">{idx.name}</p>
         {idx.change_pct > 0
-          ? <TrendingUp className={cn("h-3.5 w-3.5", color)} />
+          ? <TrendingUp className={cn("h-4 w-4 shrink-0", color)} strokeWidth={1.8} />
           : idx.change_pct < 0
-          ? <TrendingDown className={cn("h-3.5 w-3.5", color)} />
+          ? <TrendingDown className={cn("h-4 w-4 shrink-0", color)} strokeWidth={1.8} />
           : null}
       </div>
-      <p className="text-sm font-normal text-foreground leading-tight">{idx.name}</p>
-      <p className={cn("text-2xl font-bold tabular-nums tracking-tight", color)}>
-        {fmtIndexPoints(idx.price)}
-      </p>
-      <p className={cn("text-sm font-medium tabular-nums", color)}>{fmtPct(idx.change_pct)}</p>
+      <div className="mt-5">
+        <p className={cn("text-[28px] font-semibold tabular-nums leading-none tracking-[-0.035em]", color)}>
+          {fmtIndexPoints(idx.price)}
+        </p>
+        <p className={cn("mt-2 text-sm font-medium tabular-nums", color)}>{fmtPct(idx.change_pct)}</p>
+      </div>
     </div>
   );
 }
 
 function SkeletonCard() {
   return (
-    <div className="rounded-2xl border bg-card p-4 flex flex-col gap-2 animate-pulse">
+    <div className="soft-card flex min-h-32 animate-pulse flex-col gap-2 rounded-[20px] p-5">
       <div className="h-3 w-10 bg-muted rounded" />
       <div className="h-4 w-20 bg-muted rounded" />
       <div className="h-7 w-28 bg-muted rounded" />
@@ -150,7 +152,7 @@ function WatchlistRow({
   const hasData = quote.price > 0;
 
   return (
-    <div className="group flex items-center justify-between px-3 py-2.5 rounded-xl border bg-card hover:bg-muted/30 transition-colors">
+    <div className="soft-card-interactive group flex items-center justify-between rounded-2xl px-3.5 py-3">
       <button
         className="flex flex-col min-w-0 text-left cursor-pointer hover:opacity-70 transition-opacity"
         onClick={() => scrollToChart(market, quote.code)}
@@ -310,7 +312,7 @@ function WatchlistColumn({
         <h2 className="text-sm font-semibold text-foreground">{label}</h2>
         <button
           onClick={() => { setAdding(true); setAddError(null); }}
-          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+          className="inline-flex items-center gap-1 rounded-xl border bg-card/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/25 hover:text-primary"
         >
           <Plus className="h-3.5 w-3.5" />
           添加
@@ -327,7 +329,7 @@ function WatchlistColumn({
               onChange={(e) => { setInputVal(e.target.value); setAddError(null); }}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              className="flex-1 px-3 py-2 rounded-xl border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="flex-1 rounded-xl border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
             <button
               onClick={handleAdd}
@@ -351,7 +353,7 @@ function WatchlistColumn({
 
       {/* Stock list */}
       {codes.length === 0 ? (
-        <div className="rounded-2xl border border-dashed bg-card/50 py-10 flex flex-col items-center gap-2 text-center">
+        <div className="flex flex-col items-center gap-2 rounded-[20px] border border-dashed bg-card/60 py-10 text-center">
           <Plus className="h-6 w-6 text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">点击「添加」加入自选</p>
         </div>
@@ -361,7 +363,7 @@ function WatchlistColumn({
             const quote = quotes.get(code.toUpperCase());
             if (!quote) {
               return (
-                <div key={code} className="flex items-center justify-between px-3 py-2.5 rounded-xl border bg-card animate-pulse">
+                <div key={code} className="soft-card flex animate-pulse items-center justify-between rounded-2xl px-3.5 py-3">
                   <div className="h-4 w-24 bg-muted rounded" />
                   <div className="h-4 w-16 bg-muted rounded" />
                 </div>
@@ -501,7 +503,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   }, [code, market, view, valPeriod]);
 
   return (
-    <div id={id} className="rounded-2xl border bg-card p-4">
+    <div id={id} className="soft-card rounded-[22px] p-5">
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <span className="text-sm font-semibold text-foreground">
           {name && name !== code ? name : ""}
@@ -617,14 +619,20 @@ export function Overview() {
   const us_indices = indices.filter((i) => i.market === "美股");
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="mx-auto max-w-6xl space-y-10 px-4 py-7 sm:px-6 sm:py-9 lg:px-10 lg:py-12">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <LayoutDashboard className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-bold">总览</h1>
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex items-start gap-4">
+          <div className="mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10">
+            <LayoutDashboard className="h-5 w-5" strokeWidth={1.8} />
+          </div>
+          <div>
+            <p className="page-kicker">Market overview</p>
+            <h1 className="mt-1.5 text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[32px]">市场总览</h1>
+            <p className="mt-2 text-sm text-muted-foreground">全球主要市场与自选资产概览</p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 self-end sm:self-auto">
           {lastUpdated && (
             <span className="text-xs text-muted-foreground">
               更新于 {lastUpdated.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -633,7 +641,7 @@ export function Overview() {
           <button
             onClick={() => loadIndices(true)}
             disabled={refreshing}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl border bg-card/75 px-3 py-2 text-xs font-medium text-muted-foreground shadow-[0_6px_20px_rgba(32,57,58,0.04)] transition hover:border-primary/25 hover:text-primary disabled:opacity-50"
           >
             <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
             刷新
@@ -648,14 +656,14 @@ export function Overview() {
       )}
 
       {/* Index cards — A-share */}
-      <section className="space-y-2">
+      <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">A 股指数</h2>
+          <h2 className="overview-section-title">A 股指数</h2>
           {!loading && (() => { const s = getMarketStatus("A股"); return (
             <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", s.open ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{s.label}</span>
           ); })()}
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {loading
             ? [0,1,2].map((i) => <SkeletonCard key={i} />)
             : cn_indices.map((idx) => <IndexCard key={idx.code} idx={idx} flash={flash} />)}
@@ -663,14 +671,14 @@ export function Overview() {
       </section>
 
       {/* Index cards — HK */}
-      <section className="space-y-2">
+      <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">港股指数</h2>
+          <h2 className="overview-section-title">港股指数</h2>
           {!loading && (() => { const s = getMarketStatus("港股"); return (
             <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", s.open ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{s.label}</span>
           ); })()}
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {loading
             ? [0,1,2].map((i) => <SkeletonCard key={i} />)
             : hk_indices.map((idx) => <IndexCard key={idx.code} idx={idx} flash={flash} />)}
@@ -678,14 +686,14 @@ export function Overview() {
       </section>
 
       {/* Index cards — US */}
-      <section className="space-y-2">
+      <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">美股指数</h2>
+          <h2 className="overview-section-title">美股指数</h2>
           {!loading && (() => { const s = getMarketStatus("美股"); return (
             <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", s.open ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{s.label}</span>
           ); })()}
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {loading
             ? [0,1,2].map((i) => <SkeletonCard key={i} />)
             : us_indices.map((idx) => <IndexCard key={idx.code} idx={idx} flash={flash} />)}
@@ -693,9 +701,9 @@ export function Overview() {
       </section>
 
       {/* Watchlists */}
-      <section className="space-y-2">
-        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">自选</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <section className="space-y-3">
+        <h2 className="overview-section-title">自选</h2>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           <WatchlistColumn
             market="cn"
             label="A股自选"
@@ -718,8 +726,8 @@ export function Overview() {
       </section>
 
       {/* Price history charts — one per watchlist stock */}
-      <section className="space-y-2">
-        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">价格走势</h2>
+      <section className="space-y-3">
+        <h2 className="overview-section-title">价格走势</h2>
         {cnCodes.length + hkCodes.length + usCodes.length > 0 ? (
           <div className="grid grid-cols-1 gap-4">
             {cnCodes.map((code) => (
@@ -733,7 +741,7 @@ export function Overview() {
             ))}
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed bg-card/50 py-8 flex items-center justify-center">
+          <div className="flex items-center justify-center rounded-[20px] border border-dashed bg-card/60 py-9">
             <p className="text-sm text-muted-foreground">添加自选股后，此处显示每只股票的走势图</p>
           </div>
         )}

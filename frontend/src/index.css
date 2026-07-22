@@ -4,22 +4,24 @@
 
 @layer base {
   :root {
-    /* Light mode surfaces — mist-jade tint drawn from the brand palette */
-    --background: 190 20% 95%;
-    --foreground: 220 20% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 220 20% 10%;
+    /* Warm paper surfaces inspired by Praatpad, tuned for dense market data. */
+    --background: 43 44% 95%;
+    --foreground: 195 41% 16%;
+    --card: 40 100% 99%;
+    --card-foreground: 195 41% 16%;
 
-    /* Brand accent — deep teal drawn from the dotted-A logo */
-    --primary: 190 60% 37%;
+    /* Deep teal stays the product color; a lighter jade carries navigation and labels. */
+    --primary: 178 45% 27%;
     --primary-foreground: 0 0% 100%;
+    --accent: 168 46% 33%;
+    --accent-foreground: 0 0% 100%;
 
-    --muted: 220 14% 92%;
-    --muted-foreground: 220 14% 46%;
+    --muted: 45 19% 91%;
+    --muted-foreground: 187 9% 45%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 14% 87%;
-    --radius: 0.5rem;
+    --border: 120 9% 88%;
+    --radius: 0.875rem;
 
     /* Semantic colors */
     --success: 142 71% 45%;
@@ -28,9 +30,9 @@
     --info: 217 91% 60%;
 
     /* Chart tokens */
-    --chart-grid: 220 14% 90%;
-    --chart-text: 220 14% 46%;
-    --chart-axis: 220 14% 80%;
+    --chart-grid: 120 9% 90%;
+    --chart-text: 187 9% 45%;
+    --chart-axis: 120 9% 82%;
     --chart-compare-a: #3b82f6;
     --chart-compare-b: #f59e0b;
   }
@@ -45,6 +47,8 @@
     /* Brighter teal for dark surfaces; dark text keeps buttons readable */
     --primary: 184 55% 52%;
     --primary-foreground: 220 25% 10%;
+    --accent: 164 45% 62%;
+    --accent-foreground: 0 0% 100%;
 
     --muted: 220 20% 13%;           /* surface-2 */
     --muted-foreground: 220 10% 55%;
@@ -67,20 +71,15 @@
   }
 
   * { @apply border-border; }
-  /* Regular default weight; only the 400 face of Noto Sans SC is loaded
-     (see the synthesis rule below), so all Chinese renders at 400. */
-  body { @apply bg-background text-foreground font-normal; }
+  body { @apply bg-background text-foreground font-normal antialiased; }
 
-  /* Jade-mist canvas: a barely-there gradient that stays put while
-     content scrolls. Cards keep flat light surfaces on top of it. */
+  /* A quiet paper canvas keeps the dashboard fresh without reducing contrast. */
   body {
-    background-image: linear-gradient(
-      135deg,
-      hsl(184 28% 92%) 0%,
-      hsl(192 18% 94%) 45%,
-      hsl(208 12% 95%) 100%
-    );
+    background-image:
+      radial-gradient(circle at 78% 5%, hsl(164 28% 91% / 0.72), transparent 30rem),
+      linear-gradient(135deg, hsl(43 44% 96%) 0%, hsl(40 36% 95%) 58%, hsl(160 18% 94%) 100%);
     background-attachment: fixed;
+    font-feature-settings: "kern" 1, "ss01" 1, "cv01" 1;
   }
   .dark body {
     background-image: linear-gradient(
@@ -90,28 +89,57 @@
       hsl(220 20% 5%) 100%
     );
   }
-  /* Only the 400 face of Noto Sans SC is loaded, and synthetic bolding is
-     disabled — so every CJK glyph renders regular no matter what font-weight
-     a component requests. Latin/digits (Inter) keep their real bold faces. */
+  /* Use only real font weights; Geist and Noto Sans SC provide the needed faces. */
   html { font-synthesis-weight: none; }
 
-  /* Thin editorial headings — overrides per-component font-bold utilities
-     so titles match the light geometric brand style; data values in
-     p/span/td keep their heavy weights for scanability. */
+  /* Editorial hierarchy: tighter display headings, neutral UI labels. */
   h1, h2, h3, h4 {
-    font-weight: 400 !important;
-    letter-spacing: 0.02em;
+    color: hsl(var(--foreground));
+    letter-spacing: -0.02em;
+    text-wrap: balance;
   }
 
-  /* Brand wordmark — light geometric sans (Futura-like) in deep logo teal */
+  h1 { font-weight: 560; }
+  h2, h3, h4 { font-weight: 520; }
+
+  /* Praatpad-like wordmark: Geist, confident weight, natural casing. */
   .brand-wordmark {
-    font-family: "Jost", "Futura", "Century Gothic", sans-serif;
-    font-weight: 400;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: hsl(185 100% 19%);
+    font-family: "Geist Variable", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+    text-transform: none;
+    color: hsl(var(--foreground));
   }
-  .dark .brand-wordmark { color: hsl(184 55% 52%); }
+  .dark .brand-wordmark { color: hsl(var(--foreground)); }
+
+  /* Keep the original transparent A artwork and add only a soft floating shadow. */
+  .brand-mark-relief {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    place-items: center;
+  }
+
+  .brand-mark-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter:
+      drop-shadow(0 15px 13px hsl(var(--primary) / 0.3))
+      drop-shadow(0 6px 5px hsl(195 41% 16% / 0.24));
+  }
+
+  .brand-mark-relief-sm {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.22);
+    color: hsl(var(--foreground));
+  }
 
   /* Prose table enhancements */
   .prose table { border-collapse: collapse; width: 100%; }
@@ -123,6 +151,121 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+}
+
+@layer components {
+  .page-kicker {
+    @apply text-[10px] font-semibold uppercase tracking-[0.18em] text-accent;
+  }
+
+  .soft-card {
+    @apply border bg-card;
+    box-shadow: 0 12px 34px rgba(32, 57, 58, 0.055);
+  }
+
+  .soft-card-interactive {
+    @apply border bg-card transition-[border-color,box-shadow,background-color] duration-200;
+    box-shadow: 0 12px 34px rgba(32, 57, 58, 0.055);
+  }
+
+  .soft-card-interactive:hover {
+    border-color: hsl(var(--primary) / 0.22);
+    box-shadow: 0 16px 42px rgba(32, 57, 58, 0.09);
+  }
+
+  .overview-section-title {
+    @apply flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground;
+  }
+
+  .overview-section-title::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: hsl(var(--accent));
+    box-shadow: 0 0 0 4px hsl(var(--accent) / 0.09);
+  }
+
+  .app-page {
+    @apply mx-auto w-full space-y-8 px-4 py-7 sm:px-6 sm:py-9 lg:px-10 lg:py-12;
+    max-width: 72rem;
+  }
+
+  .app-page-compact { max-width: 64rem; }
+  .app-page-wide { max-width: 80rem; }
+
+  .app-page-header {
+    @apply flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between;
+  }
+
+  .app-page-heading {
+    @apply flex items-start gap-4;
+  }
+
+  .app-page-icon {
+    @apply mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10;
+  }
+
+  .app-page-title {
+    @apply mt-1.5 text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[32px];
+  }
+
+  .app-page-description {
+    @apply mt-2 max-w-2xl text-sm leading-6 text-muted-foreground;
+  }
+
+  .app-panel {
+    @apply rounded-[22px] border bg-card p-5;
+    box-shadow: 0 12px 34px rgba(32, 57, 58, 0.055);
+  }
+
+  .app-panel-compact {
+    @apply rounded-[18px] border bg-card p-4;
+    box-shadow: 0 10px 28px rgba(32, 57, 58, 0.045);
+  }
+
+  .app-panel-title {
+    @apply text-[15px] font-semibold tracking-[-0.01em] text-foreground;
+  }
+
+  .app-segmented {
+    @apply inline-flex rounded-2xl border bg-card/75 p-1;
+    box-shadow: 0 8px 24px rgba(32, 57, 58, 0.045);
+  }
+
+  .app-segmented-item {
+    @apply inline-flex h-9 items-center justify-center rounded-xl px-4 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground;
+  }
+
+  .app-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border bg-card/75 px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/25 hover:text-primary disabled:opacity-50;
+  }
+
+  .app-button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50;
+  }
+
+  .app-field {
+    @apply rounded-xl border bg-card px-3 py-2 text-sm text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/60 focus:border-primary/40 focus:ring-2 focus:ring-primary/10;
+  }
+
+  .app-table-shell {
+    @apply overflow-x-auto rounded-2xl border bg-card;
+    box-shadow: 0 8px 26px rgba(32, 57, 58, 0.035);
+  }
+
+  .app-empty-state {
+    @apply flex flex-col items-center justify-center gap-2 rounded-[22px] border border-dashed bg-card/60 px-5 py-12 text-center text-muted-foreground;
+  }
+
+  .agent-workspace {
+    background-image: radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.055), transparent 28rem);
+  }
+
+  .agent-composer {
+    @apply border-t border-border/70 bg-card/90 px-4 py-4 backdrop-blur-xl;
+    box-shadow: 0 -14px 38px rgba(32, 57, 58, 0.045);
+  }
 }
 
 /* Streaming pulse-slide animation for the "running" bar */

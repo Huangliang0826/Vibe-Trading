@@ -15,7 +15,7 @@ function Stat({ label, value, hint, tone }: { label: string; value: string; hint
     : tone === "bad" ? "text-red-500 dark:text-red-400"
     : "text-foreground";
   return (
-    <div className="rounded-xl border bg-card px-3 py-2.5">
+    <div className="app-panel-compact px-3.5 py-3">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className={cn("text-lg font-bold tabular-nums leading-tight", color)}>{value}</p>
       {hint && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</p>}
@@ -339,7 +339,7 @@ function WatchlistQuickAdd({
     <div className="space-y-2">
       <h2 className="text-sm font-semibold">{title}</h2>
       {quotes.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-card/50 px-3 py-5 text-center text-sm text-muted-foreground">
+        <div className="rounded-2xl border border-dashed bg-card/60 px-3 py-6 text-center text-sm text-muted-foreground">
           暂无自选
         </div>
       ) : (
@@ -348,7 +348,7 @@ function WatchlistQuickAdd({
             const added = holdings.some((h) => h.market === market && h.symbol.toUpperCase() === quote.code.toUpperCase());
             const color = changeColor(quote.change_pct);
             return (
-              <div key={`${market}-${quote.code}`} className="flex items-center justify-between gap-3 rounded-xl border bg-card px-3 py-2.5">
+              <div key={`${market}-${quote.code}`} className="soft-card-interactive flex items-center justify-between gap-3 rounded-2xl px-3.5 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{quote.name !== quote.code ? quote.name : quote.code}</p>
                   <p className="font-mono text-[11px] text-muted-foreground">{quote.code}</p>
@@ -365,7 +365,7 @@ function WatchlistQuickAdd({
                       "rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors",
                       added || quote.price <= 0
                         ? "cursor-not-allowed bg-muted text-muted-foreground"
-                        : "bg-background hover:bg-accent",
+                        : "bg-card hover:bg-muted",
                     )}
                   >
                     {added ? "已加入" : "加入"}
@@ -822,24 +822,30 @@ export function PaperTrading() {
   const optimalSummary = buildOptimalSummary(optimalRuns, optimalBestRunId);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+    <div className="app-page">
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <Briefcase className="h-5 w-5 text-muted-foreground" />
-        <h1 className="text-xl font-bold">模拟盘</h1>
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <div className="app-page-icon"><Briefcase className="h-5 w-5" strokeWidth={1.8} /></div>
+          <div>
+            <p className="page-kicker">Paper trading</p>
+            <h1 className="app-page-title">模拟盘</h1>
+            <p className="app-page-description">配置组合与策略，在真实历史区间中验证收益、回撤与稳健性。</p>
+          </div>
+        </div>
       </div>
 
-      <div className="flex gap-2">
-        <button type="button" onClick={() => setTab("history")} className={cn("rounded-lg border px-3 py-2 text-sm", tab === "history" && "border-primary bg-primary/10 text-primary")}>历史回测</button>
-        <button type="button" onClick={() => setTab("assets")} className={cn("rounded-lg border px-3 py-2 text-sm", tab === "assets" && "border-primary bg-primary/10 text-primary")}>资产管理</button>
+      <div className="app-segmented">
+        <button type="button" onClick={() => setTab("history")} className={cn("app-segmented-item", tab === "history" && "bg-primary text-primary-foreground shadow-sm")}>历史回测</button>
+        <button type="button" onClick={() => setTab("assets")} className={cn("app-segmented-item", tab === "assets" && "bg-primary text-primary-foreground shadow-sm")}>资产管理</button>
       </div>
 
       {tab === "assets" && <AssetManagementTab />}
       {tab === "history" && <>
 
-      <div className="space-y-4 rounded-xl border bg-card p-4">
+      <div className="app-panel space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">自选快捷添加</h2>
+          <h2 className="app-panel-title">自选快捷添加</h2>
           {quickLoading && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -873,15 +879,15 @@ export function PaperTrading() {
       </div>
 
       {/* ── Configuration Section ── */}
-      <div className="space-y-4 rounded-xl border bg-card p-4">
-        <h2 className="text-sm font-semibold">投资组合</h2>
+      <div className="app-panel space-y-4">
+        <h2 className="app-panel-title">投资组合</h2>
 
         {/* Add holding */}
         <div className="flex items-center gap-2">
           <select
             value={newMarket}
             onChange={(e) => setNewMarket(e.target.value as "us" | "hk" | "cn")}
-            className="rounded-lg border bg-background px-2 py-1.5 text-sm"
+            className="app-field px-2 py-1.5"
           >
             <option value="us">美股</option>
             <option value="hk">港股</option>
@@ -894,11 +900,11 @@ export function PaperTrading() {
               if (e.key === "Enter") void addHolding();
             }}
             placeholder={newMarket === "us" ? "输入代码 如 AAPL" : newMarket === "cn" ? "输入代码 如 600519" : "输入代码 如 0700"}
-            className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-sm"
+            className="app-field flex-1 py-1.5"
           />
           <button
             onClick={() => void addHolding()}
-            className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="app-button-primary py-1.5"
           >
             <Plus className="h-3.5 w-3.5" /> 添加
           </button>
@@ -913,7 +919,7 @@ export function PaperTrading() {
               setHoldings(updated);
             }}
             disabled={holdings.some((h) => h.symbol === "CASH")}
-            className="flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm font-medium hover:bg-accent disabled:opacity-40"
+            className="app-button-secondary py-1.5 disabled:opacity-40"
           >
             💵 现金
           </button>
@@ -921,7 +927,7 @@ export function PaperTrading() {
 
         {/* Holdings table */}
         {holdings.length > 0 && (
-          <div className="rounded-lg border">
+          <div className="app-table-shell">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
@@ -968,17 +974,17 @@ export function PaperTrading() {
 
         {/* Strategy selector */}
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold">策略</h2>
+          <h2 className="app-panel-title">策略</h2>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {STRATEGY_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setStrategy(opt.value)}
                 className={cn(
-                  "rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+                  "rounded-2xl border bg-card px-3.5 py-3 text-left text-sm transition-colors",
                   strategy === opt.value
                     ? "border-primary bg-primary/10 text-primary"
-                    : "hover:border-primary/50",
+                    : "hover:border-primary/35 hover:bg-muted/30",
                 )}
               >
                 <p className="font-medium">{opt.label}</p>
@@ -1061,7 +1067,7 @@ export function PaperTrading() {
                 "flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
                 submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
-                  : "bg-background hover:bg-accent",
+                  : "bg-card hover:bg-muted",
               )}
             >
               {optimizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -1075,7 +1081,7 @@ export function PaperTrading() {
                 "flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
                 submitting || optimizing || robustLoading || robustAutoRunning || holdings.length === 0 || !allocValid
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
-                  : "bg-background hover:bg-accent",
+                  : "bg-card hover:bg-muted",
               )}
             >
               {robustLoading || robustAutoRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -1103,10 +1109,10 @@ export function PaperTrading() {
       </div>
 
       {optimalRuns.length > 0 && (
-        <div className="rounded-xl border bg-card p-4">
+        <div className="app-panel">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold">最优策略对比</h2>
+              <h2 className="app-panel-title">最优策略对比</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 排序规则：平衡得分优先（总收益 − 2×最大亏损），打平再看总收益、最大亏损
               </p>
@@ -1120,7 +1126,7 @@ export function PaperTrading() {
               </p>
             </div>
           )}
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="app-table-shell">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b text-muted-foreground">
@@ -1179,9 +1185,9 @@ export function PaperTrading() {
       )}
 
       {robustResult && (
-        <div className="rounded-xl border bg-card p-4">
+        <div className="app-panel">
           <div className="mb-2">
-            <h2 className="text-sm font-semibold">多时间段稳健性测试</h2>
+            <h2 className="app-panel-title">多时间段稳健性测试</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
               在 {robustResult.windows.filter((w) => !w.is_full).length} 个 {robustResult.window_years} 年窗口（每 {robustResult.step_years} 年滚动）+ 全历史上，等权综合
               <span className="font-medium text-foreground">年化收益、最大回撤、相对买入持有的年化超额</span>，取平均综合分最高者。共同数据区间 {robustResult.data_start} ~ {robustResult.data_end}
@@ -1255,7 +1261,7 @@ export function PaperTrading() {
               )}
             </div>
           )}
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="app-table-shell">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
@@ -1343,7 +1349,7 @@ export function PaperTrading() {
         <div className="space-y-4">
           {/* Status */}
           {(activeRun.status === "queued" || activeRun.status === "running") && (
-            <div className="flex items-center gap-2 rounded-xl border bg-card px-4 py-6 justify-center text-muted-foreground">
+            <div className="app-panel-compact flex items-center justify-center gap-2 px-4 py-6 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span className="text-sm">回测运行中…</span>
             </div>
@@ -1418,7 +1424,7 @@ export function PaperTrading() {
 
               {/* Equity curve */}
               {activeRun.equity_curve && activeRun.equity_curve.length > 0 && (
-                <div className="rounded-xl border bg-card p-4">
+                <div className="app-panel-compact">
                   <h3 className="text-sm font-semibold mb-3">组合走势</h3>
                   <PaperEquityChart
                     data={activeRun.equity_curve}
@@ -1430,7 +1436,7 @@ export function PaperTrading() {
               )}
 
               {hasSingleHolding && singleHolding && (
-                <div className="rounded-xl border bg-card p-4">
+                <div className="app-panel-compact">
                   <div className="mb-3">
                     <h3 className="text-sm font-semibold">标的价格走势</h3>
                     <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1452,7 +1458,7 @@ export function PaperTrading() {
 
               {/* Per-symbol stats */}
               {m.by_symbol && typeof m.by_symbol === "object" && Object.keys(m.by_symbol as Record<string, unknown>).length > 0 && (
-                <div className="rounded-xl border bg-card p-4">
+                <div className="app-panel-compact">
                   <h3 className="text-sm font-semibold mb-2">分标的统计</h3>
                   <div className="rounded-lg border">
                     <table className="w-full text-sm">
@@ -1485,7 +1491,7 @@ export function PaperTrading() {
 
               {/* Trade log */}
               {activeRun.trades && activeRun.trades.length > 0 && (
-                <div className="rounded-xl border bg-card p-4">
+                <div className="app-panel-compact">
                   <h3 className="text-sm font-semibold mb-2">交易明细 ({activeRun.trades.length} 笔)</h3>
                   <div className="max-h-64 overflow-y-auto rounded-lg border">
                     <table className="w-full text-xs">
@@ -1532,7 +1538,7 @@ export function PaperTrading() {
 
       {/* ── History Section ── */}
       {runs.length > 0 && (
-        <div className="rounded-xl border bg-card p-4">
+        <div className="app-panel">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button
               onClick={() => setHistoryOpen(!historyOpen)}

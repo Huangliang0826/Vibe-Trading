@@ -174,29 +174,29 @@ interface Props {
 
 export function WelcomeScreen({ onExample }: Props) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8 text-center">
+    <div className="flex min-h-[62vh] flex-col items-center justify-center space-y-9 py-6 text-center">
       {/* Header */}
-      <div className="space-y-3">
-        <div className="h-16 w-16 mx-auto rounded-2xl bg-gradient-to-br from-primary/80 to-info/80 flex items-center justify-center shadow-lg">
-          <Bot className="h-8 w-8 text-white" />
+      <div className="space-y-4">
+        <div className="mx-auto flex h-16 w-16 -rotate-2 items-center justify-center rounded-[22px_22px_22px_8px] bg-primary text-primary-foreground shadow-[0_14px_32px_hsl(var(--primary)/0.2)]">
+          <Bot className="h-8 w-8" strokeWidth={1.8} />
         </div>
         <div>
-          <h2 className="text-2xl brand-wordmark">Alpha Mind</h2>
-          <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
-            您的专业金融智能体团队
-          </p>
-          <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed mx-auto">
-            描述一个交易策略即可开始。
+          <p className="page-kicker">AI research workspace</p>
+          <h2 className="mt-2 text-[32px] font-semibold tracking-[-0.04em] text-foreground">今天想研究什么？</h2>
+          <p className="brand-wordmark mt-2 text-xs">Alpha Mind</p>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+            <span className="block">描述一个交易策略即可开始。</span>
+            <span className="block">也可以提出研究问题或上传文档。</span>
           </p>
         </div>
       </div>
 
       {/* Capability chips */}
-      <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+      <div className="flex max-w-2xl flex-wrap justify-center gap-2">
         {CAPABILITY_CHIPS.map((chip) => (
           <span
             key={chip}
-            className="px-2.5 py-1 text-xs rounded-full border border-border/60 text-muted-foreground bg-muted/30"
+            className="rounded-full border border-border/70 bg-card/65 px-2.5 py-1 text-xs text-muted-foreground"
           >
             {chip}
           </span>
@@ -204,8 +204,8 @@ export function WelcomeScreen({ onExample }: Props) {
       </div>
 
       {/* Example categories grid */}
-      <div className="w-full max-w-2xl text-left space-y-4">
-        <p className="text-xs text-muted-foreground px-1">试试以下示例：</p>
+      <div className="w-full max-w-3xl space-y-4 text-left">
+        <p className="overview-section-title px-1">试试以下示例：</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {CATEGORIES.map((cat) => (
             <div key={cat.label} className="space-y-2">
@@ -218,7 +218,7 @@ export function WelcomeScreen({ onExample }: Props) {
                   <button
                     key={ex.title}
                     onClick={() => onExample(ex.prompt)}
-                    className={`block w-full text-left px-3 py-2.5 rounded-xl border transition-colors ${cat.color}`}
+                    className={`block w-full rounded-2xl border bg-card/70 px-3.5 py-3 text-left shadow-[0_8px_24px_rgba(32,57,58,0.035)] transition-[border-color,background-color,box-shadow] hover:shadow-[0_12px_30px_rgba(32,57,58,0.07)] ${cat.color}`}
                   >
                     <span className="text-sm font-medium text-foreground leading-snug">
                       {ex.title}

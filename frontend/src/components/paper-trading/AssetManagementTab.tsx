@@ -112,10 +112,10 @@ export function AssetManagementTab() {
 
   return (
     <div className="space-y-5">
-      <section className="space-y-4 rounded-xl border bg-card p-4">
+      <section className="app-panel space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold">候选资产</h2>
+            <h2 className="app-panel-title">候选资产</h2>
             <p className="text-xs text-muted-foreground">从自选或代码输入中加入标的，所有资产类型和比例均由你手动设置。</p>
           </div>
           {loadingQuotes && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
@@ -126,7 +126,7 @@ export function AssetManagementTab() {
             <div key={market} className="space-y-2">
               <p className="text-xs font-medium">{label}</p>
               {quotes[market].length === 0 ? (
-                <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">暂无自选</p>
+                <p className="rounded-2xl border border-dashed px-3 py-5 text-center text-xs text-muted-foreground">暂无自选</p>
               ) : quotes[market].map((quote) => {
                 const added = selectedKeys.has(`${market}:${quote.code.toUpperCase()}`);
                 return (
@@ -135,7 +135,7 @@ export function AssetManagementTab() {
                     key={`${market}:${quote.code}`}
                     onClick={() => addQuote(quote, market)}
                     disabled={added}
-                    className="flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs hover:bg-muted/40 disabled:opacity-50"
+                    className="soft-card-interactive flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-left text-xs disabled:opacity-50"
                   >
                     <span className="min-w-0"><span className="block truncate font-medium">{quote.name || quote.code}</span><span className="font-mono text-muted-foreground">{quote.code}</span></span>
                     <span>{added ? "已加入" : "+ 加入"}</span>
@@ -148,28 +148,28 @@ export function AssetManagementTab() {
 
         <div className="flex flex-wrap items-end gap-2 border-t pt-4">
           <label className="text-xs text-muted-foreground">市场
-            <select value={manualMarket} onChange={(event) => setManualMarket(event.target.value as WatchlistMarket)} className="mt-1 block rounded-lg border bg-background px-2 py-1.5 text-sm text-foreground">
+            <select value={manualMarket} onChange={(event) => setManualMarket(event.target.value as WatchlistMarket)} className="app-field mt-1 block px-2 py-1.5">
               <option value="hk">港股</option><option value="cn">A股</option><option value="us">美股</option>
             </select>
           </label>
           <label className="text-xs text-muted-foreground">类型
-            <select value={manualType} onChange={(event) => setManualType(event.target.value as ManagedAssetType)} className="mt-1 block rounded-lg border bg-background px-2 py-1.5 text-sm text-foreground">
+            <select value={manualType} onChange={(event) => setManualType(event.target.value as ManagedAssetType)} className="app-field mt-1 block px-2 py-1.5">
               <option value="stock">个股</option><option value="fund">基金/ETF</option><option value="bond">债券基金</option>
             </select>
           </label>
           <label className="min-w-48 flex-1 text-xs text-muted-foreground">代码
-            <input value={manualSymbol} onChange={(event) => setManualSymbol(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addManual(); }} placeholder="输入股票或基金代码" className="mt-1 block w-full rounded-lg border bg-background px-3 py-1.5 text-sm text-foreground" />
+            <input value={manualSymbol} onChange={(event) => setManualSymbol(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addManual(); }} placeholder="输入股票或基金代码" className="app-field mt-1 block w-full py-1.5" />
           </label>
-          <button type="button" onClick={addManual} className="flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm hover:bg-muted"><Plus className="h-4 w-4" />添加</button>
+          <button type="button" onClick={addManual} className="app-button-secondary py-1.5"><Plus className="h-4 w-4" />添加</button>
         </div>
       </section>
 
-      <section className="space-y-4 rounded-xl border bg-card p-4">
-        <div className="flex items-center justify-between"><div><h2 className="text-sm font-semibold">手动配置资产比例</h2><p className="text-xs text-muted-foreground">每项比例会自动保存；回测和追踪不会调用组合优化器。</p></div><button type="button" disabled={!selected.length} onClick={() => { const equal = 100 / (selected.length + 1); setWeights(Object.fromEntries(selected.map((item) => [keyOf(item), equal]))); setCashWeight(equal); }} className="rounded border px-2 py-1 text-xs disabled:opacity-50">平均分配</button></div>
+      <section className="app-panel space-y-4">
+        <div className="flex items-center justify-between"><div><h2 className="app-panel-title">手动配置资产比例</h2><p className="text-xs text-muted-foreground">每项比例会自动保存；回测和追踪不会调用组合优化器。</p></div><button type="button" disabled={!selected.length} onClick={() => { const equal = 100 / (selected.length + 1); setWeights(Object.fromEntries(selected.map((item) => [keyOf(item), equal]))); setCashWeight(equal); }} className="app-button-secondary px-2 py-1 text-xs disabled:opacity-50">平均分配</button></div>
         {selected.length === 0 ? (
           <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">请先从自选或代码输入中加入候选资产</p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="app-table-shell">
             <table className="w-full min-w-[560px] text-sm">
               <thead><tr className="border-b text-muted-foreground"><th className="px-3 py-2 text-left font-medium">代码</th><th className="px-3 py-2 text-left font-medium">名称</th><th className="px-3 py-2 text-left font-medium">市场</th><th className="px-3 py-2 text-left font-medium">类型</th><th className="px-3 py-2 text-right font-medium">目标比例</th><th className="w-10"></th></tr></thead>
               <tbody>{selected.map((candidate, index) => (

@@ -155,10 +155,10 @@ function RecentSignalsPanel({
 }) {
   if (!signals.length && loadingCount === 0 && errorCount === 0) return null;
   return (
-    <div className="rounded-2xl border bg-card p-4">
+    <div className="app-panel">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">最近 7 天策略信号</h2>
+          <h2 className="app-panel-title">最近 7 天策略信号</h2>
           <p className="text-[11px] text-muted-foreground">来自每只自选股的多时间段稳健策略，年度选择、每日更新信号</p>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -173,7 +173,7 @@ function RecentSignalsPanel({
       {signals.length > 0 ? (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {signals.map((signal) => (
-            <div key={signal.key} className="rounded-lg border bg-background px-3 py-2">
+            <div key={signal.key} className="rounded-2xl border bg-card px-3.5 py-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-normal text-foreground">
@@ -216,10 +216,10 @@ function ForecastWatchlistLinks({
 }) {
   if (!items.length) return null;
   return (
-    <div className="rounded-2xl border bg-card p-4">
+    <div className="app-panel">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">自选股</h2>
+          <h2 className="app-panel-title">自选股</h2>
           <p className="text-[11px] text-muted-foreground">点击股票名称跳转到对应预测图表</p>
         </div>
       </div>
@@ -231,7 +231,7 @@ function ForecastWatchlistLinks({
             <button
               key={stockKey(item.market, item.code)}
               onClick={() => scrollToForecastCard(item.market, item.code)}
-              className="rounded-lg border bg-background px-3 py-2 text-left transition hover:border-foreground/30 hover:bg-muted"
+              className="soft-card-interactive rounded-2xl px-3.5 py-3 text-left"
             >
               <span className="block max-w-36 truncate text-sm font-normal text-foreground">{name}</span>
               <span className="font-mono text-[11px] uppercase text-muted-foreground">{item.code}</span>
@@ -304,7 +304,7 @@ function ForecastCard({
   }, [market, code, context, displayHistory, cacheKey]);
 
   return (
-    <div id={forecastCardId(market, code)} className="scroll-mt-24 rounded-2xl border bg-card p-4">
+    <div id={forecastCardId(market, code)} className="app-panel scroll-mt-24">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-normal text-foreground">{data?.name && data.name !== code ? data.name : code}</span>
@@ -569,28 +569,29 @@ export function Forecast() {
   const bestErrorCount = watchlistItems.filter((item) => bestByKey[stockKey(item.market, item.code)]?.error).length;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <LineChart className="h-6 w-6 text-primary" />
+    <div className="app-page app-page-compact">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <div className="app-page-icon"><LineChart className="h-5 w-5" strokeWidth={1.8} /></div>
           <div>
-            <h1 className="text-xl font-bold">走势预测</h1>
-            <p className="text-xs text-muted-foreground">TimesFM 3 个月不确定性锥 · 同步总览自选股</p>
+            <p className="page-kicker">Forecast lab</p>
+            <h1 className="app-page-title">走势预测</h1>
+            <p className="app-page-description">TimesFM 三个月不确定性锥，同步总览自选股与稳健策略信号。</p>
           </div>
         </div>
         {/* Context length — the same knob drives both forecast and backtest. */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2 self-end sm:self-auto">
           <span className="text-xs text-muted-foreground">历史范围</span>
-          <div className="flex gap-1">
+          <div className="app-segmented">
             {CONTEXT_OPTIONS.map((o) => (
               <button
                 key={o.value}
                 onClick={() => setContext(o.value)}
                 className={cn(
-                  "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                  "app-segmented-item h-8 px-3",
                   o.value === context
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted border border-border"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 {o.label}
@@ -601,7 +602,7 @@ export function Forecast() {
       </div>
 
       {total === 0 ? (
-        <div className="rounded-2xl border border-dashed bg-card/50 py-12 flex flex-col items-center gap-2 text-center">
+        <div className="app-empty-state">
           <LineChart className="h-7 w-7 text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">在「总览」页添加A股/港股/美股自选后，此处显示走势预测</p>
         </div>

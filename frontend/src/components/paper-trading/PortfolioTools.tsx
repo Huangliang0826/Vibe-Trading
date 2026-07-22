@@ -30,7 +30,7 @@ function CurveChart({ points, name }: { points: AssetEquityPoint[]; name: string
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg border px-3 py-2"><p className="text-[11px] text-muted-foreground">{label}</p><p className="font-semibold tabular-nums">{value}</p></div>;
+  return <div className="app-panel-compact px-3 py-2.5"><p className="text-[11px] text-muted-foreground">{label}</p><p className="font-semibold tabular-nums">{value}</p></div>;
 }
 
 export function PortfolioTools({ allocations, valid }: { allocations: ManualAllocation[]; valid: boolean }) {
@@ -68,20 +68,20 @@ export function PortfolioTools({ allocations, valid }: { allocations: ManualAllo
   };
 
   return <div className="space-y-5">
-    <section className="space-y-4 rounded-xl border bg-card p-4">
+    <section className="app-panel space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 className="text-sm font-semibold">验证与追踪</h2><p className="text-xs text-muted-foreground">严格使用上方最终比例；10万美元分十周建仓，回测在建仓完成后每三个月再平衡。</p></div>
+        <div><h2 className="app-panel-title">验证与追踪</h2><p className="text-xs text-muted-foreground">严格使用上方最终比例；10万美元分十周建仓，回测在建仓完成后每三个月再平衡。</p></div>
         <div className="flex gap-2">
-          <button type="button" disabled={!valid || busy !== null} onClick={runBacktest} className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm disabled:opacity-50"><BarChart3 className="h-4 w-4" />{busy === "backtest" ? "回测中" : "一键回测"}</button>
-          <button type="button" disabled={!valid || busy !== null} onClick={startTracking} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"><PlayCircle className="h-4 w-4" />{busy === "tracking" ? "启动中" : "开始追踪"}</button>
+          <button type="button" disabled={!valid || busy !== null} onClick={runBacktest} className="app-button-secondary"><BarChart3 className="h-4 w-4" />{busy === "backtest" ? "回测中" : "一键回测"}</button>
+          <button type="button" disabled={!valid || busy !== null} onClick={startTracking} className="app-button-primary"><PlayCircle className="h-4 w-4" />{busy === "tracking" ? "启动中" : "开始追踪"}</button>
         </div>
       </div>
       {!valid && <p className="text-xs text-amber-600">资产与现金比例合计达到100%后才能回测或追踪。</p>}
       {error && <p className="rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-600">{error}</p>}
     </section>
 
-    {backtest && <section className="space-y-4 rounded-xl border bg-card p-4">
-      <div><h2 className="text-sm font-semibold">五年十周建仓与季度再平衡回测</h2><p className="text-xs text-muted-foreground">{backtest.start_date} 至 {backtest.end_date} · {backtest.installments} 期建仓 · {backtest.investment_completed_date} 完成 · 季度再平衡 {backtest.rebalances} 次</p></div>
+    {backtest && <section className="app-panel space-y-4">
+      <div><h2 className="app-panel-title">五年十周建仓与季度再平衡回测</h2><p className="text-xs text-muted-foreground">{backtest.start_date} 至 {backtest.end_date} · {backtest.installments} 期建仓 · {backtest.investment_completed_date} 完成 · 季度再平衡 {backtest.rebalances} 次</p></div>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-6"><Metric label="期末价值" value={money(backtest.final_value)} /><Metric label="累计盈利" value={money(backtest.total_profit)} /><Metric label="年化复合收益" value={pct(backtest.cagr)} /><Metric label="年度平均收益" value={pct(backtest.annual_average_return)} /><Metric label="最大回撤" value={pct(backtest.max_drawdown)} /><Metric label="年化波动" value={pct(backtest.annual_volatility)} /></div>
       <CurveChart points={backtest.curve} name="回测净值" />
       <div className="flex flex-wrap gap-2">{backtest.annual_returns.map((item) => <span key={item.year} className="rounded border px-2 py-1 text-xs">{item.year}：{pct(item.return_rate)}</span>)}</div>
@@ -89,11 +89,11 @@ export function PortfolioTools({ allocations, valid }: { allocations: ManualAllo
       {backtest.warnings.length > 0 && <ul className="list-disc space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/5 px-7 py-2 text-xs text-muted-foreground">{backtest.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
     </section>}
 
-    {tracking && <section className="space-y-4 rounded-xl border bg-card p-4">
-      <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">10万美元虚拟组合</h2><p className="text-xs text-muted-foreground">第 {tracking.completed_installments}/{tracking.total_installments} 期 · {tracking.next_installment_date ? `下期建仓 ${tracking.next_installment_date}` : `已完成建仓 · 季度再平衡 ${tracking.completed_rebalances} 次 · 下次 ${tracking.next_rebalance_date || "待定"}`} · 更新于 {tracking.last_updated}</p>{tracking.last_rebalance_date && <p className="mt-1 text-[11px] text-muted-foreground">最近一次再平衡：{tracking.last_rebalance_date}</p>}</div><button type="button" aria-label="刷新追踪" onClick={refreshTracking} disabled={busy !== null} className="rounded border p-2"><RefreshCw className={`h-4 w-4 ${busy === "refresh" ? "animate-spin" : ""}`} /></button></div>
+    {tracking && <section className="app-panel space-y-4">
+      <div className="flex items-start justify-between gap-3"><div><h2 className="app-panel-title">10万美元虚拟组合</h2><p className="text-xs text-muted-foreground">第 {tracking.completed_installments}/{tracking.total_installments} 期 · {tracking.next_installment_date ? `下期建仓 ${tracking.next_installment_date}` : `已完成建仓 · 季度再平衡 ${tracking.completed_rebalances} 次 · 下次 ${tracking.next_rebalance_date || "待定"}`} · 更新于 {tracking.last_updated}</p>{tracking.last_rebalance_date && <p className="mt-1 text-[11px] text-muted-foreground">最近一次再平衡：{tracking.last_rebalance_date}</p>}</div><button type="button" aria-label="刷新追踪" onClick={refreshTracking} disabled={busy !== null} className="app-button-secondary p-2"><RefreshCw className={`h-4 w-4 ${busy === "refresh" ? "animate-spin" : ""}`} /></button></div>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-5"><Metric label="当前资产" value={money(tracking.current_value)} /><Metric label="累计收益" value={pct(tracking.cumulative_return)} /><Metric label="今日收益" value={pct(tracking.today_return)} /><Metric label="战略现金" value={money(tracking.strategic_cash)} /><Metric label="待建仓现金" value={money(tracking.deployment_cash)} /></div>
       {tracking.curve.length > 0 && <CurveChart points={tracking.curve} name="追踪净值" />}
-      <div className="overflow-x-auto rounded-lg border"><table className="w-full min-w-[680px] text-sm"><thead><tr className="border-b text-muted-foreground"><th className="px-3 py-2 text-left">资产</th><th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2 text-right">当前价值</th><th className="px-3 py-2 text-right">目标仓位</th><th className="px-3 py-2 text-right">实际仓位</th><th className="px-3 py-2 text-right">价格日期</th></tr></thead><tbody>{tracking.positions.map((position) => <tr key={`${position.market}:${position.symbol}`} className="border-b last:border-0"><td className="px-3 py-2">{position.name} <span className="font-mono text-xs text-muted-foreground">{position.symbol}</span></td><td className="px-3 py-2 text-right tabular-nums">{position.quantity.toFixed(4)}</td><td className="px-3 py-2 text-right">{money(position.value_usd)}</td><td className="px-3 py-2 text-right">{pct(position.target_weight)}</td><td className="px-3 py-2 text-right">{pct(position.actual_weight)}</td><td className="px-3 py-2 text-right text-xs">{position.price_date}</td></tr>)}</tbody></table></div>
+      <div className="app-table-shell"><table className="w-full min-w-[680px] text-sm"><thead><tr className="border-b text-muted-foreground"><th className="px-3 py-2 text-left">资产</th><th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2 text-right">当前价值</th><th className="px-3 py-2 text-right">目标仓位</th><th className="px-3 py-2 text-right">实际仓位</th><th className="px-3 py-2 text-right">价格日期</th></tr></thead><tbody>{tracking.positions.map((position) => <tr key={`${position.market}:${position.symbol}`} className="border-b last:border-0"><td className="px-3 py-2">{position.name} <span className="font-mono text-xs text-muted-foreground">{position.symbol}</span></td><td className="px-3 py-2 text-right tabular-nums">{position.quantity.toFixed(4)}</td><td className="px-3 py-2 text-right">{money(position.value_usd)}</td><td className="px-3 py-2 text-right">{pct(position.target_weight)}</td><td className="px-3 py-2 text-right">{pct(position.actual_weight)}</td><td className="px-3 py-2 text-right text-xs">{position.price_date}</td></tr>)}</tbody></table></div>
       {tracking.warnings.length > 0 && <ul className="list-disc space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/5 px-7 py-2 text-xs text-muted-foreground">{tracking.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
     </section>}
   </div>;

@@ -83,7 +83,7 @@ function MarketSelector({
   disabled: boolean;
 }) {
   return (
-    <div className="inline-flex rounded-md border bg-muted/30 p-0.5" aria-label="扫描市场">
+    <div className="app-segmented" aria-label="扫描市场">
       {MARKET_OPTIONS.map((option) => (
         <button
           key={option.universe}
@@ -93,9 +93,9 @@ function MarketSelector({
           disabled={disabled}
           onClick={() => onChange(option.universe)}
           className={cn(
-            "h-8 px-4 text-xs font-medium transition-colors disabled:opacity-50",
+            "app-segmented-item h-8 disabled:opacity-50",
             value === option.universe
-              ? "rounded bg-background text-foreground shadow-sm"
+              ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
@@ -264,7 +264,7 @@ export function Scanner() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="app-page app-page-compact">
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
         <div className="flex h-[55vh] flex-col items-center justify-center gap-2 text-muted-foreground">
           <div className="flex items-center">
@@ -281,7 +281,7 @@ export function Scanner() {
 
   if (error || !data) {
     return (
-      <div className="mx-auto max-w-4xl px-6 py-8">
+      <div className="app-page app-page-compact">
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
         <div className="flex h-[55vh] flex-col items-center justify-center gap-3 text-muted-foreground">
           <AlertTriangle className="h-8 w-8" />
@@ -291,7 +291,7 @@ export function Scanner() {
             onClick={() => void refreshScan()}
             disabled={refreshing}
             aria-label="更新机会"
-            className="mt-2 inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs text-primary disabled:opacity-50"
+            className="app-button-secondary mt-2 text-xs text-primary"
           >
             {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             {refreshing ? "更新中" : "更新机会"}
@@ -312,10 +312,10 @@ export function Scanner() {
   const isLatest = dateIdx === 0;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      <div className="mb-5 flex items-center justify-between gap-3">
+    <div className="app-page app-page-compact">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
-        <div className="inline-flex rounded-md border bg-muted/30 p-0.5" aria-label="视图切换">
+        <div className="app-segmented" aria-label="视图切换">
           {([["leaderboard", "排行榜"], ["accuracy", "准确率"]] as const).map(([key, label]) => (
             <button
               key={key}
@@ -323,8 +323,8 @@ export function Scanner() {
               aria-pressed={view === key}
               onClick={() => setView(key)}
               className={cn(
-                "h-8 px-4 text-xs font-medium transition-colors",
-                view === key ? "rounded bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                "app-segmented-item h-8",
+                view === key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {label}
@@ -333,12 +333,13 @@ export function Scanner() {
         </div>
       </div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Radar className="h-6 w-6 text-primary" />
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <div className="app-page-icon"><Radar className="h-5 w-5" strokeWidth={1.8} /></div>
           <div>
-            <h1 className="text-xl font-bold">机会扫描</h1>
-            <p className="text-xs text-muted-foreground">
+            <p className="page-kicker">Opportunity radar</p>
+            <h1 className="app-page-title">机会扫描</h1>
+            <p className="app-page-description">
               {data.universe.toUpperCase()} · {ranked.length} 只股票
             </p>
           </div>
@@ -346,7 +347,7 @@ export function Scanner() {
         <div className="flex items-center gap-2">
           {/* Date navigator */}
           {dates.length > 1 && (
-            <div className="flex items-center gap-1 border border-border rounded px-1">
+            <div className="flex items-center gap-1 rounded-xl border bg-card/75 px-1 py-0.5">
               <button
                 onClick={() => navigateDate(1)}
                 disabled={dateIdx >= dates.length - 1}
@@ -386,7 +387,7 @@ export function Scanner() {
             onClick={() => void refreshScan()}
             disabled={refreshing}
             aria-label="更新机会"
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded border border-border hover:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="app-button-secondary px-2.5 py-1.5 text-xs disabled:cursor-not-allowed"
           >
             {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             {refreshing ? "更新中" : "更新"}
@@ -400,7 +401,7 @@ export function Scanner() {
       <>
       {/* Non-latest banner */}
       {!isLatest && (
-        <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-2 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between rounded-2xl border border-blue-500/30 bg-blue-500/5 px-4 py-3">
           <p className="text-xs text-blue-600 dark:text-blue-400">
             正在查看历史扫描 ({data.asof})，共 {dates.length} 期
           </p>
@@ -415,7 +416,7 @@ export function Scanner() {
 
       {/* Calibration alerts */}
       {calibration && !calibration.ok && calibration.alerts.map((a, i) => (
-        <div key={i} className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3">
+        <div key={i} className="mb-4 rounded-2xl border border-red-500/30 bg-red-500/5 px-4 py-3">
           <p className="text-xs text-red-600 dark:text-red-400 flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             {a.message}
@@ -425,7 +426,7 @@ export function Scanner() {
 
       {/* Warnings */}
       {data.warnings.length > 0 && (
-        <div className="mb-4 rounded-lg border border-yellow-500/30 bg-yellow-500/5 px-4 py-3">
+        <div className="mb-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/5 px-4 py-3">
           {data.warnings.map((w, i) => (
             <p key={i} className="text-xs text-yellow-600 dark:text-yellow-400 flex items-start gap-2">
               <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -466,7 +467,7 @@ export function Scanner() {
       )}
 
       {/* Leaderboard table */}
-      <div className="rounded-lg border bg-card overflow-x-auto">
+      <div className="app-table-shell">
         <table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr className="border-b bg-muted/30">

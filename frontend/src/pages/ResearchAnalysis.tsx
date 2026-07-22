@@ -188,16 +188,20 @@ export function ResearchAnalysis() {
     : "");
 
   return (
-    <div className="min-h-full bg-background">
-      <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-5">
-        <div className="flex flex-col gap-2 border-b pb-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">投研分析</h1>
-            <p className="mt-1 text-sm text-muted-foreground">TradingAgents 多 Agent 投研观点，本地永久归档，仅供研究参考，不构成投资建议。</p>
+    <div className="min-h-full">
+      <div className="app-page app-page-wide flex flex-col">
+        <div className="app-page-header">
+          <div className="app-page-heading">
+            <div className="app-page-icon"><FileSearch className="h-5 w-5" strokeWidth={1.8} /></div>
+            <div>
+              <p className="page-kicker">Research desk</p>
+              <h1 className="app-page-title">投研分析</h1>
+              <p className="app-page-description">TradingAgents 多智能体投研观点，本地永久归档；仅供研究参考，不构成投资建议。</p>
+            </div>
           </div>
           <button
             onClick={loadRuns}
-            className="inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
+            className="app-button-secondary self-end sm:self-auto"
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             刷新历史
@@ -213,8 +217,8 @@ export function ResearchAnalysis() {
 
         <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="space-y-4">
-            <section className="rounded-md border bg-card p-4">
-              <h2 className="text-sm font-semibold">新建分析</h2>
+            <section className="app-panel-compact">
+              <h2 className="app-panel-title">新建分析</h2>
               <div className="mt-4 space-y-3">
                 <label className="block text-xs font-medium text-muted-foreground">
                   股票代码
@@ -222,7 +226,7 @@ export function ResearchAnalysis() {
                     value={symbol}
                     onChange={(event) => setSymbol(event.target.value)}
                     placeholder="AAPL / NVDA / 0700.HK"
-                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    className="app-field mt-1 w-full"
                   />
                 </label>
                 <label className="block text-xs font-medium text-muted-foreground">
@@ -231,7 +235,7 @@ export function ResearchAnalysis() {
                     type="date"
                     value={analysisDate}
                     onChange={(event) => setAnalysisDate(event.target.value)}
-                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    className="app-field mt-1 w-full"
                   />
                 </label>
                 <label className="block text-xs font-medium text-muted-foreground">
@@ -239,7 +243,7 @@ export function ResearchAnalysis() {
                   <select
                     value={analysisMode}
                     onChange={(event) => setAnalysisMode(event.target.value as "fast" | "full")}
-                    className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    className="app-field mt-1 w-full"
                   >
                     <option value="fast">快速分析（推荐）</option>
                     <option value="full">完整分析</option>
@@ -249,7 +253,7 @@ export function ResearchAnalysis() {
                 <button
                   disabled={creating}
                   onClick={() => createRun()}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+                  className="app-button-primary w-full disabled:opacity-60"
                 >
                   {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />}
                   开始投研分析
@@ -257,7 +261,7 @@ export function ResearchAnalysis() {
               </div>
             </section>
 
-            <section className="rounded-md border bg-card">
+            <section className="app-panel-compact overflow-hidden p-0">
               <div className="border-b px-4 py-3 text-sm font-semibold">本地归档</div>
               <div className="max-h-[520px] overflow-auto p-2">
                 {loading && runs.length === 0 ? (
@@ -272,7 +276,7 @@ export function ResearchAnalysis() {
                     key={run.run_id}
                     onClick={() => setSelectedRun(run)}
                     className={cn(
-                      "mb-2 w-full rounded-md border p-3 text-left transition-colors hover:bg-muted",
+                      "mb-2 w-full rounded-2xl border bg-card p-3 text-left transition-colors hover:border-primary/25 hover:bg-muted/40",
                       selectedRun?.run_id === run.run_id && "border-primary bg-primary/5",
                     )}
                   >
@@ -293,7 +297,7 @@ export function ResearchAnalysis() {
               </div>
             </section>
 
-            <section className="rounded-md border bg-card">
+            <section className="app-panel-compact overflow-hidden p-0">
               <button
                 onClick={() => setFiltersExpanded((value) => !value)}
                 className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold hover:bg-muted"
@@ -311,7 +315,7 @@ export function ResearchAnalysis() {
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
                         placeholder="关键词"
-                        className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm outline-none focus:border-primary"
+                        className="app-field w-full py-2 pl-9 pr-3"
                       />
                     </div>
                   </label>
@@ -320,12 +324,12 @@ export function ResearchAnalysis() {
                       value={filterSymbol}
                       onChange={(event) => setFilterSymbol(event.target.value)}
                       placeholder="股票"
-                      className="rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                      className="app-field w-full"
                     />
                     <select
                       value={filterRating}
                       onChange={(event) => setFilterRating(event.target.value as "all" | "buy" | "hold" | "sell")}
-                      className="rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                      className="app-field w-full"
                     >
                       <option value="all">全部结论</option>
                       <option value="buy">买入倾向</option>
@@ -337,20 +341,20 @@ export function ResearchAnalysis() {
                     type="date"
                     value={filterDate}
                     onChange={(event) => setFilterDate(event.target.value)}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    className="app-field w-full"
                   />
                 </div>
               )}
             </section>
           </aside>
 
-          <main className="rounded-md border bg-card">
+          <main className="app-panel overflow-hidden p-0">
             {!selectedRun ? (
               <div className="flex min-h-[520px] items-center justify-center p-6 text-sm text-muted-foreground">
                 选择一条历史记录，或新建一次投研分析。
               </div>
             ) : (
-              <div className="space-y-5 p-5">
+              <div className="space-y-5 p-5 sm:p-6">
                 <div className="flex flex-col gap-3 border-b pb-4 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -378,14 +382,14 @@ export function ResearchAnalysis() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => rerun(selectedRun)}
-                      className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
+                      className="app-button-secondary"
                     >
                       <RefreshCw className="h-4 w-4" />
                       重新分析
                     </button>
                     <button
                       onClick={() => deleteRun(selectedRun)}
-                      className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-red-600 hover:bg-red-500/10"
+                      className="app-button-secondary text-red-600 hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-600"
                     >
                       <Trash2 className="h-4 w-4" />
                       删除
@@ -394,20 +398,20 @@ export function ResearchAnalysis() {
                 </div>
 
                 {(selectedRun.status === "queued" || selectedRun.status === "running") && (
-                  <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                  <div className="flex items-center gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {selectedRun.summary || "后台分析运行中"}
                   </div>
                 )}
 
                 {selectedRun.status === "failed" && (
-                  <div className="rounded-md border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300">
+                  <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300">
                     {selectedRun.error || "分析失败"}
                   </div>
                 )}
 
                 {report && !report.structured ? (
-                  <article className="prose prose-sm dark:prose-invert max-w-none rounded-md bg-muted p-4">
+                  <article className="prose prose-sm dark:prose-invert max-w-none rounded-2xl bg-muted/60 p-5">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {rawAnalysis || report.summary}
                     </ReactMarkdown>
@@ -429,7 +433,7 @@ export function ResearchAnalysis() {
                     <DetailSection title="声明">{report.disclaimer}</DetailSection>
                   </article>
                 ) : selectedRun.report_markdown ? (
-                  <article className="prose prose-sm dark:prose-invert max-w-none rounded-md bg-muted p-4">
+                  <article className="prose prose-sm dark:prose-invert max-w-none rounded-2xl bg-muted/60 p-5">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {selectedRun.report_markdown}
                     </ReactMarkdown>
