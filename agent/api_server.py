@@ -5251,6 +5251,9 @@ register_news_center_routes(app, require_auth=require_local_or_auth)
 from src.api.historical_event_routes import register_historical_event_routes  # noqa: E402
 register_historical_event_routes(app, require_auth=require_local_or_auth)
 
+from src.api.learning_routes import register_learning_routes  # noqa: E402
+register_learning_routes(app, require_auth=require_local_or_auth)
+
 
 # ============================================================================
 # Main Entry Point

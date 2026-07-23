@@ -15,7 +15,7 @@ interface Props {
   height?: number;
 }
 
-const BUY_MARKER_COLOR = "#ef4444";
+const BUY_MARKER_COLOR = "#de6a48";
 
 function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   if (val.includes(" ")) {
