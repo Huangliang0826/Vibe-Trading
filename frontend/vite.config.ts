@@ -67,6 +67,7 @@ export default defineConfig(({ mode }) => {
         "^/paper-trading/": apiProxy,
         "^/asset-management/": apiProxy,
         "^/research/": apiProxy,
+        "^/learning/": apiProxy,
         "^/forecast/": apiProxy,
         "^/hstech/": apiProxy,
       },

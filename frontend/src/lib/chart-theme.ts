@@ -27,7 +27,7 @@ function buildTheme() {
   const isDark = document.documentElement.classList.contains("dark");
 
   const successHex = hslToHex(css("--success")) || "#22c55e";
-  const dangerHex = hslToHex(css("--danger")) || "#ef4444";
+  const dangerHex = hslToHex(css("--danger")) || "#de6a48";
   const infoHex = hslToHex(css("--info")) || "#3b82f6";
   const warningHex = hslToHex(css("--warning")) || "#f59e0b";
   const gridHex = hslToHex(css("--chart-grid")) || (isDark ? "#1e2433" : "#e5e7eb");

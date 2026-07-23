@@ -129,7 +129,7 @@ export function ValuationChart({ points, metric, period, onPeriodChange, loading
             symbol: "none",
             label: { fontSize: 9, position: "insideEndTop" },
             data: [
-              { yAxis: stats.max, lineStyle: { color: "#ef4444", type: "dashed", width: 1 }, label: { formatter: `最高 ${formatValue(metric, stats.max)}`, color: "#ef4444" } },
+              { yAxis: stats.max, lineStyle: { color: "#de6a48", type: "dashed", width: 1 }, label: { formatter: `最高 ${formatValue(metric, stats.max)}`, color: "#de6a48" } },
               { yAxis: stats.min, lineStyle: { color: "#22c55e", type: "dashed", width: 1 }, label: { formatter: `最低 ${formatValue(metric, stats.min)}`, color: "#22c55e" } },
               { yAxis: stats.median, lineStyle: { color: "#f59e0b", type: "dashed", width: 1 }, label: { formatter: `中位数 ${formatValue(metric, stats.median)}`, color: "#f59e0b" } },
             ],

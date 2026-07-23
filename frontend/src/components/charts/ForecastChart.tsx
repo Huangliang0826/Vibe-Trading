@@ -170,7 +170,7 @@ export function ForecastChart({ data, height = 320, trades }: Props) {
           symbol: "triangle",
           symbolSize: 12,
           symbolRotate: 180,
-          itemStyle: { color: "#ef4444" },
+          itemStyle: { color: "#de6a48" },
           tooltip: markerTooltip,
           z: 10,
         },

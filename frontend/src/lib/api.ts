@@ -109,6 +109,25 @@ function appendQueryParam(url: string, key: string, value: string): string {
   return `${url}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
+export interface GeneratedQuiz {
+  type: "choice" | "judge" | "scenario";
+  question: string;
+  options: string[];
+  answer: number;
+  explanation: string;
+  ai_generated: boolean;
+}
+
+export interface GeneratedCard {
+  type: "concept" | "story" | "pitfall";
+  difficulty: number;
+  title: string;
+  core: string;
+  example?: string | null;
+  pitfall?: string | null;
+  quiz: GeneratedQuiz;
+}
+
 export const api = {
   uploadFile,
   listRuns: () => request<RunListItem[]>("/runs"),
@@ -259,6 +278,38 @@ export const api = {
     request<WalkForwardResponse>(`/scan/quintile/walkforward?universe=${universe}&period=${period}&rebal_days=${rebalDays}&cost_bps=${costBps}`),
   getScanPortfolio: (universe = "hkconnect", period = "2024-2026") =>
     request<ScanPortfolioResponse>(`/scan/quintile/portfolio?universe=${universe}&period=${period}`),
+
+  // 量化学习 · AI 动态出题(DeepSeek 官方 API)
+  generateQuiz: (body: {
+    topic_title: string;
+    title: string;
+    core: string;
+    example?: string;
+    pitfall?: string;
+    avoid_question?: string;
+  }) =>
+    request<GeneratedQuiz>("/learning/generate-quiz", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  generateCards: (body: {
+    topic_id: string;
+    topic_title: string;
+    topic_subtitle?: string;
+    existing_titles?: string[];
+    count?: number;
+  }) =>
+    request<{ cards: GeneratedCard[] }>("/learning/generate-cards", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  // 跨设备同步:单用户共享的学习状态(进度 + AI 卡片)
+  getLearningState: () => request<{ progress: unknown; extra: unknown }>("/learning/state"),
+  putLearningState: (body: { progress: unknown; extra: unknown }) =>
+    request<{ progress: unknown; extra: unknown }>("/learning/state", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   getNewsCenterDates: () => request<string[]>("/news-center/dates"),
   getNewsCenterArticles: (filters: NewsCenterFilters = {}) => {

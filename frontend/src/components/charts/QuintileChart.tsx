@@ -4,7 +4,7 @@ import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import type { QuintileResponse } from "@/lib/api";
 
-const Q_COLORS = ["#10b981", "#34d399", "#94a3b8", "#f97316", "#ef4444"];
+const Q_COLORS = ["#10b981", "#34d399", "#94a3b8", "#f97316", "#de6a48"];
 const LS_COLOR = "#6366f1";
 
 interface Props {

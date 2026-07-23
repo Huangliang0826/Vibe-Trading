@@ -39,6 +39,9 @@ const ResearchAnalysis = lazy(() =>
 const PaperTrading = lazy(() =>
   import("@/pages/PaperTrading").then((m) => ({ default: m.PaperTrading })),
 );
+const Learning = lazy(() =>
+  import("@/pages/Learning").then((m) => ({ default: m.Learning })),
+);
 function PageLoader() {
   return (
     <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
@@ -73,6 +76,7 @@ export const router = createBrowserRouter([
       { path: "/forecast", element: wrap(Forecast) },
       { path: "/hstech", element: wrap(HSTech) },
       { path: "/paper-trading", element: wrap(PaperTrading) },
+      { path: "/learning", element: wrap(Learning) },
       { path: "/analytics", element: <Navigate to="/settings?tab=analytics" replace /> },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },

@@ -27,7 +27,7 @@ function shortDate(value: string) {
   return value;
 }
 
-const BUY_MARKER_COLOR = "#ef4444";
+const BUY_MARKER_COLOR = "#de6a48";
 const EQUITY_LINE_COLOR = "#94a3b8";
 
 export function computePaperEquityStats(data: EquityPoint[], initialCapital: number) {
