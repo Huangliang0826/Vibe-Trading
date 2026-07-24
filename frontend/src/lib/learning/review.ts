@@ -49,6 +49,50 @@ export function buildReviewQueue(
   ];
 }
 
+/**
+ * 构建一组练习队列:到期 + 新题优先;不足 `max` 时,用其它学过的卡片补足
+ * (优先盒子低、最久没练的),保证"再来一组"永远有题练,不会因为都答过而空掉。
+ */
+export function buildSessionQueue(
+  progress: LearningProgress,
+  cards: KnowledgeCard[],
+  topic: TopicId | "all",
+  max = 10,
+  now = Date.now(),
+): ReviewItem[] {
+  const base = buildReviewQueue(progress, cards, topic, now);
+  if (base.length >= max) return base.slice(0, max);
+
+  const inQueue = new Set(base.map((i) => i.card.id));
+  const supplement = cards
+    .filter(
+      (c) => progress.read[c.id] && !inQueue.has(c.id) && (topic === "all" || c.topicId === topic),
+    )
+    .sort((a, b) => {
+      const sa = progress.quiz[a.id];
+      const sb = progress.quiz[b.id];
+      const boxA = sa?.box ?? 0;
+      const boxB = sb?.box ?? 0;
+      if (boxA !== boxB) return boxA - boxB; // 盒子低(更薄弱)先练
+      return (sa?.lastAt ?? 0) - (sb?.lastAt ?? 0); // 最久没练的先练
+    })
+    .slice(0, max - base.length)
+    .map((card) => ({ card, due: false }));
+
+  return [...base, ...supplement];
+}
+
+/** 某范围内可练习的卡片数量(学过的即可练,不局限于到期) */
+export function countPracticeable(
+  progress: LearningProgress,
+  cards: KnowledgeCard[],
+  topic: TopicId | "all",
+): number {
+  return cards.filter(
+    (c) => progress.read[c.id] && (topic === "all" || c.topicId === topic),
+  ).length;
+}
+
 /** 统计当前有多少题"到期待复习"(用于 tab 上的红点提示) */
 export function countDueReviews(
   progress: LearningProgress,

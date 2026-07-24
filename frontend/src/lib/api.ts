@@ -292,6 +292,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // 批量出题:一次调用生成整组题,大幅降低等待
+  generateQuizBatch: (body: {
+    items: { id: string; topic_title: string; title: string; core: string; example?: string; pitfall?: string }[];
+  }) =>
+    request<{ results: { id: string; quiz: GeneratedQuiz }[] }>("/learning/generate-quiz-batch", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   generateCards: (body: {
     topic_id: string;
     topic_title: string;

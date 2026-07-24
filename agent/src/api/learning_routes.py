@@ -145,6 +145,30 @@ class GenerateQuizRequest(BaseModel):
     avoid_question: str | None = Field(default=None, max_length=1000)
 
 
+class QuizBatchItem(BaseModel):
+    """批量出题里的一条卡片(id 用于把生成结果对应回去)。"""
+
+    id: str = Field(..., max_length=80)
+    topic_title: str = Field(..., max_length=100)
+    title: str = Field(..., max_length=200)
+    core: str = Field(..., max_length=4000)
+    example: str | None = Field(default=None, max_length=4000)
+    pitfall: str | None = Field(default=None, max_length=4000)
+
+
+class GenerateQuizBatchRequest(BaseModel):
+    items: list[QuizBatchItem] = Field(..., max_length=12)
+
+
+class QuizBatchResult(BaseModel):
+    id: str
+    quiz: GeneratedQuiz
+
+
+class GenerateQuizBatchResponse(BaseModel):
+    results: list[QuizBatchResult]
+
+
 class GeneratedQuiz(BaseModel):
     """AI 生成的题目(结构与前端题库题一致)。"""
 
@@ -287,6 +311,72 @@ def _generate_quiz(req: GenerateQuizRequest) -> GeneratedQuiz:
     return _validate_and_shuffle(parsed)
 
 
+_BATCH_SYSTEM_PROMPT = (
+    "你是一位资深的量化交易与投资教育出题老师。下面给出若干个知识点,请为每个知识点各出"
+    "一道中文测验题,检验是否真正理解而非死记。要求:\n"
+    "1. 每题类型从 choice / judge / scenario 中择一,优先情景题、判断题;\n"
+    "2. 恰好 4 个选项,只有 1 个正确,干扰项有迷惑性但无歧义;\n"
+    "3. 解析点明为什么对、为什么其它错;指代选项时用其内容或关键词,不要用字母序号"
+    "(选项展示时会被打乱);\n"
+    "4. 紧扣对应知识点,题目之间不重复;\n"
+    "5. 只输出一个 JSON 对象:{\"items\": [{\"id\": <原样返回该知识点的 id>, \"type\":..., "
+    "\"question\":..., \"options\":[4个], \"answer\": <0-3>, \"explanation\":...}, ...]},"
+    "不要输出多余文字或 markdown。"
+)
+
+
+def _build_batch_prompt(items: list[QuizBatchItem]) -> str:
+    blocks = []
+    for it in items:
+        parts = [f"id: {it.id}", f"主题: {it.topic_title}", f"知识点: {it.title}", f"讲解: {it.core}"]
+        if it.example:
+            parts.append(f"案例: {it.example}")
+        if it.pitfall:
+            parts.append(f"误区: {it.pitfall}")
+        blocks.append("\n".join(parts))
+    return (
+        "请为以下 " + str(len(items)) + " 个知识点各出一道题(每题带回对应的 id):\n\n"
+        + "\n\n---\n\n".join(blocks)
+    )
+
+
+def _generate_quiz_batch(req: GenerateQuizBatchRequest) -> list[QuizBatchResult]:
+    """一次调用生成整组题目,逐条校验后按 id 对应返回;非法项跳过。"""
+    if not req.items:
+        return []
+    model = os.getenv(QUIZ_MODEL_ENV, DEFAULT_QUIZ_MODEL).strip() or DEFAULT_QUIZ_MODEL
+    raw_text = _call_deepseek(
+        model,
+        _BATCH_SYSTEM_PROMPT,
+        _build_batch_prompt(req.items),
+        temperature=0.8,
+        timeout=int(os.getenv("LEARNING_BATCH_TIMEOUT", "90")),
+        max_tokens=6000,
+    )
+    obj = _extract_quiz_json(raw_text)
+    items = obj.get("items") if isinstance(obj, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("no items array in model output")
+
+    valid_ids = {it.id for it in req.items}
+    rng = random.Random()
+    results: list[QuizBatchResult] = []
+    seen: set[str] = set()
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        cid = str(entry.get("id", "")).strip()
+        if cid not in valid_ids or cid in seen:
+            continue
+        try:
+            quiz = _validate_and_shuffle(entry, rng)
+        except (ValueError, TypeError):
+            continue
+        seen.add(cid)
+        results.append(QuizBatchResult(id=cid, quiz=quiz))
+    return results
+
+
 _CARD_TYPES = {"concept", "story", "pitfall"}
 
 
@@ -383,6 +473,17 @@ def register_learning_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         except Exception as exc:  # noqa: BLE001 — 前端会回退到内置题库
             logger.warning("AI quiz generation failed: %s", exc)
             raise HTTPException(status_code=503, detail="AI 出题暂时不可用,已切换到题库") from exc
+
+    @router.post("/generate-quiz-batch", response_model=GenerateQuizBatchResponse)
+    async def generate_quiz_batch(req: GenerateQuizBatchRequest) -> GenerateQuizBatchResponse:
+        try:
+            results = await anyio.to_thread.run_sync(_generate_quiz_batch, req)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — 前端回退到题库
+            logger.warning("AI quiz batch generation failed: %s", exc)
+            raise HTTPException(status_code=503, detail="AI 批量出题暂时不可用") from exc
+        return GenerateQuizBatchResponse(results=results)
 
     @router.post("/generate-cards", response_model=GenerateCardsResponse)
     async def generate_cards(req: GenerateCardsRequest) -> GenerateCardsResponse:

@@ -228,6 +228,52 @@ def test_generate_cards_count_bounds():
         GenerateCardsRequest(topic_id="market", topic_title="t", count=99)
 
 
+# ── 批量出题(generate-quiz-batch)──────────────────────────────────────────
+
+def test_generate_quiz_batch_maps_by_id(monkeypatch):
+    batch = {
+        "items": [
+            {"id": "risk-first", "type": "choice", "question": "q1",
+             "options": ["对的做法", "错1", "错2", "错3"], "answer": 0, "explanation": "e1"},
+            {"id": "risk-kelly", "type": "judge", "question": "q2",
+             "options": ["对的做法", "错1", "错2", "错3"], "answer": 0, "explanation": "e2"},
+        ]
+    }
+    monkeypatch.setattr(learning_routes, "_call_deepseek", lambda *a, **k: json.dumps(batch))
+    app = FastAPI()
+    register_learning_routes(app, require_auth=lambda: None)
+    resp = TestClient(app).post(
+        "/learning/generate-quiz-batch",
+        json={"items": [
+            {"id": "risk-first", "topic_title": "风险", "title": "止损", "core": "..."},
+            {"id": "risk-kelly", "topic_title": "风险", "title": "凯利", "core": "..."},
+        ]},
+    )
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    by_id = {r["id"]: r for r in results}
+    assert set(by_id) == {"risk-first", "risk-kelly"}
+    assert by_id["risk-first"]["quiz"]["options"][by_id["risk-first"]["quiz"]["answer"]] == "对的做法"
+
+
+def test_generate_quiz_batch_drops_unknown_and_dupe_ids(monkeypatch):
+    batch = {
+        "items": [
+            {"id": "risk-first", "type": "choice", "question": "q", "options": ["对的做法", "b", "c", "d"], "answer": 0, "explanation": "e"},
+            {"id": "risk-first", "type": "choice", "question": "dupe", "options": ["对的做法", "b", "c", "d"], "answer": 0, "explanation": "e"},
+            {"id": "not-requested", "type": "choice", "question": "q", "options": ["对的做法", "b", "c", "d"], "answer": 0, "explanation": "e"},
+        ]
+    }
+    monkeypatch.setattr(learning_routes, "_call_deepseek", lambda *a, **k: json.dumps(batch))
+    app = FastAPI()
+    register_learning_routes(app, require_auth=lambda: None)
+    resp = TestClient(app).post(
+        "/learning/generate-quiz-batch",
+        json={"items": [{"id": "risk-first", "topic_title": "t", "title": "x", "core": "c"}]},
+    )
+    assert [r["id"] for r in resp.json()["results"]] == ["risk-first"]
+
+
 # ── 跨设备状态同步(GET/PUT /learning/state)────────────────────────────────
 
 def test_state_roundtrip(tmp_path, monkeypatch):

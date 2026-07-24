@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, X, ArrowRight, ChevronLeft, Sparkles, HelpCircle, GraduationCap, Wand2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api, type GeneratedQuiz } from "@/lib/api";
+import { api } from "@/lib/api";
 import { TOPICS } from "@/lib/learning/topics";
 import { CARDS_BY_TOPIC, ALL_CARDS, getCard } from "@/lib/learning/content";
-import type { TopicId } from "@/lib/learning/types";
+import type { TopicId, KnowledgeCard } from "@/lib/learning/types";
 import type { LearningProgress } from "@/lib/learning/progress";
 import { recordQuizResult } from "@/lib/learning/progress";
-import { buildReviewQueue, countDueReviews, shuffledOptions, type ReviewItem } from "@/lib/learning/review";
+import { buildSessionQueue, countPracticeable, countDueReviews, shuffledOptions, type ReviewItem } from "@/lib/learning/review";
 import { TOPIC_THEME } from "@/lib/learning/theme";
+import { loadAiQuizCache, mergeIntoAiQuizCache, type AiQuizCache } from "@/lib/learning/aiquiz-cache";
+
+const PREFETCH_BATCH = 10;
 
 const SESSION_MAX = 10;
 
@@ -39,20 +42,61 @@ export function ReviewSession({
   const [confident, setConfident] = useState(true);
   const [picked, setPicked] = useState<number | null>(null);
   const [results, setResults] = useState<Answered[]>([]);
-  // AI 出题:DeepSeek 现场生成本题;失败自动回退题库
+  // AI 出题:打开即在后台批量预生成并缓存,做完自动补下一批,源源不断
   const [aiMode, setAiMode] = useState(false);
-  const [aiState, setAiState] = useState<{ status: "off" | "loading" | "ready" | "error"; data?: GeneratedQuiz }>({
-    status: "off",
-  });
+  const [cache, setCache] = useState<AiQuizCache>(() => loadAiQuizCache());
+  const [busy, setBusy] = useState(false); // 是否有一批正在生成
+  const [batchError, setBatchError] = useState(false);
+  const cacheRef = useRef(cache);
+  cacheRef.current = cache;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
 
   const learnedCount = useMemo(() => ALL_CARDS.filter((c) => progress.read[c.id]).length, [progress.read]);
 
-  // 各范围可复习题数(到期 + 未测过的新题)
+  // 后台批量预生成:挑一组尚未缓存的卡片,一次调用生成整批并写入缓存
+  const runPrefetch = useCallback((cards: KnowledgeCard[]) => {
+    if (busyRef.current) return;
+    const candidates = cards.filter((c) => !cacheRef.current[c.id]).slice(0, PREFETCH_BATCH);
+    if (candidates.length === 0) return;
+    setBusy(true);
+    setBatchError(false);
+    api
+      .generateQuizBatch({
+        items: candidates.map((c) => ({
+          id: c.id,
+          topic_title: TOPICS.find((t) => t.id === c.topicId)?.title ?? "",
+          title: c.title,
+          core: c.core,
+          example: c.example,
+          pitfall: c.pitfall,
+        })),
+      })
+      .then((res) => setCache((prev) => mergeIntoAiQuizCache(prev, res.results)))
+      .catch(() => setBatchError(true))
+      .finally(() => setBusy(false));
+  }, []);
+
+  // 当前复习范围对应的候选卡池(用于预取即将练到的题;取较大范围保证源源不断)
+  const poolFor = useCallback(
+    (s: Scope): KnowledgeCard[] => {
+      const cards = s === "all" ? ALL_CARDS : CARDS_BY_TOPIC[s];
+      return buildSessionQueue(progress, cards, s, 40).map((i) => i.card);
+    },
+    [progress],
+  );
+
+  const cachedCount = useMemo(
+    () => poolFor("all").filter((c) => cache[c.id]).length,
+    [poolFor, cache],
+  );
+
+  // 各范围可练习的卡片数(学过的即可练;到期数单独用红点标示)
   const scopeCounts = useMemo(() => {
     const counts: Record<string, number> = { all: 0 };
-    counts.all = buildReviewQueue(progress, ALL_CARDS, "all").length;
+    counts.all = countPracticeable(progress, ALL_CARDS, "all");
     for (const t of TOPICS) {
-      counts[t.id] = buildReviewQueue(progress, CARDS_BY_TOPIC[t.id], t.id).length;
+      counts[t.id] = countPracticeable(progress, CARDS_BY_TOPIC[t.id], t.id);
     }
     return counts;
   }, [progress]);
@@ -66,38 +110,30 @@ export function ReviewSession({
 
   const start = (s: Scope) => {
     const cards = s === "all" ? ALL_CARDS : CARDS_BY_TOPIC[s];
-    const q = buildReviewQueue(progress, cards, s).slice(0, SESSION_MAX);
+    const q = buildSessionQueue(progress, cards, s, SESSION_MAX);
     setScope(s);
     setQueue(q);
     setIndex(0);
     setPicked(null);
     setConfident(true);
     setResults([]);
+    // 确保本组题已(或正在)预生成
+    if (aiMode) runPrefetch(q.map((i) => i.card));
   };
 
-  // AI 模式下,进入每道题时向 DeepSeek 请求一道现场生成的题目
+  // 打开 AI 出题的那一刻:立即在后台批量预生成一批题并缓存
   useEffect(() => {
-    if (!queue || index >= queue.length) return;
-    if (!aiMode) {
-      setAiState({ status: "off" });
-      return;
-    }
-    const card = queue[index].card;
-    let cancelled = false;
-    setAiState({ status: "loading" });
-    api
-      .generateQuiz({
-        topic_title: TOPICS.find((t) => t.id === card.topicId)?.title ?? "",
-        title: card.title,
-        core: card.core,
-        example: card.example,
-        pitfall: card.pitfall,
-        avoid_question: card.quiz.question,
-      })
-      .then((d) => { if (!cancelled) setAiState({ status: "ready", data: d }); })
-      .catch(() => { if (!cancelled) setAiState({ status: "error" }); });
-    return () => { cancelled = true; };
-  }, [aiMode, queue, index]);
+    if (aiMode && learnedCount > 0) runPrefetch(poolFor("all"));
+    // 仅在开关切换时触发一次预取
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiMode]);
+
+  // 做完一组后自动补下一批,保持"源源不断"
+  const finished = queue !== null && index >= queue.length;
+  useEffect(() => {
+    if (aiMode && finished && learnedCount > 0) runPrefetch(poolFor("all"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiMode, finished]);
 
   // ── 尚未开始:选择范围 ──
   if (!queue) {
@@ -125,9 +161,19 @@ export function ReviewSession({
             <p className="flex items-center gap-1.5 text-sm font-medium">
               AI 出题
               <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">DeepSeek</span>
+              {aiMode && busy && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-normal text-primary">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  准备中
+                </span>
+              )}
             </p>
             <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-              每题由 deepseek-v4-pro 现场生成,更新鲜、更考应用;失败自动回退题库
+              {aiMode
+                ? busy
+                  ? "正在后台批量生成题目并缓存,做完自动续上,源源不断"
+                  : `已备好 ${cachedCount} 道题,即点即答,零等待`
+                : "打开即后台批量出题并缓存,复习时即时呈现,不用等"}
             </p>
           </div>
           <button
@@ -142,7 +188,7 @@ export function ReviewSession({
           >
             <span
               className={cn(
-                "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
+                "absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform",
                 aiMode ? "translate-x-[22px]" : "translate-x-0.5",
               )}
             />
@@ -283,17 +329,19 @@ export function ReviewSession({
   // ── 答题中 ──
   const item = queue[index];
   const card = item.card;
-  const aiLoading = aiMode && aiState.status === "loading";
-  const aiError = aiMode && aiState.status === "error";
-  const usingAi = aiMode && aiState.status === "ready" && !!aiState.data;
+  // 缓存里已有预生成的 AI 题 → 立即使用;否则若正在批量生成则显示等待;都没有则回退题库
+  const cachedQuiz = aiMode ? cache[card.id] : undefined;
+  const usingAi = !!cachedQuiz;
+  const aiLoading = aiMode && !cachedQuiz && busy; // 后台批量还在生成本题
+  const aiError = aiMode && !cachedQuiz && !busy && batchError;
   const staticShuffled = shuffledOptions(card);
-  const current = usingAi
+  const current = cachedQuiz
     ? {
-        type: aiState.data!.type as string,
-        question: aiState.data!.question,
-        options: aiState.data!.options,
-        answer: aiState.data!.answer,
-        explanation: aiState.data!.explanation,
+        type: cachedQuiz.type as string,
+        question: cachedQuiz.question,
+        options: cachedQuiz.options,
+        answer: cachedQuiz.answer,
+        explanation: cachedQuiz.explanation,
       }
     : {
         type: card.quiz.type as string,
@@ -379,8 +427,8 @@ export function ReviewSession({
         {aiLoading ? (
           <div className="mt-5 flex flex-col items-center gap-2.5 py-10 text-center">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <p className="text-sm font-medium">DeepSeek 正在出题…</p>
-            <p className="text-[11px] text-muted-foreground">根据「{card.title}」现场生成一道新题</p>
+            <p className="text-sm font-medium">DeepSeek 正在批量准备题目…</p>
+            <p className="text-[11px] text-muted-foreground">正在后台一次生成整组题,稍等片刻,之后即时出题</p>
           </div>
         ) : (
           <>
