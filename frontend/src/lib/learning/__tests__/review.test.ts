@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReviewQueue, countDueReviews, shuffledOptions } from "../review";
+import { buildReviewQueue, buildSessionQueue, countPracticeable, countDueReviews, shuffledOptions } from "../review";
 import { emptyProgress, type LearningProgress } from "../progress";
 import type { KnowledgeCard } from "../types";
 
@@ -59,6 +59,55 @@ describe("buildReviewQueue", () => {
     const p: LearningProgress = { ...emptyProgress(), read: { a: now, x: now } };
     const q = buildReviewQueue(p, mixed, "risk", now);
     expect(q.map((i) => i.card.id)).toEqual(["x"]);
+  });
+});
+
+describe("buildSessionQueue (再来一组 always has cards)", () => {
+  const now = Date.UTC(2026, 6, 22, 10);
+  const cards = [card("a"), card("b"), card("c"), card("d")];
+
+  it("returns a full set even when nothing is due (all answered, pushed to future)", () => {
+    // 全部学过且都答对推到未来 → buildReviewQueue 为空,但仍应补足练习题
+    const future = now + 3 * DAY;
+    const p: LearningProgress = {
+      ...emptyProgress(),
+      read: { a: now, b: now, c: now, d: now },
+      quiz: {
+        a: { box: 2, due: future, correct: 1, wrong: 0, lastAt: now },
+        b: { box: 2, due: future, correct: 1, wrong: 0, lastAt: now },
+        c: { box: 2, due: future, correct: 1, wrong: 0, lastAt: now },
+        d: { box: 2, due: future, correct: 1, wrong: 0, lastAt: now },
+      },
+    };
+    expect(buildReviewQueue(p, cards, "all", now)).toHaveLength(0);
+    const session = buildSessionQueue(p, cards, "all", 10, now);
+    expect(session.length).toBe(4); // 用学过的卡片补足
+    expect(session.every((i) => i.due === false)).toBe(true);
+  });
+
+  it("caps at max and prioritizes due items first", () => {
+    const p: LearningProgress = {
+      ...emptyProgress(),
+      read: { a: now, b: now, c: now, d: now },
+      quiz: { a: { box: 1, due: now - DAY, correct: 0, wrong: 1, lastAt: now } }, // a is due
+    };
+    const session = buildSessionQueue(p, cards, "all", 2, now);
+    expect(session).toHaveLength(2);
+    expect(session[0].card.id).toBe("a"); // due first
+  });
+
+  it("only draws from learned cards", () => {
+    const p: LearningProgress = { ...emptyProgress(), read: { a: now } };
+    const session = buildSessionQueue(p, cards, "all", 10, now);
+    expect(session.map((i) => i.card.id)).toEqual(["a"]);
+  });
+});
+
+describe("countPracticeable", () => {
+  const now = Date.UTC(2026, 6, 22, 10);
+  it("counts learned cards in scope regardless of due", () => {
+    const p: LearningProgress = { ...emptyProgress(), read: { a: now, b: now } };
+    expect(countPracticeable(p, [card("a"), card("b"), card("c")], "all")).toBe(2);
   });
 });
 
