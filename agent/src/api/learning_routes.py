@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -461,6 +462,60 @@ def _generate_cards(req: GenerateCardsRequest) -> list[GeneratedCard]:
     return cards
 
 
+# 每个子请求生成的卡片数;拆小可显著降低单次耗时,避免逼近超时导致失败
+_CARD_CHUNK = 4
+
+
+async def _generate_cards_parallel(req: GenerateCardsRequest) -> list[GeneratedCard]:
+    """把一次大生成拆成若干小块并行调用,再合并去重截断。
+
+    单次生成 10 张完整卡片约需两分钟,常逼近超时而失败;拆成每块 4 张并行,
+    单块只需数十秒,整体墙钟时间约减半且更稳定。略微多生成以抵消跨块去重损耗。
+    """
+    target = req.count
+    if target <= _CARD_CHUNK:
+        return await anyio.to_thread.run_sync(_generate_cards, req)
+
+    # 多生成 2 张的缓冲,分块;各块用相同 existing_titles,跨块重复事后去重
+    sizes: list[int] = []
+    remaining = target + 2
+    while remaining > 0:
+        s = min(_CARD_CHUNK, remaining)
+        sizes.append(s)
+        remaining -= s
+
+    chunk_reqs = [
+        GenerateCardsRequest(
+            topic_id=req.topic_id,
+            topic_title=req.topic_title,
+            topic_subtitle=req.topic_subtitle,
+            existing_titles=req.existing_titles,
+            count=size,
+        )
+        for size in sizes
+    ]
+    results = await asyncio.gather(
+        *(anyio.to_thread.run_sync(_generate_cards, cr) for cr in chunk_reqs),
+        return_exceptions=True,
+    )
+
+    seen = {t.strip().lower() for t in req.existing_titles if t.strip()}
+    merged: list[GeneratedCard] = []
+    for res in results:
+        if isinstance(res, BaseException):
+            logger.warning("card chunk failed: %s", res)
+            continue
+        for card in res:
+            key = card.title.strip().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(card)
+    if not merged:
+        raise ValueError("all card chunks failed")
+    return merged[:target]
+
+
 def register_learning_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
     router = APIRouter(prefix="/learning", dependencies=[Depends(require_auth)])
 
@@ -488,7 +543,7 @@ def register_learning_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
     @router.post("/generate-cards", response_model=GenerateCardsResponse)
     async def generate_cards(req: GenerateCardsRequest) -> GenerateCardsResponse:
         try:
-            cards = await anyio.to_thread.run_sync(_generate_cards, req)
+            cards = await _generate_cards_parallel(req)
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001
