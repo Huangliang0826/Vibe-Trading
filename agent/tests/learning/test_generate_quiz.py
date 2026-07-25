@@ -140,6 +140,7 @@ def test_request_model_length_guard():
 
 from src.api.learning_routes import (  # noqa: E402
     GenerateCardsRequest,
+    _CARD_CHUNK,
     _validate_card,
 )
 
@@ -184,8 +185,35 @@ def test_validate_card_normalizes_bad_difficulty_and_type():
 
 
 def test_generate_cards_route(monkeypatch):
-    batch = {"cards": [_good_card(f"知识点{i}") for i in range(10)]}
+    # count <= chunk size 走单块路径
+    batch = {"cards": [_good_card(f"知识点{i}") for i in range(6)]}
     monkeypatch.setattr(learning_routes, "_call_deepseek", lambda *a, **k: json.dumps(batch))
+    app = FastAPI()
+    register_learning_routes(app, require_auth=lambda: None)
+    resp = TestClient(app).post(
+        "/learning/generate-cards",
+        json={"topic_id": "market", "topic_title": "市场与交易机制", "count": 4},
+    )
+    assert resp.status_code == 200
+    cards = resp.json()["cards"]
+    assert len(cards) == 4
+    assert all(c["quiz"]["options"][c["quiz"]["answer"]] == "对的做法" for c in cards)
+
+
+def test_generate_cards_route_parallel_merges_to_target(monkeypatch):
+    """count>chunk 时并行分块生成,合并去重后达到目标数量。"""
+    import itertools
+    import threading
+
+    counter = itertools.count()
+    lock = threading.Lock()
+
+    def distinct_cards(*a, **k):
+        with lock:
+            base = next(counter)
+        return json.dumps({"cards": [_good_card(f"P{base}-{i}") for i in range(_CARD_CHUNK)]})
+
+    monkeypatch.setattr(learning_routes, "_call_deepseek", distinct_cards)
     app = FastAPI()
     register_learning_routes(app, require_auth=lambda: None)
     resp = TestClient(app).post(
@@ -194,8 +222,8 @@ def test_generate_cards_route(monkeypatch):
     )
     assert resp.status_code == 200
     cards = resp.json()["cards"]
-    assert len(cards) == 10
-    assert all(c["quiz"]["options"][c["quiz"]["answer"]] == "对的做法" for c in cards)
+    assert len(cards) == 10  # 分块并行 + 合并后达到目标
+    assert len({c["title"] for c in cards}) == 10  # 跨块去重,标题唯一
 
 
 def test_generate_cards_dedupes_within_batch_and_against_existing(monkeypatch):
