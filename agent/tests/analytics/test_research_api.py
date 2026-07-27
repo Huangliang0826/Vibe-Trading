@@ -20,11 +20,13 @@ def research_client(tmp_path):
     return TestClient(app), store
 
 
-def seed_quality(store, *, subject, market, horizon, metric, value, sample_count):
+def seed_quality(store, *, subject, market, horizon, metric, value, sample_count, as_of=None):
+    # Default to today so freshness (≤2d) and coverage (30d window) stay valid
+    # over time — a hardcoded date silently rots the suite.
     store.append_events([make_quality_event(
         subject_type=subject, subject_id="all", market=market, horizon=horizon,
         regime="all", metric_name=metric, metric_value=value, sample_count=sample_count,
-        formula_version=f"{subject}.v1", as_of=date(2026, 7, 13),
+        formula_version=f"{subject}.v1", as_of=as_of or date.today(),
     )])
 
 
@@ -51,12 +53,13 @@ def test_research_api_reports_source_coverage_and_freshness(tmp_path):
         value=0.57,
         sample_count=21,
     )
+    today = date.today().isoformat()
     store.upsert_source_state(SourceSyncState(
         source="scanner",
         status="available",
-        last_attempted_at="2026-07-13T10:00:00Z",
-        last_success_at="2026-07-13T10:00:00Z",
-        data_through="2026-07-13",
+        last_attempted_at=f"{today}T10:00:00Z",
+        last_success_at=f"{today}T10:00:00Z",
+        data_through=today,
         records_scanned=21,
         events_written=1,
         coverage_days=1,
