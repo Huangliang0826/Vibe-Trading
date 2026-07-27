@@ -94,6 +94,29 @@ port_owner() {
   fi
 }
 
+# Kill whatever is LISTENing on a port (graceful TERM, then forceful KILL).
+# Lets restart reclaim a port even when the service was started outside
+# scripts/dev (manual nohup, a previous shell, an editor task, ...).
+reclaim_port() {
+  local host="$1"
+  local port="$2"
+  port_is_listening "$host" "$port" || return 0
+  command -v lsof >/dev/null 2>&1 || return 0
+  local pids
+  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ')"
+  [[ -n "${pids// /}" ]] || return 0
+  printf "reclaiming port %s (pid %s)...\n" "$port" "$pids"
+  # shellcheck disable=SC2086
+  kill -TERM $pids 2>/dev/null || true
+  for _ in $(seq 1 24); do
+    port_is_listening "$host" "$port" || return 0
+    sleep 0.25
+  done
+  # shellcheck disable=SC2086
+  kill -KILL $pids 2>/dev/null || true
+  sleep 0.3
+}
+
 start_service() {
   local service="$1"
   shift
@@ -128,22 +151,32 @@ PY
 
 stop_service() {
   local service="$1"
+  local host="" port=""
+  case "$service" in
+    backend) host="$BACKEND_HOST"; port="$BACKEND_PORT" ;;
+    frontend) host="$FRONTEND_HOST"; port="$FRONTEND_PORT" ;;
+  esac
+
   local file
   file="$(pid_file "$service")"
-  if ! [[ -f "$file" ]]; then
-    printf "%s not started by scripts/dev\n" "$service"
-    return
+  if [[ -f "$file" ]]; then
+    local pid
+    pid="$(cat "$file")"
+    if kill -0 "$pid" 2>/dev/null; then
+      printf "stopping %s (pid %s)...\n" "$service" "$pid"
+      kill -TERM "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+      sleep 0.5
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    fi
+    rm -f "$file"
   fi
 
-  local pid
-  pid="$(cat "$file")"
-  if kill -0 "$pid" 2>/dev/null; then
-    printf "stopping %s (pid %s)...\n" "$service" "$pid"
-    kill -TERM "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
-    sleep 0.5
-    kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  # Always reclaim the port, even when the service was started outside
+  # scripts/dev — this is what makes `restart` reliable regardless of how the
+  # process was launched (and lets a fresh frontend reload vite.config).
+  if [[ -n "$port" ]]; then
+    reclaim_port "$host" "$port"
   fi
-  rm -f "$file"
 }
 
 url_ok() {
