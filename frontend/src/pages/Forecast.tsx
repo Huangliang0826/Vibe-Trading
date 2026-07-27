@@ -304,7 +304,7 @@ function ForecastCard({
   }, [market, code, context, displayHistory, cacheKey]);
 
   return (
-    <div id={forecastCardId(market, code)} className="app-panel scroll-mt-24">
+    <div className="app-panel">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-normal text-foreground">{data?.name && data.name !== code ? data.name : code}</span>
@@ -452,6 +452,91 @@ function ForecastCard({
           ) : bestStrategy?.summary ? (
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{bestStrategy.summary}</p>
           ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── rate-limited lazy mount for per-stock charts ─────────────────────────────
+// The watchlist can hold 20+ stocks; mounting every ForecastChart (ECharts) at
+// once janks the main thread (especially on phones) and makes the page feel
+// frozen / navigation unresponsive. A global scheduler mounts at most one chart
+// per interval so there is never a burst, regardless of viewport/IO behavior;
+// cards scrolled into view jump the queue so they appear promptly.
+
+const MOUNT_INTERVAL_MS = 300;
+const _mountQueue: { id: string; run: () => void }[] = [];
+let _draining = false;
+
+function _drainMountQueue() {
+  if (_draining) return;
+  _draining = true;
+  const step = () => {
+    const job = _mountQueue.shift();
+    if (!job) { _draining = false; return; }
+    job.run();
+    setTimeout(step, MOUNT_INTERVAL_MS);
+  };
+  step();
+}
+
+function scheduleMount(id: string, run: () => void, prioritize = false) {
+  const existing = _mountQueue.findIndex((j) => j.id === id);
+  if (existing >= 0) {
+    if (prioritize) _mountQueue.unshift(..._mountQueue.splice(existing, 1));
+    return;
+  }
+  const job = { id, run };
+  if (prioritize) _mountQueue.unshift(job);
+  else _mountQueue.push(job);
+  _drainMountQueue();
+}
+
+function LazyForecastCard(props: {
+  market: WatchlistMarket;
+  code: string;
+  context: number;
+  displayHistory: number;
+  bestStrategyState?: BestStrategyState;
+  onRefreshBestStrategy: (market: WatchlistMarket, code: string, refresh?: boolean, strategy?: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const id = `${props.market}-${props.code}`;
+
+  useEffect(() => {
+    if (show) return;
+    let cancelled = false;
+    const mount = () => { if (!cancelled) setShow(true); };
+    scheduleMount(id, mount); // queued mount (rate-limited)
+
+    // Scrolled into view → jump the queue so it appears promptly.
+    const el = ref.current;
+    let io: IntersectionObserver | undefined;
+    if (el && typeof IntersectionObserver !== "undefined") {
+      io = new IntersectionObserver(
+        (entries) => { if (entries.some((e) => e.isIntersecting)) scheduleMount(id, mount, true); },
+        { rootMargin: "300px" },
+      );
+      io.observe(el);
+    }
+    return () => { cancelled = true; io?.disconnect(); };
+  }, [id, show]);
+
+  return (
+    <div
+      ref={ref}
+      id={forecastCardId(props.market, props.code)}
+      className="scroll-mt-24"
+      style={show ? undefined : { minHeight: 420 }}
+    >
+      {show ? (
+        <ForecastCard {...props} />
+      ) : (
+        <div className="app-panel animate-pulse" style={{ height: 420 }}>
+          <div className="h-4 w-32 rounded bg-muted" />
+          <div className="mt-4 h-[320px] rounded-xl bg-muted/40" />
         </div>
       )}
     </div>
@@ -611,7 +696,7 @@ export function Forecast() {
           <RecentSignalsPanel signals={recentSignals} loadingCount={bestLoadingCount} errorCount={bestErrorCount} />
           <ForecastWatchlistLinks items={watchlistItems} states={bestByKey} />
           {watchlistItems.map((item) => (
-            <ForecastCard
+            <LazyForecastCard
               key={`${item.market}-${item.code}-${context}`}
               market={item.market}
               code={item.code}
