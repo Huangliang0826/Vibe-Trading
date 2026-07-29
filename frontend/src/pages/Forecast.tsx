@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { LineChart, Loader2, AlertTriangle, TrendingUp } from "lucide-react";
+import { LineChart, Loader2, AlertTriangle, TrendingUp, RefreshCw } from "lucide-react";
 import { api, type WatchlistMarket, type ForecastResponse, type HSTechBestStrategyResponse, type TradeSignal } from "@/lib/api";
 import { ForecastChart } from "@/components/charts/ForecastChart";
 import { cn } from "@/lib/utils";
@@ -264,6 +264,7 @@ function ForecastCard({
   const initialCached = useRef(readSessionCache<ForecastResponse>(cacheKey, FORECAST_SESSION_TTL));
   const [data, setData] = useState<ForecastResponse | null>(initialCached.current);
   const [loading, setLoading] = useState(!initialCached.current);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bestStrategy = bestStrategyState?.data || null;
   const bestStrategyLoading = !!bestStrategyState?.loading;
@@ -287,21 +288,49 @@ function ForecastCard({
     onRefreshBestStrategy(market, code, false, override);
   };
 
-  useEffect(() => {
+  // ``nocache=1`` bypasses both the browser session cache and the backend's
+  // 48h forecast cache so the cone is rebuilt from the latest available bars.
+  const loadForecast = useCallback((nocache: 0 | 1) => {
     let cancelled = false;
-    setLoading(!initialCached.current);
+    if (nocache) setRefreshing(true);
+    else setLoading(!initialCached.current);
     setError(null);
-    api.getForecast(market, code, 3, context, 0, displayHistory)
+    api.getForecast(market, code, 3, context, nocache, displayHistory)
       .then((d) => {
         if (!cancelled) {
           setData(d);
           writeSessionCache(cacheKey, d);
         }
       })
-      .catch((e) => { if (!cancelled && !initialCached.current) setError(e?.message || "预测失败"); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .catch((e) => {
+        // Keep the stale cone visible on a background refresh failure.
+        if (!cancelled && !(initialCached.current && !nocache)) setError(e?.message || "预测失败");
+      })
+      .finally(() => { if (!cancelled) { setLoading(false); setRefreshing(false); } });
     return () => { cancelled = true; };
   }, [market, code, context, displayHistory, cacheKey]);
+
+  useEffect(() => loadForecast(0), [loadForecast]);
+
+  // Self-heal a stale cone: if the strategy has a signal newer than the cone's
+  // last bar (the two feeds cache independently), the newest entry/exit marker
+  // would sit off the chart. Silently refetch the cone once with nocache so its
+  // history catches up. Guarded by the cone's last date so it never loops.
+  const autoRefreshedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || loading || refreshing) return;
+    const hist = data.history || [];
+    const lastHist = hist.length ? hist[hist.length - 1]?.date : "";
+    if (!lastHist || !trades.length) return;
+    const latestSignal = trades.reduce((max, t) => {
+      const d = t.exit_reason === "end_of_backtest" ? t.entry_date : (t.exit_date || t.entry_date);
+      return d && d > max ? d : max;
+    }, "");
+    if (latestSignal > lastHist && autoRefreshedForRef.current !== lastHist) {
+      autoRefreshedForRef.current = lastHist;
+      loadForecast(1);
+    }
+  }, [data, trades, loading, refreshing, loadForecast]);
 
   return (
     <div className="app-panel">
@@ -331,6 +360,15 @@ function ForecastCard({
               </span>
             </div>
           )}
+          <button
+            onClick={() => loadForecast(1)}
+            disabled={refreshing || loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] text-muted-foreground transition hover:border-foreground/30 hover:text-foreground disabled:opacity-50"
+            title="绕过缓存，用最新可得的行情重新计算走势预测"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+            {refreshing ? "重算中" : "用最新数据重算"}
+          </button>
           <button
             onClick={() => onRefreshBestStrategy(market, code, true)}
             disabled={bestStrategyLoading}

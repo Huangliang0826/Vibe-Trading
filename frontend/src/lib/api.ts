@@ -535,6 +535,8 @@ export const api = {
     if (release) query.set("release", release);
     return request<AnalyticsDevelopmentResponse>(`/api/analytics/development?${query}`);
   },
+  getEdgeScorecard: (days: AnalyticsDays = 90, costBps = 15) =>
+    request<EdgeScorecardResponse>(`/api/analytics/edge-scorecard?days=${days}&cost_bps=${costBps}`),
 
 };
 
@@ -636,6 +638,40 @@ export interface AnalyticsResearchQualityResponse {
   series: AnalyticsResearchSeriesPoint[];
   freshness: AnalyticsFreshness;
   coverage: AnalyticsCoverage;
+}
+
+export type EdgeVerdict = "edge" | "no_edge" | "insufficient";
+export type EdgeConfidence = "significant" | "point_estimate" | "insufficient";
+
+export interface EdgeScorecardRow {
+  id: string;
+  source: "scanner" | "forecast" | "paper_trading";
+  market: string;
+  horizon: string;
+  subject_id: string;
+  metric: string;
+  metric_label: string;
+  unit: "pct" | "accuracy" | "sharpe";
+  baseline: number;
+  gross_value: number | null;
+  value: number | null;
+  cost_applied: number;
+  interval_low: number | null;
+  interval_high: number | null;
+  sample_count: number;
+  verdict: EdgeVerdict;
+  confidence: EdgeConfidence;
+  data_through: string | null;
+  freshness: AnalyticsFreshness;
+}
+
+export interface EdgeScorecardResponse {
+  generated_at: string;
+  calculation_version: string;
+  days: AnalyticsDays;
+  cost_bps: number;
+  summary: { edge: number; no_edge: number; insufficient: number };
+  rows: EdgeScorecardRow[];
 }
 
 export interface AnalyticsCommit {

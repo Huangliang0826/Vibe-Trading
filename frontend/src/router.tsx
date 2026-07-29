@@ -77,6 +77,7 @@ export const router = createBrowserRouter([
       { path: "/hstech", element: wrap(HSTech) },
       { path: "/paper-trading", element: wrap(PaperTrading) },
       { path: "/learning", element: wrap(Learning) },
+      { path: "/edge", element: <Navigate to="/settings?tab=edge" replace /> },
       { path: "/analytics", element: <Navigate to="/settings?tab=analytics" replace /> },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },

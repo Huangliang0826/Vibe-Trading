@@ -11,6 +11,7 @@ from .store import AnalyticsStore
 from .statistics import wilson_interval
 from .git_activity import GitActivityReader
 from .development import group_commits, rank_module_churn
+from .edge import EDGE_SPECS, EdgeSpec, evaluate_edge, pool_rate
 
 
 def _iso_now() -> str:
@@ -151,6 +152,126 @@ class AnalyticsService:
                 sources=[state.model_dump(mode="json") for state in source_states],
             ),
         }
+
+    def edge_scorecard(self, *, days: int, cost_bps: float = 15.0) -> dict[str, Any]:
+        """Per-signal-source verdict: after costs, vs a do-nothing baseline —
+        does each source demonstrate an edge, and how confident are we?"""
+        today = datetime.now(timezone.utc).date()
+        start = datetime.combine(today - timedelta(days=days - 1), datetime.min.time(), tzinfo=timezone.utc)
+        end = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        events = self.store.query_events(kind="quality", start=start, end=end)
+
+        rows: list[dict[str, Any]] = []
+        for subject, spec in EDGE_SPECS.items():
+            metric_events = [
+                e for e in events
+                if e.metadata.get("subject_type") == subject
+                and e.metadata.get("metric_name") == spec.metric
+            ]
+            if not metric_events:
+                continue
+            error_sources = any(s.status == "error" for s in self.store.get_source_states(subject))
+            if subject == "forecast":
+                rows.extend(self._forecast_rows(metric_events, spec, cost_bps, error_sources))
+            else:
+                rows.extend(self._grouped_rows(subject, metric_events, spec, cost_bps, error_sources))
+
+        # Sort: edges first, then no_edge, then insufficient; strongest sample first.
+        order = {"edge": 0, "no_edge": 1, "insufficient": 2}
+        rows.sort(key=lambda r: (order.get(r["verdict"], 3), -(r["sample_count"] or 0)))
+        summary = {
+            "edge": sum(1 for r in rows if r["verdict"] == "edge"),
+            "no_edge": sum(1 for r in rows if r["verdict"] == "no_edge"),
+            "insufficient": sum(1 for r in rows if r["verdict"] == "insufficient"),
+        }
+        return {
+            "generated_at": _iso_now(),
+            "calculation_version": CALCULATION_VERSION,
+            "days": days,
+            "cost_bps": cost_bps,
+            "summary": summary,
+            "rows": rows,
+        }
+
+    def _latest_by_group(self, events: list[Any], key) -> dict[Any, Any]:
+        latest: dict[Any, Any] = {}
+        for e in events:
+            k = key(e)
+            prev = latest.get(k)
+            if prev is None or str(e.metadata.get("as_of") or "") >= str(prev.metadata.get("as_of") or ""):
+                latest[k] = e
+        return latest
+
+    def _row(self, *, subject: str, spec: EdgeSpec, market: str, horizon: str, subject_id: str,
+             value, low, high, sample_count: int, as_of: str | None, cost_bps: float,
+             error_sources: bool) -> dict[str, Any]:
+        a = evaluate_edge(spec, value=value, interval_low=low, interval_high=high,
+                          sample_count=sample_count, cost_bps=cost_bps)
+        return {
+            "id": f"{subject}:{market}:{horizon}:{subject_id}",
+            "source": subject,
+            "market": market,
+            "horizon": horizon,
+            "subject_id": subject_id,
+            "metric": spec.metric,
+            "metric_label": spec.label,
+            "unit": spec.unit,
+            "baseline": spec.baseline,
+            "gross_value": value,
+            "value": a.net_value,
+            "cost_applied": a.cost_applied,
+            "interval_low": a.net_low,
+            "interval_high": a.net_high,
+            "sample_count": sample_count,
+            "verdict": a.verdict,
+            "confidence": a.confidence,
+            "data_through": as_of,
+            "freshness": _freshness(as_of, source_error=error_sources),
+        }
+
+    def _grouped_rows(self, subject: str, events: list[Any], spec: EdgeSpec,
+                      cost_bps: float, error_sources: bool) -> list[dict[str, Any]]:
+        latest = self._latest_by_group(
+            events,
+            lambda e: (e.metadata.get("market"), e.metadata.get("horizon"), e.metadata.get("subject_id")),
+        )
+        out = []
+        for (market, horizon, subject_id), e in latest.items():
+            m = e.metadata
+            out.append(self._row(
+                subject=subject, spec=spec, market=str(market), horizon=str(horizon),
+                subject_id=str(subject_id), value=m.get("metric_value"),
+                low=m.get("interval_low"), high=m.get("interval_high"),
+                sample_count=int(m.get("sample_count") or 0),
+                as_of=str(m.get("as_of")) if m.get("as_of") else None,
+                cost_bps=cost_bps, error_sources=error_sources,
+            ))
+        return out
+
+    def _forecast_rows(self, events: list[Any], spec: EdgeSpec,
+                       cost_bps: float, error_sources: bool) -> list[dict[str, Any]]:
+        # Pool per-stock directional accuracy into one number per market/horizon.
+        latest = self._latest_by_group(
+            events,
+            lambda e: (e.metadata.get("market"), e.metadata.get("horizon"), e.metadata.get("subject_id")),
+        )
+        groups: dict[tuple[str, str], list[Any]] = {}
+        for (market, horizon, _sid), e in latest.items():
+            groups.setdefault((str(market), str(horizon)), []).append(e)
+        out = []
+        for (market, horizon), evs in groups.items():
+            pairs = [
+                (float(e.metadata["metric_value"]), int(e.metadata.get("sample_count") or 0))
+                for e in evs if e.metadata.get("metric_value") is not None
+            ]
+            rate, total_n, low, high = pool_rate(pairs)
+            as_of = max((str(e.metadata.get("as_of") or "") for e in evs), default="") or None
+            out.append(self._row(
+                subject="forecast", spec=spec, market=market, horizon=horizon,
+                subject_id="pooled", value=rate, low=low, high=high, sample_count=total_n,
+                as_of=as_of, cost_bps=cost_bps, error_sources=error_sources,
+            ))
+        return out
 
     def development(
         self,

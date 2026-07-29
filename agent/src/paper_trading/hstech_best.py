@@ -558,8 +558,15 @@ def summarize_best_strategy(
 def _latest_trade_summary(trades: list[dict[str, Any]], display_code: str = HSTECH_DISPLAY_CODE) -> str:
     if not trades:
         return "最新交易：暂无交易记录，当前没有可跟随的买卖动作。"
-    actionable = [trade for trade in trades if trade.get("exit_reason") != "end_of_backtest"]
-    latest = sorted(actionable or trades, key=lambda tr: str(tr.get("exit_date")), reverse=True)[0]
+    # Pick the most recent trade overall. A still-open position (end_of_backtest)
+    # is the latest actionable state when it was entered after the last closed
+    # exit — filtering it out here would report a stale "已卖出" while the strategy
+    # is actually holding a fresh position.
+    latest = sorted(
+        trades,
+        key=lambda tr: str(tr.get("exit_date") or tr.get("entry_date") or ""),
+        reverse=True,
+    )[0]
     if latest.get("exit_reason") == "end_of_backtest":
         return (
             f"最新交易：最近一次买入是 {latest.get('entry_date')}，价格 {float(latest.get('entry_price') or 0):.2f}；"

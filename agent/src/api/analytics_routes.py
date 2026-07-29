@@ -66,6 +66,13 @@ def register_analytics_routes(
             regime=regime,
         )
 
+    @router.get("/edge-scorecard")
+    async def edge_scorecard(
+        days: AnalyticsDays = 90,
+        cost_bps: float = Query(15.0, ge=0, le=200),
+    ) -> dict[str, Any]:
+        return service.edge_scorecard(days=int(days), cost_bps=cost_bps)
+
     @router.get("/development")
     async def development(
         days: AnalyticsDays = 30,

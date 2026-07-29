@@ -8,7 +8,16 @@ type MarkerDatum = {
   value: [string, number];
   strategyPrice: number;
   pnlPct?: number;
+  // Set when the marker had to be snapped to a nearby bar because the exact
+  // trade date is missing from the (possibly stale/trimmed) chart history.
+  tradeDate?: string;
 };
+
+// How far a trade date may be from the nearest available bar before we give up
+// and drop the marker. Covers the common case where the forecast cone's history
+// lags the strategy signals by a few days (independent caches) or a trade lands
+// on an exchange holiday absent from the price source.
+const SNAP_TOLERANCE_DAYS = 7;
 
 export function buildTradeOverlays(
   bars: ForecastResponse["history"],
@@ -22,15 +31,42 @@ export function buildTradeOverlays(
   const markAreas: { xAxis: string }[][] = [];
   if (!firstDate || !lastDate) return { entryData, exitData, markAreas };
 
-  for (const trade of trades) {
-    const entryDisplayPrice = prices.get(trade.entry_date);
-    const exitDisplayPrice = prices.get(trade.exit_date);
-    if (entryDisplayPrice != null) {
-      entryData.push({ value: [trade.entry_date, entryDisplayPrice], strategyPrice: trade.entry_price });
+  const dayMs = 86_400_000;
+  // Resolve a trade date to a drawable [barDate, close]. An exact bar wins;
+  // otherwise snap to the nearest bar within tolerance so recent signals still
+  // render when the chart history lags the trade history. Returns null when the
+  // date is too far from any bar (e.g. an old trade trimmed off the left edge).
+  const resolve = (date: string): { barDate: string; price: number; snapped: boolean } | null => {
+    const exact = prices.get(date);
+    if (exact != null) return { barDate: date, price: exact, snapped: false };
+    const t = Date.parse(`${date}T00:00:00Z`);
+    if (Number.isNaN(t)) return null;
+    let best: { bar: typeof bars[number]; diff: number } | null = null;
+    for (const bar of bars) {
+      if (bar.close == null || !isFinite(bar.close)) continue;
+      const diff = Math.abs(Date.parse(`${bar.date}T00:00:00Z`) - t);
+      if (best === null || diff < best.diff) best = { bar, diff };
     }
-    if (trade.exit_reason !== "end_of_backtest" && exitDisplayPrice != null) {
+    if (best === null || best.diff > SNAP_TOLERANCE_DAYS * dayMs) return null;
+    return { barDate: best.bar.date, price: best.bar.close, snapped: true };
+  };
+
+  for (const trade of trades) {
+    const entry = resolve(trade.entry_date);
+    const exit = resolve(trade.exit_date);
+    if (entry) {
+      entryData.push({
+        value: [entry.barDate, entry.price],
+        strategyPrice: trade.entry_price,
+        tradeDate: entry.snapped ? trade.entry_date : undefined,
+      });
+    }
+    if (trade.exit_reason !== "end_of_backtest" && exit) {
       exitData.push({
-        value: [trade.exit_date, exitDisplayPrice], strategyPrice: trade.exit_price, pnlPct: trade.pnl_pct,
+        value: [exit.barDate, exit.price],
+        strategyPrice: trade.exit_price,
+        pnlPct: trade.pnl_pct,
+        tradeDate: exit.snapped ? trade.exit_date : undefined,
       });
     }
     if (trade.entry_date <= lastDate && trade.exit_date >= firstDate) {
@@ -148,8 +184,12 @@ export function ForecastChart({ data, height = 320, trades }: Props) {
       const { entryData, exitData, markAreas } = buildTradeOverlays(hist, trades);
       const markerTooltip = {
         formatter: (params: { data: MarkerDatum; seriesName: string }) => {
-          const [date, displayPrice] = params.data.value;
-          return `${params.seriesName}<br/>${date}<br/>图表价格 ${displayPrice.toFixed(2)}<br/>策略复权价 ${params.data.strategyPrice.toFixed(2)}`;
+          const [barDate, displayPrice] = params.data.value;
+          const tradeDate = params.data.tradeDate ?? barDate;
+          const snapNote = params.data.tradeDate
+            ? `<br/><span style="opacity:.65">标记已对齐至最近行情日 ${barDate}</span>`
+            : "";
+          return `${params.seriesName}<br/>${tradeDate}<br/>图表价格 ${displayPrice.toFixed(2)}<br/>策略复权价 ${params.data.strategyPrice.toFixed(2)}${snapNote}`;
         },
       };
       series.push(

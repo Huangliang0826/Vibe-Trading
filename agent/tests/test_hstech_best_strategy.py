@@ -3,6 +3,7 @@ import pandas as pd
 from src.paper_trading.hstech_best import (
     STRATEGY_NAMES,
     _candidate_row,
+    _latest_trade_summary,
     _robust_candidate_row,
     _paired_trade_signals,
     normalize_best_strategy_symbol,
@@ -120,6 +121,31 @@ def test_summary_starts_with_strategy_principle_and_latest_trade():
     assert summary.startswith("策略原理：突破长期高点时买入")
     assert "唐奇安突破" in summary
     assert "最新交易：2024-03-04 卖出 0700" in summary
+
+
+def test_latest_trade_summary_reports_open_position_after_closed_trades():
+    # A newer still-open position must win over an older closed exit, otherwise
+    # the summary claims the strategy already sold while it is actually holding.
+    trades = [
+        {
+            "entry_date": "2025-09-10", "exit_date": "2025-09-29",
+            "entry_price": 56.1, "exit_price": 55.44,
+            "pnl_pct": -1.2, "holding_bars": 13, "exit_reason": "signal",
+        },
+        {
+            "entry_date": "2026-07-28", "exit_date": "2026-07-29",
+            "entry_price": 29.23, "exit_price": 29.26,
+            "pnl_pct": 0.1, "holding_bars": 1, "exit_reason": "end_of_backtest",
+        },
+    ]
+
+    summary = _latest_trade_summary(trades, "1810")
+
+    assert "最近一次买入是 2026-07-28" in summary
+    assert "29.23" in summary
+    # Must not fall back to the older closed exit.
+    assert "2025-09-29" not in summary
+    assert "继续持有或等待下一次信号" in summary
 
 
 def test_candidate_row_keeps_compact_metrics():
