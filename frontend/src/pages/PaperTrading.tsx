@@ -1134,6 +1134,7 @@ export function PaperTrading() {
                   <th className="px-3 py-2 text-right font-medium">总收益</th>
                   <th className="px-3 py-2 text-right font-medium">夏普</th>
                   <th className="px-3 py-2 text-right font-medium">最大亏损</th>
+                  <th className="px-3 py-2 text-right font-medium">最大回撤</th>
                   <th className="px-3 py-2 text-right font-medium">交易数</th>
                   <th className="px-3 py-2 text-left font-medium">状态</th>
                 </tr>
@@ -1165,6 +1166,9 @@ export function PaperTrading() {
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-red-500">
                         {run.status === "completed" ? pct(metrics.max_loss as number) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-red-500">
+                        {run.status === "completed" ? pct(metrics.max_drawdown as number) : "—"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {run.status === "completed" ? String(metrics.trade_count ?? run.trades?.length ?? 0) : "—"}
@@ -1403,8 +1407,16 @@ export function PaperTrading() {
                   value={fmtMoney(m.final_value as number)}
                   tone={(m.final_value as number) > activeRun.initial_total_usd ? "good" : "bad"}
                 />
-                <Stat label="Sortino" value={(m.sortino as number)?.toFixed(2) ?? "—"} />
-                <Stat label="Calmar" value={(m.calmar as number)?.toFixed(2) ?? "—"} />
+                <Stat
+                  label="盈亏比"
+                  value={(m.profit_loss_ratio as number)?.toFixed(2) ?? "—"}
+                  tone={(m.profit_loss_ratio as number) > 1 ? "good" : "neutral"}
+                />
+                <Stat
+                  label="最大回撤"
+                  value={pct(m.max_drawdown as number)}
+                  tone="bad"
+                />
               </div>
 
               {activeRun.experiment && (
