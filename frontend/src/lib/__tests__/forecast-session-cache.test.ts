@@ -28,7 +28,14 @@ describe("forecast session cache", () => {
   });
 
   it("isolates forecast ranges and per-stock strategy caches", () => {
-    expect(forecastSessionKey("cn", "600519", 1260, 1260)).toBe("forecast:cn:600519:1260:1260");
-    expect(strategySessionKey("cn", "600519")).toBe("strategy:v2:cn:600519");
+    expect(forecastSessionKey("cn", "600519", 1260, 1260, "2026-07-31")).toBe("forecast:cn:600519:1260:1260:2026-07-31");
+    expect(strategySessionKey("cn", "600519", "2026-07-31")).toBe("strategy:v2:cn:600519:2026-07-31");
+  });
+
+  it("stamps keys with the local day so cross-day payloads never collide", () => {
+    const d1 = "2026-07-30", d2 = "2026-07-31";
+    expect(forecastSessionKey("us", "AAPL", 1260, 1260, d1))
+      .not.toBe(forecastSessionKey("us", "AAPL", 1260, 1260, d2));
+    expect(strategySessionKey("us", "AAPL", d1)).not.toBe(strategySessionKey("us", "AAPL", d2));
   });
 });

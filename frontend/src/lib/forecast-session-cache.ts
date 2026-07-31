@@ -1,12 +1,23 @@
 const PREFIX = "vibe:forecast-session:";
 
-export function forecastSessionKey(market: string, code: string, context: number, displayHistory: number): string {
-  return `forecast:${market}:${code.toUpperCase()}:${context}:${displayHistory}`;
+// Local calendar date (YYYY-MM-DD). Session cache keys embed it so a payload
+// cached on a previous trading day can never be served today — keeping the
+// browser-side cache in lockstep with the backend's per-day cone/strategy
+// caches. Injectable for deterministic tests.
+export function localDayISO(now = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-export function strategySessionKey(market: string, code: string): string {
+export function forecastSessionKey(market: string, code: string, context: number, displayHistory: number, day = localDayISO()): string {
+  return `forecast:${market}:${code.toUpperCase()}:${context}:${displayHistory}:${day}`;
+}
+
+export function strategySessionKey(market: string, code: string, day = localDayISO()): string {
   // v2: pre-v2 caches stripped `candidates`, which the strategy picker needs.
-  return `strategy:v2:${market}:${code.toUpperCase()}`;
+  return `strategy:v2:${market}:${code.toUpperCase()}:${day}`;
 }
 
 type CacheEnvelope<T> = { savedAt: number; value: T };

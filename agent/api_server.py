@@ -2831,10 +2831,16 @@ async def get_forecast(
 ):
     """Price forecast cone with transparent baseline models."""
     from src.forecast import service
+    from src.paper_trading.hstech_best import default_end_date
 
     market = market.lower()
     horizon = max(1, min(months, 12)) * 21
-    key = f"forecast-v2:{market}:{code.upper()}:{horizon}:{context}:{display_history}"
+    # Stamp the key with the current trading date so the cone rolls over daily,
+    # in lockstep with the strategy-signal cache (which already keys on it).
+    # Without this the cone can serve a payload up to _FORECAST_TTL old while the
+    # signals move on, dropping the newest markers off the chart.
+    as_of = default_end_date()
+    key = f"forecast-v2:{market}:{code.upper()}:{horizon}:{context}:{display_history}:{as_of}"
     if not nocache:
         cached = _FORECAST_CACHE.get(key)
         if cached and (time.time() - cached[0]) < _FORECAST_TTL:
@@ -2880,9 +2886,11 @@ async def get_forecast_calibration(
 ):
     """Walk-forward backtest: TimesFM vs naive baselines."""
     from src.forecast import backtest
+    from src.paper_trading.hstech_best import default_end_date
 
     market = market.lower()
-    key = f"calib:{market}:{code.upper()}:{bt_horizon}:{context}"
+    # Roll over daily alongside the cone and strategy caches (see get_forecast).
+    key = f"calib:{market}:{code.upper()}:{bt_horizon}:{context}:{default_end_date()}"
     cached = _CALIB_CACHE.get(key)
     if cached and (time.time() - cached[0]) < _CALIB_TTL:
         _submit_forecast_quality({**cached[1], "bt_horizon": bt_horizon})
@@ -2973,11 +2981,13 @@ async def get_forecast_strategy(
     """
     from backtest.costs import per_side_cost_bps
     from src.forecast import strategy
+    from src.paper_trading.hstech_best import default_end_date
 
     market = market.lower()
     if cost_bps is None:
         cost_bps = round(per_side_cost_bps(market), 2)
-    key = f"strategy:{market}:{code.upper()}:{context}:{rebalance}:{cost_bps}"
+    # Roll over daily alongside the cone and strategy-signal caches.
+    key = f"strategy:{market}:{code.upper()}:{context}:{rebalance}:{cost_bps}:{default_end_date()}"
     cached = _STRATEGY_CACHE.get(key)
     if cached and (time.time() - cached[0]) < _STRATEGY_TTL:
         return {**cached[1], "cached": True}
