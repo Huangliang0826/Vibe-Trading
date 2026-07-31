@@ -4513,6 +4513,51 @@ async def live_status_endpoint(broker: Optional[str] = Query(None, max_length=64
     return LiveStatusResponse(global_halted=halt_flag_set(broker=None), brokers=statuses)
 
 
+def _redact_account(account: dict) -> dict:
+    """Drop the raw broker account number before sending to the UI."""
+    inner = account.get("account")
+    if isinstance(inner, dict):
+        inner = {k: v for k, v in inner.items() if k not in {"account_number", "account_id", "id"}}
+        account = {**account, "account": inner}
+    return {k: v for k, v in account.items() if k not in {"account_number", "account_id"}}
+
+
+@app.get("/live/paper-snapshot", dependencies=[Depends(require_auth)])
+async def trading_snapshot_endpoint(
+    profile_id: str = Query("alpaca-paper-trade", max_length=64),
+):
+    """Read-only live snapshot of a trading connector profile for the UI.
+
+    Combines account, positions and open orders into one poll so the paper
+    monitoring cockpit can render current state. Read-only: places no orders and
+    never returns the broker account number.
+    """
+    from src.trading import service
+
+    pid = profile_id.strip()
+    try:
+        account = await asyncio.to_thread(service.get_account, pid)
+        positions = await asyncio.to_thread(service.get_positions, pid)
+        orders = await asyncio.to_thread(service.get_open_orders, pid)
+    except ValueError as exc:  # unknown profile id
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"snapshot failed: {exc}") from exc
+
+    return {
+        "profile_id": pid,
+        "connected": account.get("status") == "ok",
+        "environment": account.get("environment"),
+        "is_paper": account.get("is_paper"),
+        "account": _redact_account(account).get("account"),
+        "account_error": account.get("error"),
+        "positions": positions.get("positions") or [],
+        "positions_error": positions.get("error"),
+        "open_orders": orders.get("open_orders") or [],
+        "orders_error": orders.get("error"),
+    }
+
+
 @app.post("/live/authorize", dependencies=[Depends(require_auth)])
 async def live_authorize_endpoint(payload: LiveAuthorizeRequest):
     """Describe the OAuth bootstrap on-ramp for a live broker (C2 web on-ramp).

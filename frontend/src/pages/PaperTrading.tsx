@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
 import { buildRobustWinnerRunRequest } from "@/lib/paper-trading-robust";
 import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 import { AssetManagementTab } from "@/components/paper-trading/AssetManagementTab";
+import { LivePaperTab } from "@/components/paper-trading/LivePaperTab";
 
-type PaperTradingTab = "history" | "assets";
+type PaperTradingTab = "history" | "assets" | "paper";
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" | "neutral" }) {
   const color = tone === "good" ? "text-emerald-600 dark:text-emerald-400"
@@ -838,9 +839,11 @@ export function PaperTrading() {
       <div className="app-segmented">
         <button type="button" onClick={() => setTab("history")} className={cn("app-segmented-item", tab === "history" && "bg-primary text-primary-foreground shadow-sm")}>历史回测</button>
         <button type="button" onClick={() => setTab("assets")} className={cn("app-segmented-item", tab === "assets" && "bg-primary text-primary-foreground shadow-sm")}>资产管理</button>
+        <button type="button" onClick={() => setTab("paper")} className={cn("app-segmented-item", tab === "paper" && "bg-primary text-primary-foreground shadow-sm")}>Paper 账户</button>
       </div>
 
       {tab === "assets" && <AssetManagementTab />}
+      {tab === "paper" && <LivePaperTab />}
       {tab === "history" && <>
 
       <div className="app-panel space-y-4">

@@ -128,6 +128,19 @@ export interface GeneratedCard {
   quiz: GeneratedQuiz;
 }
 
+export interface TradingSnapshot {
+  profile_id: string;
+  connected: boolean;
+  environment: string | null;
+  is_paper: boolean | null;
+  account: Record<string, unknown> | null;
+  account_error?: string | null;
+  positions: Record<string, unknown>[];
+  positions_error?: string | null;
+  open_orders: Record<string, unknown>[];
+  orders_error?: string | null;
+}
+
 export const api = {
   uploadFile,
   listRuns: () => request<RunListItem[]>("/runs"),
@@ -218,6 +231,10 @@ export const api = {
     request<{ status: string; run_id: string }>(`/research-analysis/runs/${encodeURIComponent(runId)}`, {
       method: "DELETE",
     }),
+
+  // Live paper account (broker sandbox) — read-only monitoring snapshot
+  getTradingSnapshot: (profileId = "alpaca-paper-trade") =>
+    request<TradingSnapshot>(`/live/paper-snapshot?profile_id=${encodeURIComponent(profileId)}`),
 
   // 模拟盘 (Paper Trading)
   createPaperTradingRun: (body: PaperTradingCreate) =>
@@ -412,6 +429,11 @@ export const api = {
     }),
   haltLive: (session_id?: string, broker?: string, reason?: string) =>
     request<HaltLiveResponse>("/live/halt", {
+      method: "POST",
+      body: JSON.stringify({ session_id, broker, reason }),
+    }),
+  resumeLive: (session_id?: string, broker?: string, reason?: string) =>
+    request<HaltLiveResponse>("/live/resume", {
       method: "POST",
       body: JSON.stringify({ session_id, broker, reason }),
     }),
