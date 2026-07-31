@@ -62,7 +62,16 @@ function forecastCardId(market: WatchlistMarket, code: string): string {
 
 function scrollToForecastCard(market: WatchlistMarket, code: string) {
   const el = document.getElementById(forecastCardId(market, code));
-  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (!el) return;
+  // Instant (not smooth): forecast cards lazy-mount as they enter the viewport,
+  // and the resulting layout shift cancels an in-flight smooth scroll, often
+  // leaving the target off-screen. A second pass on the next frame corrects for
+  // any height the newly mounted card added.
+  el.scrollIntoView({ behavior: "auto", block: "center" });
+  requestAnimationFrame(() => {
+    document.getElementById(forecastCardId(market, code))
+      ?.scrollIntoView({ behavior: "auto", block: "center" });
+  });
 }
 
 function daysAgoISO(days: number): string {
@@ -173,7 +182,20 @@ function RecentSignalsPanel({
       {signals.length > 0 ? (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {signals.map((signal) => (
-            <div key={signal.key} className="rounded-2xl border bg-card px-3.5 py-3">
+            <div
+              key={signal.key}
+              role="button"
+              tabIndex={0}
+              onClick={() => scrollToForecastCard(signal.market, signal.code)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  scrollToForecastCard(signal.market, signal.code);
+                }
+              }}
+              title={`查看 ${signal.name} 的预测图表`}
+              className="cursor-pointer rounded-2xl border bg-card px-3.5 py-3 transition hover:border-primary/40 hover:bg-muted/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-normal text-foreground">
