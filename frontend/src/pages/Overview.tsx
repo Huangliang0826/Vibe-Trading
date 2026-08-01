@@ -7,7 +7,7 @@ import { CapitalFlowPanel } from "@/components/charts/CapitalFlowPanel";
 import { StockEventsPanel } from "@/components/charts/StockEventsPanel";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { cn } from "@/lib/utils";
-import { historyCacheKey, quoteCacheKey, readOverviewCache, writeOverviewCache } from "@/lib/overview-price-cache";
+import { historyCacheKey, quoteCacheKey, readOverviewCache, writeOverviewCache, pruneOverviewCache } from "@/lib/overview-price-cache";
 
 const REFRESH_MS = 30_000;
 const MARKET_INDEX_CACHE_KEY = "overview-market-indices:v1";
@@ -67,7 +67,19 @@ function loadList(key: string): string[] {
   try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
 }
 function saveList(key: string, list: string[]) {
-  localStorage.setItem(key, JSON.stringify(list));
+  const value = JSON.stringify(list);
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // localStorage full (usually the overview price cache) — the watchlist is
+    // small and critical, so free space and retry rather than crash the app.
+    try {
+      pruneOverviewCache(0); // drop the entire disposable price cache
+      localStorage.setItem(key, value);
+    } catch {
+      // Still failing; the backend watchlist remains the source of truth.
+    }
+  }
 }
 
 // ── IndexCard ─────────────────────────────────────────────────────────────
