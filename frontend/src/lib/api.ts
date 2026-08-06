@@ -141,6 +141,36 @@ export interface TradingSnapshot {
   orders_error?: string | null;
 }
 
+export interface PaperTickOrder {
+  market: string; code: string; side: string; reason: string;
+  notional: number | null; quantity: number | null;
+}
+export interface PaperTickExecuted extends PaperTickOrder {
+  ok: boolean; order_status: string | null; error: string | null;
+}
+export interface PaperTickResult {
+  as_of: string;
+  dry_run: boolean;
+  halted: boolean;
+  planned: PaperTickOrder[];
+  executed: PaperTickExecuted[];
+  skipped: { code: string; reason: string }[];
+  daily_count_before: number;
+  daily_count_after: number;
+  limit_max_trades_per_day: number;
+  limit_max_order_notional: number;
+  note: string;
+}
+export interface PaperTickState {
+  status: "idle" | "running" | "done" | "error";
+  dry_run: boolean | null;
+  started_at: string | null;
+  finished_at: string | null;
+  result: PaperTickResult | null;
+  error: string | null;
+  already_running?: boolean;
+}
+
 export const api = {
   uploadFile,
   listRuns: () => request<RunListItem[]>("/runs"),
@@ -235,6 +265,9 @@ export const api = {
   // Live paper account (broker sandbox) — read-only monitoring snapshot
   getTradingSnapshot: (profileId = "alpaca-paper-trade") =>
     request<TradingSnapshot>(`/live/paper-snapshot?profile_id=${encodeURIComponent(profileId)}`),
+  runPaperTick: (dryRun: boolean) =>
+    request<PaperTickState>(`/live/paper-tick?dry_run=${dryRun}`, { method: "POST" }),
+  getPaperTick: () => request<PaperTickState>("/live/paper-tick"),
 
   // 模拟盘 (Paper Trading)
   createPaperTradingRun: (body: PaperTradingCreate) =>

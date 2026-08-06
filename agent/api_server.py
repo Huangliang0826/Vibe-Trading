@@ -4558,6 +4558,58 @@ async def trading_snapshot_endpoint(
     }
 
 
+# Latest deterministic paper-tick run (single, in-memory — a tick is slow so it
+# runs in the background and the UI polls this state). Not persisted: a restart
+# just clears it, which is fine for a manual trigger.
+_PAPER_TICK_STATE: dict[str, Any] = {
+    "status": "idle",   # idle | running | done | error
+    "dry_run": None,
+    "started_at": None,
+    "finished_at": None,
+    "result": None,
+    "error": None,
+}
+
+
+async def _run_paper_tick_bg(dry_run: bool) -> None:
+    from datetime import datetime, timezone
+    from src.paper_trading.auto_executor import build_default_deps, run_paper_tick
+    try:
+        res = await asyncio.to_thread(lambda: run_paper_tick(build_default_deps(), dry_run=dry_run))
+        _PAPER_TICK_STATE.update(status="done", result=res.to_dict(), error=None)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("paper tick failed: %s", exc)
+        _PAPER_TICK_STATE.update(status="error", error=str(exc))
+    finally:
+        _PAPER_TICK_STATE["finished_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+@app.post("/live/paper-tick", dependencies=[Depends(require_auth)])
+async def run_paper_tick_endpoint(dry_run: bool = Query(True)):
+    """Kick off one deterministic paper tick in the background (dry-run default).
+
+    Returns immediately; the tick is slow (a robust backtest per US watchlist
+    name). Poll ``GET /live/paper-tick`` for the result. ``dry_run=false`` places
+    real paper orders — still gated by the kill switch inside the executor.
+    """
+    from datetime import datetime, timezone
+    if _PAPER_TICK_STATE["status"] == "running":
+        return {**_PAPER_TICK_STATE, "already_running": True}
+    _PAPER_TICK_STATE.update(
+        status="running", dry_run=bool(dry_run),
+        started_at=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        finished_at=None, result=None, error=None,
+    )
+    asyncio.create_task(_run_paper_tick_bg(bool(dry_run)))
+    return {**_PAPER_TICK_STATE, "already_running": False}
+
+
+@app.get("/live/paper-tick", dependencies=[Depends(require_auth)])
+async def get_paper_tick_endpoint():
+    """Return the latest paper-tick run state (for UI polling)."""
+    return {**_PAPER_TICK_STATE}
+
+
 @app.post("/live/authorize", dependencies=[Depends(require_auth)])
 async def live_authorize_endpoint(payload: LiveAuthorizeRequest):
     """Describe the OAuth bootstrap on-ramp for a live broker (C2 web on-ramp).

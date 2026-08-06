@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw, ShieldAlert, Play, CircleCheck, CircleAlert } from "lucide-react";
 import { api, type TradingSnapshot, type LiveStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { PaperAutoTradePanel } from "@/components/paper-trading/PaperAutoTradePanel";
 
 const POLL_MS = 5000;
 
@@ -85,7 +86,8 @@ export function LivePaperTab() {
   const connected = !!snap?.connected;
 
   return (
-    <div className="app-panel space-y-4">
+    <div className="space-y-4">
+      <div className="app-panel space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -229,6 +231,9 @@ export function LivePaperTab() {
           </div>
         </>
       )}
+      </div>
+
+      <PaperAutoTradePanel halted={halted} onAfterExecute={() => refresh(false)} />
     </div>
   );
 }
