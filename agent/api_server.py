@@ -4617,6 +4617,13 @@ async def get_paper_tick_endpoint():
     return {**_PAPER_TICK_STATE}
 
 
+@app.get("/live/paper-actions", dependencies=[Depends(require_auth)])
+async def get_paper_actions_endpoint(limit: int = Query(50, ge=1, le=500)):
+    """Return recent executed paper actions (audit ledger), newest first."""
+    from src.paper_trading.auto_executor import read_paper_actions
+    return {"actions": read_paper_actions(limit)}
+
+
 class PaperScheduleRequest(BaseModel):
     """Toggle the daily paper-tick scheduler (Phase 2c)."""
     enabled: bool

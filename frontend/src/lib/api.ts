@@ -175,6 +175,17 @@ export interface PaperScheduleState {
   last_run_date: string | null;
   run_after_et: string;
 }
+export interface PaperAction {
+  as_of: string;
+  code: string;
+  side: string;
+  reason: string;
+  notional: number | null;
+  quantity: number | null;
+  ok: boolean;
+  order_status: string | null;
+  error: string | null;
+}
 
 export const api = {
   uploadFile,
@@ -276,6 +287,8 @@ export const api = {
   getPaperSchedule: () => request<PaperScheduleState>("/live/paper-schedule"),
   setPaperSchedule: (enabled: boolean) =>
     request<PaperScheduleState>("/live/paper-schedule", { method: "POST", body: JSON.stringify({ enabled }) }),
+  getPaperActions: (limit = 50) =>
+    request<{ actions: PaperAction[] }>(`/live/paper-actions?limit=${limit}`),
 
   // 模拟盘 (Paper Trading)
   createPaperTradingRun: (body: PaperTradingCreate) =>

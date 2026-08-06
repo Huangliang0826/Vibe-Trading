@@ -132,6 +132,24 @@ def test_daily_limit_enforced_across_execution():
     assert counter["n"] == ax.MAX_TRADES_PER_DAY
 
 
+def test_read_paper_actions_newest_first_and_limited(monkeypatch, tmp_path):
+    import src.config.paths as paths
+    monkeypatch.setattr(paths, "get_runtime_root", lambda: tmp_path)
+    p = tmp_path / "live" / "paper" / "actions.jsonl"
+    p.parent.mkdir(parents=True)
+    p.write_text('{"code":"A"}\n\n{"code":"B"}\nnot-json\n{"code":"C"}\n', encoding="utf-8")
+
+    rows = ax.read_paper_actions(limit=2)
+    assert [r["code"] for r in rows] == ["C", "B"]  # newest first, malformed skipped, limited
+    assert ax.read_paper_actions() == [] or ax.read_paper_actions()[0]["code"] == "C"
+
+
+def test_read_paper_actions_missing_file(monkeypatch, tmp_path):
+    import src.config.paths as paths
+    monkeypatch.setattr(paths, "get_runtime_root", lambda: tmp_path)
+    assert ax.read_paper_actions() == []
+
+
 def test_tick_is_idempotent_once_reconciled():
     # AAPL long-desired and already held, nothing else -> no orders.
     deps, placed, _ = _deps(

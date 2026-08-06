@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Eye, Zap, AlertTriangle, Clock } from "lucide-react";
-import { api, type PaperTickState, type PaperTickOrder, type PaperScheduleState } from "@/lib/api";
+import { Loader2, Eye, Zap, AlertTriangle, Clock, History } from "lucide-react";
+import { api, type PaperTickState, type PaperTickOrder, type PaperScheduleState, type PaperAction } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const POLL_MS = 3000;
@@ -8,7 +8,7 @@ const POLL_MS = 3000;
 function side(code: string) {
   return code === "buy" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500";
 }
-function amount(o: PaperTickOrder): string {
+function amount(o: { notional: number | null; quantity: number | null }): string {
   if (o.notional != null) return `$${o.notional.toLocaleString("en-US")}`;
   if (o.quantity != null) return `${o.quantity} 股`;
   return "—";
@@ -19,31 +19,38 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
   const [busy, setBusy] = useState(false);
   const [schedule, setSchedule] = useState<PaperScheduleState | null>(null);
   const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [actions, setActions] = useState<PaperAction[] | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const wasRunning = useRef(false);
+
+  const refreshActions = useCallback(() => {
+    api.getPaperActions(50).then((r) => setActions(r.actions)).catch(() => {});
+  }, []);
 
   const poll = useCallback(async () => {
     try {
       const s = await api.getPaperTick();
       setTick(s);
-      // When an execute run finishes, refresh the account/positions above.
+      // When an execute run finishes, refresh the account/positions + audit log.
       if (wasRunning.current && s.status !== "running") {
         wasRunning.current = false;
+        refreshActions();
         if (s.dry_run === false) onAfterExecute?.();
       }
       if (s.status === "running") wasRunning.current = true;
     } catch { /* keep last state */ }
-  }, [onAfterExecute]);
+  }, [onAfterExecute, refreshActions]);
 
   useEffect(() => {
     poll();
+    refreshActions();
     api.getPaperSchedule().then(setSchedule).catch(() => {});
     timer.current = setInterval(() => {
       // only poll while a run is active to avoid needless traffic
       if (wasRunning.current) poll();
     }, POLL_MS);
     return () => { if (timer.current) clearInterval(timer.current); };
-  }, [poll]);
+  }, [poll, refreshActions]);
 
   const toggleSchedule = async () => {
     const next = !schedule?.enabled;
@@ -176,6 +183,41 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
               </ul>
             </details>
           )}
+        </div>
+      )}
+
+      {/* Audit log — every executed order the auto-trader placed */}
+      {actions && actions.length > 0 && (
+        <div className="border-t pt-3">
+          <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold">
+            <History className="h-4 w-4 text-muted-foreground" />操作日志 ({actions.length})
+          </div>
+          <div className="app-table-shell max-h-72 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="px-3 py-2 text-left font-medium">时间</th>
+                  <th className="px-3 py-2 text-left font-medium">标的</th>
+                  <th className="px-3 py-2 text-left font-medium">方向</th>
+                  <th className="px-3 py-2 text-right font-medium">规模</th>
+                  <th className="px-3 py-2 text-left font-medium">结果</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actions.map((a, i) => (
+                  <tr key={`${a.as_of}-${a.code}-${i}`} className="border-b last:border-0">
+                    <td className="px-3 py-2 tabular-nums text-muted-foreground">{a.as_of.replace("T", " ").replace("Z", "")}</td>
+                    <td className="px-3 py-2 font-medium">{a.code}</td>
+                    <td className={cn("px-3 py-2", side(a.side))}>{a.side === "buy" ? "买入" : "卖出"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{amount(a)}</td>
+                    <td className={cn("px-3 py-2", a.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
+                      {a.ok ? (a.order_status ? a.order_status.split(".").pop() : "OK") : `失败:${a.error || "未知"}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

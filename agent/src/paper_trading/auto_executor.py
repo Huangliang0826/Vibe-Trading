@@ -250,6 +250,34 @@ def _paper_audit(record: dict) -> None:
         logger.warning("paper audit write failed: %s", exc)
 
 
+def _actions_path():
+    from src.config.paths import get_runtime_root
+    return get_runtime_root() / "live" / "paper" / "actions.jsonl"
+
+
+def read_paper_actions(limit: int = 50) -> list[dict]:
+    """Return the most recent executed paper actions, newest first."""
+    import json
+    path = _actions_path()
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    rows.reverse()  # newest first
+    return rows[: max(1, limit)]
+
+
 def build_default_deps(profile_id: str = PROFILE_ID) -> PaperTickDeps:
     """Wire the executor to the real halt switch, watchlist, account and broker."""
     from datetime import datetime, timezone
