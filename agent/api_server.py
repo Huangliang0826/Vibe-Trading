@@ -480,6 +480,9 @@ class LiveStatusResponse(BaseModel):
 # ============================================================================
 
 
+_paper_schedule_task: "Optional[asyncio.Task]" = None
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Run preflight checks on server startup, clean up on shutdown."""
@@ -500,8 +503,12 @@ async def lifespan(_app: FastAPI):
     if resumable:
         logger.warning("resumed %d interrupted research analysis runs", len(resumable))
     schedule_startup_refresh()
+    global _paper_schedule_task
+    _paper_schedule_task = asyncio.create_task(_paper_schedule_loop())
     yield
     # Shutdown
+    if _paper_schedule_task is not None:
+        _paper_schedule_task.cancel()
     for stop_event in _research_analysis_stop_events.values():
         stop_event.set()
     if _research_analysis_tasks:
@@ -4608,6 +4615,69 @@ async def run_paper_tick_endpoint(dry_run: bool = Query(True)):
 async def get_paper_tick_endpoint():
     """Return the latest paper-tick run state (for UI polling)."""
     return {**_PAPER_TICK_STATE}
+
+
+class PaperScheduleRequest(BaseModel):
+    """Toggle the daily paper-tick scheduler (Phase 2c)."""
+    enabled: bool
+
+
+@app.get("/live/paper-schedule", dependencies=[Depends(require_auth)])
+async def get_paper_schedule_endpoint():
+    """Return the daily paper-tick schedule state (enabled + last run date)."""
+    from src.paper_trading import schedule as sched
+    return {**sched.read_schedule(), "run_after_et": sched.RUN_AFTER.strftime("%H:%M")}
+
+
+@app.post("/live/paper-schedule", dependencies=[Depends(require_auth)])
+async def set_paper_schedule_endpoint(payload: PaperScheduleRequest):
+    """Enable/disable the daily scheduler. Execution is still gated by the kill switch."""
+    from src.paper_trading import schedule as sched
+    return {**sched.set_enabled(payload.enabled), "run_after_et": sched.RUN_AFTER.strftime("%H:%M")}
+
+
+def _paper_market_open() -> Optional[bool]:
+    """Whether the US market is open now per the Alpaca clock; None on error."""
+    try:
+        from src.trading.connectors.alpaca import sdk as al
+        client = al._trading_client(al.load_config())
+        return bool(client.get_clock().is_open)
+    except Exception as exc:  # noqa: BLE001 - unconfigured / offline broker
+        logger.warning("paper market clock check failed: %s", exc)
+        return None
+
+
+async def _paper_schedule_loop() -> None:
+    """Run the deterministic paper tick once per US trading day after the open.
+
+    Two-key safety: only fires when the schedule is enabled; even then the
+    executor still blocks actual orders while the kill switch is tripped.
+    """
+    from src.paper_trading import schedule as sched
+    await asyncio.sleep(5)  # let startup settle
+    while True:
+        try:
+            now_et = sched.et_now()
+            state = sched.read_schedule()
+            if sched.is_due(now_et, state) and _PAPER_TICK_STATE["status"] != "running":
+                is_open = await asyncio.to_thread(_paper_market_open)
+                if is_open is True:
+                    _PAPER_TICK_STATE.update(
+                        status="running", dry_run=False,
+                        started_at=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                        finished_at=None, result=None, error=None,
+                    )
+                    await _run_paper_tick_bg(False)
+                    sched.mark_ran(now_et.date().isoformat())
+                    logger.info("paper schedule: ran daily tick for %s", now_et.date().isoformat())
+                elif is_open is False:
+                    # Holiday: mark handled so we don't re-check every minute today.
+                    sched.mark_ran(now_et.date().isoformat())
+                    logger.info("paper schedule: market closed %s, skipped", now_et.date().isoformat())
+                # is_open None -> transient error; retry next minute without marking.
+        except Exception as exc:  # noqa: BLE001 - the loop must never die
+            logger.warning("paper schedule loop error: %s", exc)
+        await asyncio.sleep(60)
 
 
 @app.post("/live/authorize", dependencies=[Depends(require_auth)])

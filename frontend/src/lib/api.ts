@@ -170,6 +170,11 @@ export interface PaperTickState {
   error: string | null;
   already_running?: boolean;
 }
+export interface PaperScheduleState {
+  enabled: boolean;
+  last_run_date: string | null;
+  run_after_et: string;
+}
 
 export const api = {
   uploadFile,
@@ -268,6 +273,9 @@ export const api = {
   runPaperTick: (dryRun: boolean) =>
     request<PaperTickState>(`/live/paper-tick?dry_run=${dryRun}`, { method: "POST" }),
   getPaperTick: () => request<PaperTickState>("/live/paper-tick"),
+  getPaperSchedule: () => request<PaperScheduleState>("/live/paper-schedule"),
+  setPaperSchedule: (enabled: boolean) =>
+    request<PaperScheduleState>("/live/paper-schedule", { method: "POST", body: JSON.stringify({ enabled }) }),
 
   // 模拟盘 (Paper Trading)
   createPaperTradingRun: (body: PaperTradingCreate) =>

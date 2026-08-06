@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Eye, Zap, AlertTriangle } from "lucide-react";
-import { api, type PaperTickState, type PaperTickOrder } from "@/lib/api";
+import { Loader2, Eye, Zap, AlertTriangle, Clock } from "lucide-react";
+import { api, type PaperTickState, type PaperTickOrder, type PaperScheduleState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const POLL_MS = 3000;
@@ -17,6 +17,8 @@ function amount(o: PaperTickOrder): string {
 export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolean; onAfterExecute?: () => void }) {
   const [tick, setTick] = useState<PaperTickState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [schedule, setSchedule] = useState<PaperScheduleState | null>(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const wasRunning = useRef(false);
 
@@ -35,12 +37,29 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
 
   useEffect(() => {
     poll();
+    api.getPaperSchedule().then(setSchedule).catch(() => {});
     timer.current = setInterval(() => {
       // only poll while a run is active to avoid needless traffic
       if (wasRunning.current) poll();
     }, POLL_MS);
     return () => { if (timer.current) clearInterval(timer.current); };
   }, [poll]);
+
+  const toggleSchedule = async () => {
+    const next = !schedule?.enabled;
+    if (next && !window.confirm(
+      "开启每日自动执行:每个美股交易日开盘后(10:00 ET)自动按稳健信号下 paper 单。\n" +
+      "注意:kill switch 仍是总闸——它开着时定时任务会空转不下单。确定开启?",
+    )) return;
+    setScheduleBusy(true);
+    try {
+      setSchedule(await api.setPaperSchedule(next));
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "操作失败");
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
 
   const start = async (dryRun: boolean) => {
     if (!dryRun) {
@@ -90,6 +109,33 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
           </button>
         </div>
       </div>
+
+      {/* Daily scheduler toggle (Phase 2c) */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
+        <div className="flex items-center gap-2 text-xs">
+          <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-medium">每日自动执行</span>
+          <span className="text-muted-foreground">
+            开盘后 {schedule?.run_after_et ?? "10:00"} ET · 上次 {schedule?.last_run_date ?? "—"}
+          </span>
+        </div>
+        <button
+          onClick={toggleSchedule}
+          disabled={scheduleBusy || !schedule}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition disabled:opacity-50",
+            schedule?.enabled ? "bg-emerald-600 text-white hover:opacity-90" : "border hover:border-foreground/30",
+          )}
+        >
+          {scheduleBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {schedule?.enabled ? "已开启 · 点击关闭" : "已关闭 · 点击开启"}
+        </button>
+      </div>
+      {schedule?.enabled && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+          自动执行已开启。真正下单还需 kill switch 处于「恢复」状态——它触发时定时任务只空转、不下单。
+        </div>
+      )}
 
       {running && (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
