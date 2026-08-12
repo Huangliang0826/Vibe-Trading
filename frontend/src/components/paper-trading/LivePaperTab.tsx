@@ -143,15 +143,25 @@ export function LivePaperTab() {
 
       {connected && (
         <>
-          {/* Account summary */}
+          {/* Account summary. 持仓市值 is summed from the positions themselves —
+              Alpaca's portfolio_value equals equity, which 净值 already shows. */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            <Stat label="现金" value={money(account.cash)} />
+            <Stat label="现金" value={money(account.cash)}
+              tone={(num(account.cash) ?? 0) < 0 ? "bad" : undefined} />
             <Stat label="净值" value={money(account.equity)} />
             <Stat label="可用购买力" value={money(account.buying_power)} />
-            <Stat label="组合市值" value={money(account.portfolio_value)} />
+            <Stat
+              label="持仓市值"
+              value={money(positions.reduce((sum, p) => sum + (num((p as Record<string, unknown>).market_value) ?? 0), 0))}
+            />
             <Stat label="账户状态" value={clean(account.status)}
               tone={account.trading_blocked ? "bad" : "good"} />
           </div>
+          {(num(account.cash) ?? 0) < 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              现金为负 = 使用了保证金(Alpaca paper 账户默认 4 倍购买力):持仓市值超过了账户现金。净值 = 现金 + 持仓市值。
+            </p>
+          )}
 
           {/* Positions */}
           <div>
