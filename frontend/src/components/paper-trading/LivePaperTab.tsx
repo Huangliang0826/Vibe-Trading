@@ -173,16 +173,18 @@ export function LivePaperTab() {
                   <tbody>
                     {positions.map((p, i) => {
                       const pos = p as Record<string, unknown>;
-                      const upl = num(pos.unrealized_pl);
+                      // Alpaca connector field names: quantity / average_cost / unrealized_pnl.
+                      const qty = num(pos.quantity ?? pos.qty);
+                      const upl = num(pos.unrealized_pnl ?? pos.unrealized_pl);
                       return (
                         <tr key={String(pos.symbol ?? i)} className="border-b last:border-0">
                           <td className="px-3 py-2 font-medium">{clean(pos.symbol)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{clean(pos.qty)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{money(pos.avg_entry_price)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{qty === null ? "—" : qty.toFixed(4).replace(/\.?0+$/, "")}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{money(pos.average_cost ?? pos.avg_entry_price)}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{money(pos.market_value)}</td>
                           <td className={cn("px-3 py-2 text-right tabular-nums",
                             upl != null && upl >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
-                            {money(pos.unrealized_pl)}
+                            {money(upl)}
                           </td>
                         </tr>
                       );

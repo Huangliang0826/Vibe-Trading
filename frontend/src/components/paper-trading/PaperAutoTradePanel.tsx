@@ -8,6 +8,17 @@ const POLL_MS = 3000;
 function side(code: string) {
   return code === "buy" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500";
 }
+// The ledger records the status at submit time; a market order almost always
+// fills seconds later, so raw PENDING_NEW/NEW reads as "stuck" when it isn't.
+function statusLabel(raw: string | null): string {
+  const s = (raw || "").split(".").pop() || "";
+  if (s === "PENDING_NEW" || s === "NEW" || s === "ACCEPTED") return "已提交";
+  if (s === "FILLED") return "已成交";
+  if (s === "PARTIALLY_FILLED") return "部分成交";
+  if (s === "CANCELED" || s === "CANCELLED") return "已撤销";
+  return s || "OK";
+}
+
 function amount(o: { notional: number | null; quantity: number | null }): string {
   if (o.notional != null) return `$${o.notional.toLocaleString("en-US")}`;
   if (o.quantity != null) return `${o.quantity} 股`;
@@ -211,7 +222,7 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
                     <td className={cn("px-3 py-2", side(a.side))}>{a.side === "buy" ? "买入" : "卖出"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{amount(a)}</td>
                     <td className={cn("px-3 py-2", a.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
-                      {a.ok ? (a.order_status ? a.order_status.split(".").pop() : "OK") : `失败:${a.error || "未知"}`}
+                      {a.ok ? statusLabel(a.order_status) : `失败:${a.error || "未知"}`}
                     </td>
                   </tr>
                 ))}
@@ -277,7 +288,7 @@ function ExecTable({ rows }: { rows: import("@/lib/api").PaperTickExecuted[] }) 
                 <td className={cn("px-3 py-2", side(o.side))}>{o.side === "buy" ? "买入" : "卖出"}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{amount(o)}</td>
                 <td className={cn("px-3 py-2", o.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
-                  {o.ok ? (o.order_status ? o.order_status.split(".").pop() : "OK") : `失败:${o.error || "未知"}`}
+                  {o.ok ? statusLabel(o.order_status) : `失败:${o.error || "未知"}`}
                 </td>
               </tr>
             ))}

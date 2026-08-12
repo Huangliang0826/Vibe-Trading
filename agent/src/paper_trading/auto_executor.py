@@ -298,13 +298,23 @@ def build_default_deps(profile_id: str = PROFILE_ID) -> PaperTickDeps:
             return 0.0
 
     def get_positions() -> dict[str, float]:
+        """Map symbol -> held quantity. FAIL CLOSED on any read problem.
+
+        The Alpaca connector normalizes the share count to ``quantity`` (some
+        connectors use ``qty``). A position whose quantity cannot be parsed
+        must abort the tick rather than read as 0.0 — treating a held position
+        as flat is exactly the daily re-buy bug this guards against.
+        """
         pos = service.get_positions(profile_id)
+        if pos.get("status") != "ok":
+            raise RuntimeError(f"positions read failed: {pos.get('error') or pos.get('status')}")
         out: dict[str, float] = {}
         for p in (pos.get("positions") or []):
+            raw = p.get("quantity", p.get("qty"))
             try:
-                out[str(p.get("symbol")).upper()] = float(p.get("qty") or 0.0)
+                out[str(p.get("symbol")).upper()] = float(raw)
             except (TypeError, ValueError):
-                continue
+                raise RuntimeError(f"unparseable position quantity for {p.get('symbol')}: {raw!r}") from None
         return out
 
     def place(*, market, code, side, notional, quantity):  # noqa: ANN001

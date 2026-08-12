@@ -132,6 +132,43 @@ def test_daily_limit_enforced_across_execution():
     assert counter["n"] == ax.MAX_TRADES_PER_DAY
 
 
+# ── build_default_deps.get_positions (the daily re-buy regression) ──────────
+def _positions_reader(monkeypatch, payload):
+    from src.trading import service
+    monkeypatch.setattr(service, "get_positions", lambda pid: payload)
+    return ax.build_default_deps().get_positions
+
+
+def test_default_positions_reader_uses_connector_quantity_key(monkeypatch):
+    # Alpaca normalizes to ``quantity`` — reading ``qty`` made every held
+    # position look flat, so the executor re-bought the same names daily.
+    reader = _positions_reader(monkeypatch, {
+        "status": "ok",
+        "positions": [{"symbol": "AAPL", "quantity": "129.57"}, {"symbol": "QQQ", "qty": 13.9}],
+    })
+    assert reader() == {"AAPL": 129.57, "QQQ": 13.9}
+
+
+def test_default_positions_reader_fails_closed_on_error_status(monkeypatch):
+    reader = _positions_reader(monkeypatch, {"status": "error", "error": "boom"})
+    try:
+        reader()
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+
+
+def test_default_positions_reader_fails_closed_on_unparseable_qty(monkeypatch):
+    reader = _positions_reader(monkeypatch, {
+        "status": "ok", "positions": [{"symbol": "AAPL"}],  # no quantity at all
+    })
+    try:
+        reader()
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+
+
 def test_read_paper_actions_newest_first_and_limited(monkeypatch, tmp_path):
     import src.config.paths as paths
     monkeypatch.setattr(paths, "get_runtime_root", lambda: tmp_path)
