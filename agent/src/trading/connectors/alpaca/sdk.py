@@ -445,6 +445,41 @@ def place_order(
     }
 
 
+def get_order(config: AlpacaConfig | None = None, order_id: str = "") -> dict[str, Any]:
+    """Read one order by id — the settled outcome of a submitted order.
+
+    ``place_order`` returns the status at submit time (typically
+    ``PENDING_NEW``); a market order settles seconds later. Callers use this to
+    backfill the terminal status and the actual fill price.
+
+    Returns:
+        ``{"status": "ok", "order_id", "symbol", "side", "order_status",
+        "filled_qty", "filled_avg_price"}`` or ``{"status": "error", "error"}``.
+        Fails closed — never raises for caller-controlled mistakes.
+    """
+    cfg = config or load_config()
+    clean_id = str(order_id or "").strip()
+    if not clean_id:
+        return {"status": "error", "error": "order_id is required"}
+    try:
+        order = _trading_client(cfg).get_order_by_id(clean_id)
+    except AlpacaDependencyError as exc:
+        return {"status": "error", "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - read errors are reported, not raised
+        return {"status": "error", "error": str(exc)}
+
+    filled_price = _obj_get(order, "filled_avg_price")
+    return {
+        "status": "ok",
+        "order_id": clean_id,
+        "symbol": str(_obj_get(order, "symbol", "") or ""),
+        "side": str(_obj_get(order, "side", "") or ""),
+        "order_status": str(_obj_get(order, "status", "") or ""),
+        "filled_qty": _obj_get(order, "filled_qty"),
+        "filled_avg_price": float(filled_price) if filled_price not in (None, "") else None,
+    }
+
+
 def cancel_order(
     config: AlpacaConfig | None = None,
     order_id: str = "",

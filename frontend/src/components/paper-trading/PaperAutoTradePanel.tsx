@@ -194,6 +194,7 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
                   <th className="px-3 py-2 text-left font-medium">标的</th>
                   <th className="px-3 py-2 text-left font-medium">方向</th>
                   <th className="px-3 py-2 text-right font-medium">规模</th>
+                  <th className="px-3 py-2 text-right font-medium">成交价</th>
                   <th className="px-3 py-2 text-left font-medium">结果</th>
                 </tr>
               </thead>
@@ -204,6 +205,9 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
                     <td className="px-3 py-2 font-medium">{a.code}</td>
                     <td className={cn("px-3 py-2", side(a.side))}>{a.side === "buy" ? "买入" : "卖出"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{amount(a)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {a.filled_avg_price != null ? `$${a.filled_avg_price.toFixed(2)}` : "—"}
+                    </td>
                     <td className={cn("px-3 py-2", a.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
                       {a.ok ? statusLabel(a.order_status) : `失败:${a.error || "未知"}`}
                     </td>

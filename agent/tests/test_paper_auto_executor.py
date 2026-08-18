@@ -181,6 +181,53 @@ def test_read_paper_actions_newest_first_and_limited(monkeypatch, tmp_path):
     assert ax.read_paper_actions() == [] or ax.read_paper_actions()[0]["code"] == "C"
 
 
+# ── backfill_fills ───────────────────────────────────────────────────────────
+def _ledger(monkeypatch, tmp_path, rows):
+    import json
+    import src.config.paths as paths
+    monkeypatch.setattr(paths, "get_runtime_root", lambda: tmp_path)
+    p = tmp_path / "live" / "paper" / "actions.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    return p
+
+
+def test_backfill_settles_pending_rows_with_fill_price(monkeypatch, tmp_path):
+    _ledger(monkeypatch, tmp_path, [
+        {"code": "AAPL", "ok": True, "order_id": "o1", "order_status": "OrderStatus.PENDING_NEW"},
+    ])
+    fetched = ax.backfill_fills(lambda oid: {
+        "status": "ok", "order_status": "OrderStatus.FILLED",
+        "filled_qty": "32.5", "filled_avg_price": 308.71,
+    })
+    assert fetched == 1
+    row = ax.read_paper_actions()[0]
+    assert row["order_status"] == "OrderStatus.FILLED"
+    assert row["filled_avg_price"] == 308.71
+
+
+def test_backfill_skips_already_settled_and_failed_rows(monkeypatch, tmp_path):
+    _ledger(monkeypatch, tmp_path, [
+        {"code": "A", "ok": True, "order_id": "o1", "order_status": "OrderStatus.FILLED"},
+        {"code": "B", "ok": False, "order_id": None, "order_status": None, "error": "boom"},
+    ])
+    calls = []
+    assert ax.backfill_fills(lambda oid: calls.append(oid) or {"status": "ok"}) == 0
+    assert calls == []
+
+
+def test_backfill_survives_fetch_errors(monkeypatch, tmp_path):
+    _ledger(monkeypatch, tmp_path, [
+        {"code": "A", "ok": True, "order_id": "o1", "order_status": "OrderStatus.NEW"},
+    ])
+
+    def boom(_oid):
+        raise RuntimeError("broker down")
+
+    assert ax.backfill_fills(boom) == 0          # no crash
+    assert ax.read_paper_actions()[0]["order_status"] == "OrderStatus.NEW"  # untouched
+
+
 def test_read_paper_actions_missing_file(monkeypatch, tmp_path):
     import src.config.paths as paths
     monkeypatch.setattr(paths, "get_runtime_root", lambda: tmp_path)

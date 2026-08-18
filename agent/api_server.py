@@ -2788,43 +2788,20 @@ def _write_forecast_disk_cache(key: str, result: dict) -> None:
 
 
 def _best_strategy_disk_cache_path(key: str) -> Path:
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
-    return _BEST_STRATEGY_DISK_CACHE_DIR / f"{digest}.json"
+    from src.paper_trading.selection_cache import cache_path
+    return cache_path(key, _BEST_STRATEGY_DISK_CACHE_DIR)
 
 
 def _read_best_strategy_disk_cache(key: str, ttl: float = _HSTECH_BEST_STRATEGY_TTL) -> dict | None:
-    path = _best_strategy_disk_cache_path(key)
-    try:
-        stat = path.stat()
-        if time.time() - stat.st_mtime > ttl:
-            return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    result = payload.get("result") if isinstance(payload, dict) else None
-    return result if isinstance(result, dict) else None
+    # Delegates to the shared selection cache so the paper auto-executor and
+    # this API surface always read/write the same files (single source).
+    from src.paper_trading.selection_cache import read_cache
+    return read_cache(key, ttl, _BEST_STRATEGY_DISK_CACHE_DIR)
 
 
 def _write_best_strategy_disk_cache(key: str, result: dict) -> None:
-    path = _best_strategy_disk_cache_path(key)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    payload = {
-        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "result": result,
-    }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tmp.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, allow_nan=False)
-            handle.flush()
-            os.fsync(handle.fileno())
-        tmp.replace(path)
-    except Exception as exc:  # noqa: BLE001 - best-strategy cache is best-effort.
-        logger.warning("best strategy disk cache write failed for %s: %s", key, exc)
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
+    from src.paper_trading.selection_cache import write_cache
+    write_cache(key, result, _BEST_STRATEGY_DISK_CACHE_DIR)
 
 
 @app.get("/forecast/{market}/{code}")
@@ -3165,7 +3142,8 @@ async def get_forecast_best_paper_strategy(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     effective_end = end_date or default_end_date()
-    selection_key = f"forecast-robust-selection:{mk}:{display_code}:{ROBUST_SELECTION_VERSION}"
+    from src.paper_trading.selection_cache import selection_cache_key
+    selection_key = selection_cache_key(mk, display_code)
     selection = None
     selection_cached = False
     if not refresh:
@@ -4584,6 +4562,11 @@ async def _run_paper_tick_bg(dry_run: bool) -> None:
     try:
         res = await asyncio.to_thread(lambda: run_paper_tick(build_default_deps(), dry_run=dry_run))
         _PAPER_TICK_STATE.update(status="done", result=res.to_dict(), error=None)
+        if res.executed:
+            # Market orders settle seconds after submit; record what they did.
+            from src.paper_trading.auto_executor import backfill_fills_default
+            await asyncio.sleep(3)
+            await asyncio.to_thread(backfill_fills_default)
     except Exception as exc:  # noqa: BLE001
         logger.warning("paper tick failed: %s", exc)
         _PAPER_TICK_STATE.update(status="error", error=str(exc))
@@ -4619,8 +4602,16 @@ async def get_paper_tick_endpoint():
 
 @app.get("/live/paper-actions", dependencies=[Depends(require_auth)])
 async def get_paper_actions_endpoint(limit: int = Query(50, ge=1, le=500)):
-    """Return recent executed paper actions (audit ledger), newest first."""
-    from src.paper_trading.auto_executor import read_paper_actions
+    """Return recent executed paper actions (audit ledger), newest first.
+
+    Settles any still-pending rows first so the log shows real fill prices
+    rather than the submit-time status.
+    """
+    from src.paper_trading.auto_executor import backfill_fills_default, read_paper_actions
+    try:
+        await asyncio.to_thread(backfill_fills_default)
+    except Exception as exc:  # noqa: BLE001 - never block reading the ledger
+        logger.warning("paper action backfill skipped: %s", exc)
     return {"actions": read_paper_actions(limit)}
 
 

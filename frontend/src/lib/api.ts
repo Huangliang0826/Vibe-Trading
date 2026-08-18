@@ -183,7 +183,11 @@ export interface PaperAction {
   notional: number | null;
   quantity: number | null;
   ok: boolean;
+  order_id?: string | null;
   order_status: string | null;
+  /** Settled fill data, backfilled after the order clears. */
+  filled_qty?: string | number | null;
+  filled_avg_price?: number | null;
   error: string | null;
 }
 

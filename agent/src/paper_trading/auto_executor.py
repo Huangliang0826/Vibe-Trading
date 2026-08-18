@@ -201,7 +201,8 @@ def run_paper_tick(deps: PaperTickDeps, *, dry_run: bool = True) -> TickResult:
         record = {
             "as_of": as_of, "code": order.code, "side": order.side, "reason": order.reason,
             "notional": order.notional, "quantity": order.quantity,
-            "ok": ok, "order_status": (res or {}).get("order_status"),
+            "ok": ok, "order_id": (res or {}).get("order_id"),
+            "order_status": (res or {}).get("order_status"),
             "error": None if ok else (res or {}).get("error"),
         }
         result.executed.append(record)
@@ -226,9 +227,19 @@ def _real_signal(market: str, code: str) -> tuple[list[dict], bool]:
         default_end_date, normalize_best_strategy_symbol,
         run_selected_single_symbol_strategy, select_single_symbol_robust_strategy,
     )
+    from src.paper_trading.selection_cache import (
+        SELECTION_TTL_SECONDS, read_cache, selection_cache_key, write_cache,
+    )
+
     _paper, _yahoo, display = normalize_best_strategy_symbol(code, market)
     end = default_end_date()
-    selection = select_single_symbol_robust_strategy(display, market, end_date=end)
+    # Reuse the annual selection the forecast UI rides on (shared disk cache) —
+    # recomputing it per tick was slow and could diverge from what the UI shows.
+    sel_key = selection_cache_key(market, display)
+    selection = read_cache(sel_key, SELECTION_TTL_SECONDS)
+    if selection is None:
+        selection = select_single_symbol_robust_strategy(display, market, end_date=end)
+        write_cache(sel_key, selection)
     payload = run_selected_single_symbol_strategy(
         display, market, display, display, selection=selection, end_date=end,
     )
@@ -255,6 +266,66 @@ def _actions_path():
     return get_runtime_root() / "live" / "paper" / "actions.jsonl"
 
 
+def backfill_fills(fetch_order: Callable[[str], dict], *, limit: int = 40) -> int:
+    """Settle recent ledger rows: record terminal status + actual fill price.
+
+    ``place_order`` only knows the submit-time status (``PENDING_NEW``), so the
+    ledger would otherwise never show what an order actually did. Rewrites the
+    last ``limit`` rows in place, leaving already-settled rows untouched.
+
+    Returns the number of rows updated.
+    """
+    import json
+    path = _actions_path()
+    if not path.exists():
+        return 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+
+    rows: list[dict | str] = []
+    for line in lines:
+        try:
+            rows.append(json.loads(line) if line.strip() else line)
+        except ValueError:
+            rows.append(line)  # keep unparseable lines verbatim
+
+    settled = {"FILLED", "CANCELED", "CANCELLED", "EXPIRED", "REJECTED"}
+    updated = 0
+    start = max(0, len(rows) - limit)
+    for i in range(start, len(rows)):
+        row = rows[i]
+        if not isinstance(row, dict) or not row.get("ok"):
+            continue
+        oid = row.get("order_id")
+        status = str(row.get("order_status") or "").split(".")[-1]
+        if not oid or status in settled:
+            continue
+        try:
+            res = fetch_order(str(oid))
+        except Exception as exc:  # noqa: BLE001 - backfill must never sink a tick
+            logger.warning("fill backfill failed for %s: %s", oid, exc)
+            continue
+        if not isinstance(res, dict) or res.get("status") != "ok":
+            continue
+        row["order_status"] = res.get("order_status")
+        row["filled_qty"] = res.get("filled_qty")
+        row["filled_avg_price"] = res.get("filled_avg_price")
+        updated += 1
+
+    if updated:
+        try:
+            path.write_text(
+                "\n".join(json.dumps(r, ensure_ascii=False) if isinstance(r, dict) else r for r in rows) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.warning("fill backfill write failed: %s", exc)
+            return 0
+    return updated
+
+
 def read_paper_actions(limit: int = 50) -> list[dict]:
     """Return the most recent executed paper actions, newest first."""
     import json
@@ -276,6 +347,16 @@ def read_paper_actions(limit: int = 50) -> list[dict]:
         return []
     rows.reverse()  # newest first
     return rows[: max(1, limit)]
+
+
+def backfill_fills_default(profile_id: str = PROFILE_ID, *, limit: int = 40) -> int:
+    """Backfill settled fills using the real broker connector."""
+    from src.trading.connectors.alpaca import sdk as alpaca_sdk
+    from src.trading.profiles import profile_by_id
+
+    profile = profile_by_id(profile_id)
+    config = alpaca_sdk.build_config(profile.config, None)
+    return backfill_fills(lambda oid: alpaca_sdk.get_order(config, oid), limit=limit)
 
 
 def build_default_deps(profile_id: str = PROFILE_ID) -> PaperTickDeps:
