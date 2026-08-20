@@ -481,6 +481,7 @@ class LiveStatusResponse(BaseModel):
 
 
 _paper_schedule_task: "Optional[asyncio.Task]" = None
+_forecast_warmup_task: "Optional[asyncio.Task]" = None
 
 
 @asynccontextmanager
@@ -503,12 +504,15 @@ async def lifespan(_app: FastAPI):
     if resumable:
         logger.warning("resumed %d interrupted research analysis runs", len(resumable))
     schedule_startup_refresh()
-    global _paper_schedule_task
+    global _paper_schedule_task, _forecast_warmup_task
     _paper_schedule_task = asyncio.create_task(_paper_schedule_loop())
+    _forecast_warmup_task = asyncio.create_task(_forecast_warmup_loop())
     yield
     # Shutdown
     if _paper_schedule_task is not None:
         _paper_schedule_task.cancel()
+    if _forecast_warmup_task is not None:
+        _forecast_warmup_task.cancel()
     for stop_event in _research_analysis_stop_events.values():
         stop_event.set()
     if _research_analysis_tasks:
@@ -4643,6 +4647,82 @@ def _paper_market_open() -> Optional[bool]:
     except Exception as exc:  # noqa: BLE001 - unconfigured / offline broker
         logger.warning("paper market clock check failed: %s", exc)
         return None
+
+
+# Default forecast range the page opens with (5 年 / context 1260) — warming the
+# other ranges would multiply the cost for a view most visits never open.
+_FORECAST_WARM_CONTEXT = 1260
+_FORECAST_WARM_DISPLAY_HISTORY = 1260
+
+
+def _forecast_warm_targets() -> list[tuple[str, str]]:
+    """Every watchlist symbol as (market, code)."""
+    store = _get_watchlist_store()
+    targets: list[tuple[str, str]] = []
+    for market in ("cn", "hk", "us"):
+        try:
+            targets.extend((market, code) for code in store.get(market))
+        except Exception as exc:  # noqa: BLE001 - a bad market must not stop warming
+            logger.warning("forecast warm-up: watchlist read failed for %s: %s", market, exc)
+    return targets
+
+
+async def _warm_forecasts_once() -> tuple[int, int]:
+    """Precompute today's forecast cone + strategy signal for the watchlist.
+
+    Calls the real endpoint functions so warmed entries land under exactly the
+    keys the page requests. Sequential on purpose: TimesFM is CPU-heavy and
+    nothing is waiting on this.
+    """
+    warmed = failed = 0
+    for market, code in _forecast_warm_targets():
+        try:
+            await get_forecast(
+                market, code, months=3,
+                context=_FORECAST_WARM_CONTEXT,
+                display_history=_FORECAST_WARM_DISPLAY_HISTORY,
+                nocache=0,
+            )
+            # The signal panel loads alongside the cone; US names are usually
+            # already warm from the paper tick, but CN/HK are not.
+            # Every Query-defaulted arg must be passed explicitly: calling an
+            # endpoint function directly bypasses FastAPI's dependency
+            # resolution, so omitted params arrive as Query objects.
+            await get_forecast_best_paper_strategy(
+                Response(), market, code,
+                start_date="2020-01-01", end_date="", refresh=False, strategy="",
+            )
+            warmed += 1
+        except Exception as exc:  # noqa: BLE001 - one bad symbol must not stop the rest
+            failed += 1
+            logger.warning("forecast warm-up failed for %s/%s: %s", market, code, exc)
+        await asyncio.sleep(0)  # yield so requests stay responsive
+    return warmed, failed
+
+
+async def _forecast_warmup_loop() -> None:
+    """Warm the forecast caches once per local calendar day.
+
+    Runs shortly after startup and then watches for the date to roll over, so a
+    long-lived backend keeps each morning's first visit fast.
+    """
+    from src.forecast import warmup
+
+    await asyncio.sleep(20)  # let startup settle before a CPU-heavy batch
+    while True:
+        try:
+            if warmup.needs_warmup():
+                started = time.time()
+                logger.info("forecast warm-up: starting daily precompute")
+                warmed, failed = await _warm_forecasts_once()
+                warmup.mark_warmed(warmed=warmed, failed=failed)
+                logger.info(
+                    "forecast warm-up: %d warmed, %d failed in %.0fs",
+                    warmed, failed, time.time() - started,
+                )
+        except Exception as exc:  # noqa: BLE001 - the loop must never die
+            logger.warning("forecast warm-up loop error: %s", exc)
+        await asyncio.sleep(600)  # re-check every 10 min for the date rollover
 
 
 async def _paper_schedule_loop() -> None:
