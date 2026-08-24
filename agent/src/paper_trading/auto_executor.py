@@ -9,10 +9,13 @@ Rule set (confirmed with the user):
     open) but that we do not hold  -> BUY.
   * A stock the strategy now wants FLAT (latest trade closed / unreliable / none)
     that we DO hold                -> SELL the whole position.
-  * Entry size: ``ENTRY_NOTIONAL`` (capped at ``MAX_ORDER_NOTIONAL`` and by
-    available buying power). Exits sell the full position (exempt from the size
-    cap — a risk-reducing close must not be left partial) but still consume one
-    of the day's order slots.
+  * Entry size: ``ENTRY_NOTIONAL`` (capped at ``MAX_ORDER_NOTIONAL``). Exits
+    sell the full position (exempt from the size cap — a risk-reducing close
+    must not be left partial) but still consume one of the day's order slots.
+  * Portfolio ceiling: entries stop once total position value would exceed
+    ``MAX_TOTAL_EXPOSURE_PCT`` of equity, and are funded from settled cash
+    rather than margin buying power. Positions already above the cap are left
+    alone — only a signal closes a position.
   * At most ``MAX_TRADES_PER_DAY`` orders per UTC day; exits are planned before
     entries so risk-reduction wins when the budget is tight.
   * The GLOBAL kill switch aborts the whole tick before any order.
@@ -33,8 +36,31 @@ logger = logging.getLogger(__name__)
 MAX_TRADES_PER_DAY = 5
 MAX_ORDER_NOTIONAL = 10_000.0
 ENTRY_NOTIONAL = 10_000.0
+#: Portfolio-level ceiling: total position market value may not exceed this
+#: fraction of account equity. Without it the executor deploys ENTRY_NOTIONAL
+#: per watchlist name with no account-level bound — a 25-name watchlist would
+#: try to put $250k to work in a $100k account, silently buying on margin.
+MAX_TOTAL_EXPOSURE_PCT = 0.95
 PROFILE_ID = "alpaca-paper-trade"
 BROKER_KEY = PROFILE_ID  # daily-count / audit namespace
+
+
+@dataclass(frozen=True)
+class AccountState:
+    """The account facts entry sizing depends on."""
+
+    cash: float       # settled cash; negative means margin is already in use
+    equity: float     # net liquidation value
+    exposure: float   # summed market value of open positions
+
+    @property
+    def exposure_cap(self) -> float:
+        return max(0.0, self.equity) * MAX_TOTAL_EXPOSURE_PCT
+
+    @property
+    def entry_headroom(self) -> float:
+        """Dollars available for new entries: never borrow, never exceed the cap."""
+        return max(0.0, min(self.cash, self.exposure_cap - self.exposure))
 
 
 @dataclass(frozen=True)
@@ -57,6 +83,9 @@ class TickResult:
     skipped: list[dict] = field(default_factory=list)   # {code, reason}
     daily_count_before: int = 0
     daily_count_after: int = 0
+    exposure: float = 0.0
+    exposure_cap: float = 0.0
+    entry_headroom: float = 0.0
     note: str = ""
 
     def to_dict(self) -> dict:
@@ -71,6 +100,10 @@ class TickResult:
             "daily_count_after": self.daily_count_after,
             "limit_max_trades_per_day": MAX_TRADES_PER_DAY,
             "limit_max_order_notional": MAX_ORDER_NOTIONAL,
+            "exposure": round(self.exposure, 2),
+            "exposure_cap": round(self.exposure_cap, 2),
+            "entry_headroom": round(self.entry_headroom, 2),
+            "limit_max_total_exposure_pct": MAX_TOTAL_EXPOSURE_PCT,
             "note": self.note,
         }
 
@@ -92,12 +125,15 @@ def plan_paper_tick(
     held_qty: dict[str, float],    # code(upper) -> qty held (>0 == long)
     *,
     remaining_slots: int,
-    buying_power: float,
+    account: AccountState,
 ) -> tuple[list[PlannedOrder], list[dict]]:
     """Pure planner: reconcile targets vs holdings into orders + skips.
 
-    Exits are emitted first, then entries, each bounded by ``remaining_slots``
-    and (entries only) available ``buying_power``.
+    Exits are emitted first (risk-reducing wins when the budget is tight), then
+    entries, bounded by ``remaining_slots`` and by the account's entry headroom
+    — which caps total exposure and refuses to buy on margin. An existing
+    position over the cap is never force-sold; only the signal closes a
+    position.
     """
     exits: list[PlannedOrder] = []
     entries: list[PlannedOrder] = []
@@ -118,14 +154,19 @@ def plan_paper_tick(
         # long+held or flat+flat -> already reconciled, nothing to do.
 
     plan: list[PlannedOrder] = []
-    budget = buying_power
+    budget = account.entry_headroom
+    # Report whichever constraint is actually binding. Both deplete equally per
+    # entry (it spends cash and adds the same notional to exposure), so their
+    # relative tightness is fixed for the whole plan.
+    cap_room = account.exposure_cap - account.exposure
+    blocked_by = "exposure_limit" if cap_room <= account.cash else "insufficient_cash"
     for order in [*exits, *entries]:
         if len(plan) >= remaining_slots:
             skipped.append({"code": order.code, "reason": "daily_trade_limit"})
             continue
         if order.side == "buy":
             if order.notional is None or order.notional > budget:
-                skipped.append({"code": order.code, "reason": "insufficient_buying_power"})
+                skipped.append({"code": order.code, "reason": blocked_by})
                 continue
             budget -= order.notional
         plan.append(order)
@@ -137,7 +178,7 @@ class PaperTickDeps:
     """Injected side-effecting collaborators (real in prod, fakes in tests)."""
     halt_check: Callable[[], bool]
     get_watchlist: Callable[[], list[tuple[str, str]]]      # [(market, code)]
-    get_buying_power: Callable[[], float]
+    get_account: Callable[[], AccountState]
     get_positions: Callable[[], dict[str, float]]           # code(upper) -> qty
     get_signal: Callable[[str, str], tuple[list[dict], bool]]  # (market, code)->(trades, reliable)
     place_order: Callable[..., dict]                        # (market, code, side, notional, quantity)->result
@@ -169,8 +210,12 @@ def run_paper_tick(deps: PaperTickDeps, *, dry_run: bool = True) -> TickResult:
             continue
         targets.append({"market": market, "code": code, "desired": desired_position(trades, reliable)})
 
+    account = deps.get_account()
+    result.exposure = account.exposure
+    result.exposure_cap = account.exposure_cap
+    result.entry_headroom = account.entry_headroom
     plan, skips = plan_paper_tick(
-        targets, positions, remaining_slots=remaining, buying_power=deps.get_buying_power(),
+        targets, positions, remaining_slots=remaining, account=account,
     )
     result.planned = plan
     result.skipped.extend(skips)
@@ -370,13 +415,33 @@ def build_default_deps(profile_id: str = PROFILE_ID) -> PaperTickDeps:
     def get_watchlist() -> list[tuple[str, str]]:
         return [("us", c) for c in WatchlistStore().get("us")]
 
-    def get_buying_power() -> float:
+    def get_account() -> AccountState:
+        """Cash / equity / exposure. FAILS CLOSED on a bad read.
+
+        Sizing decisions ride on these numbers; defaulting a failed read to 0
+        would silently disable the exposure cap (0 exposure looks like plenty
+        of room), so an unreadable account aborts the tick instead.
+        """
         acct = service.get_account(profile_id)
-        inner = acct.get("account") if isinstance(acct, dict) else None
+        if not isinstance(acct, dict) or acct.get("status") != "ok":
+            raise RuntimeError(f"account read failed: {(acct or {}).get('error') or 'unknown'}")
+        inner = acct.get("account") or {}
         try:
-            return float((inner or {}).get("buying_power") or 0.0)
+            cash = float(inner.get("cash"))
+            equity = float(inner.get("equity"))
         except (TypeError, ValueError):
-            return 0.0
+            raise RuntimeError(f"unparseable account cash/equity: {inner.get('cash')!r}/{inner.get('equity')!r}") from None
+
+        pos = service.get_positions(profile_id)
+        if pos.get("status") != "ok":
+            raise RuntimeError(f"positions read failed: {pos.get('error') or pos.get('status')}")
+        exposure = 0.0
+        for p in (pos.get("positions") or []):
+            try:
+                exposure += float(p.get("market_value"))
+            except (TypeError, ValueError):
+                raise RuntimeError(f"unparseable market_value for {p.get('symbol')}") from None
+        return AccountState(cash=cash, equity=equity, exposure=exposure)
 
     def get_positions() -> dict[str, float]:
         """Map symbol -> held quantity. FAIL CLOSED on any read problem.
@@ -407,7 +472,7 @@ def build_default_deps(profile_id: str = PROFILE_ID) -> PaperTickDeps:
     return PaperTickDeps(
         halt_check=lambda: halt_flag_set(broker=None),
         get_watchlist=get_watchlist,
-        get_buying_power=get_buying_power,
+        get_account=get_account,
         get_positions=get_positions,
         get_signal=_real_signal,
         place_order=place,

@@ -159,6 +159,10 @@ export interface PaperTickResult {
   daily_count_after: number;
   limit_max_trades_per_day: number;
   limit_max_order_notional: number;
+  exposure: number;
+  exposure_cap: number;
+  entry_headroom: number;
+  limit_max_total_exposure_pct: number;
   note: string;
 }
 export interface PaperTickState {

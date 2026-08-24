@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from src.paper_trading import auto_executor as ax
 from src.paper_trading.auto_executor import (
-    PaperTickDeps, desired_position, plan_paper_tick, run_paper_tick,
+    AccountState, PaperTickDeps, desired_position, plan_paper_tick, run_paper_tick,
 )
 
 
@@ -35,7 +35,7 @@ def test_plan_buys_entries_and_sells_exits_reconciling_to_target():
         {"market": "us", "code": "TSLA", "desired": "flat"},   # flat -> nothing
     ]
     plan, skipped = plan_paper_tick(
-        targets, {"NVDA": 3.0, "MSFT": 2.0}, remaining_slots=5, buying_power=100_000,
+        targets, {"NVDA": 3.0, "MSFT": 2.0}, remaining_slots=5, account=AccountState(cash=100_000, equity=200_000, exposure=0),
     )
     sides = [(o.code, o.side, o.reason) for o in plan]
     # exits first, then entries
@@ -47,16 +47,16 @@ def test_plan_buys_entries_and_sells_exits_reconciling_to_target():
 
 def test_plan_respects_daily_slot_budget():
     targets = [{"market": "us", "code": c, "desired": "long"} for c in ("A", "B", "C")]
-    plan, skipped = plan_paper_tick(targets, {}, remaining_slots=2, buying_power=1_000_000)
+    plan, skipped = plan_paper_tick(targets, {}, remaining_slots=2, account=AccountState(cash=1_000_000, equity=2_000_000, exposure=0))
     assert len(plan) == 2
     assert skipped == [{"code": "C", "reason": "daily_trade_limit"}]
 
 
 def test_plan_skips_entries_without_buying_power():
     targets = [{"market": "us", "code": "AAPL", "desired": "long"}]
-    plan, skipped = plan_paper_tick(targets, {}, remaining_slots=5, buying_power=100.0)
+    plan, skipped = plan_paper_tick(targets, {}, remaining_slots=5, account=AccountState(cash=100.0, equity=100_000, exposure=0))
     assert plan == []
-    assert skipped == [{"code": "AAPL", "reason": "insufficient_buying_power"}]
+    assert skipped == [{"code": "AAPL", "reason": "insufficient_cash"}]
 
 
 # ── run_paper_tick ───────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ def _deps(*, halted=False, watchlist=None, positions=None, signals=None, count=0
     return PaperTickDeps(
         halt_check=lambda: halted,
         get_watchlist=lambda: watchlist or [],
-        get_buying_power=lambda: 400_000.0,
+        get_account=lambda: AccountState(cash=400_000.0, equity=400_000.0, exposure=0.0),
         get_positions=lambda: positions or {},
         get_signal=lambda m, c: (signals or {}).get(c.upper(), ([], False)),
         place_order=place,
@@ -242,3 +242,77 @@ def test_tick_is_idempotent_once_reconciled():
     )
     res = run_paper_tick(deps, dry_run=False)
     assert res.planned == [] and placed == []
+
+
+# ── portfolio exposure cap ───────────────────────────────────────────────────
+def _long_targets(*codes):
+    return [{"market": "us", "code": c, "desired": "long"} for c in codes]
+
+
+def test_account_state_headroom_math():
+    # 95% of $100k equity = $95k cap; $60k already deployed leaves $35k, and
+    # cash is the tighter of the two here.
+    a = AccountState(cash=20_000, equity=100_000, exposure=60_000)
+    assert a.exposure_cap == 95_000
+    assert a.entry_headroom == 20_000
+
+    # Cap binds when cash is plentiful (margin available but unused).
+    b = AccountState(cash=80_000, equity=100_000, exposure=90_000)
+    assert b.entry_headroom == 5_000
+
+    # Never negative, even when already over the cap on margin.
+    c = AccountState(cash=-12_000, equity=98_000, exposure=110_000)
+    assert c.entry_headroom == 0.0
+
+
+def test_entries_stop_at_the_exposure_cap():
+    # $100k equity -> $95k cap, $90k deployed: only one more $10k entry would
+    # breach it, so none are allowed (a full entry does not fit in $5k).
+    account = AccountState(cash=50_000, equity=100_000, exposure=90_000)
+    plan, skipped = plan_paper_tick(
+        _long_targets("AAPL", "MSFT"), {}, remaining_slots=5, account=account,
+    )
+    assert plan == []
+    assert [s["reason"] for s in skipped] == ["exposure_limit", "exposure_limit"]
+
+
+def test_entries_fill_only_the_available_headroom():
+    # $95k cap, $70k deployed -> $25k of room funds exactly two $10k entries.
+    account = AccountState(cash=50_000, equity=100_000, exposure=70_000)
+    plan, skipped = plan_paper_tick(
+        _long_targets("A", "B", "C"), {}, remaining_slots=5, account=account,
+    )
+    assert [o.code for o in plan] == ["A", "B"]
+    # Cash ($50k) is ample; the cap is what stops the third entry.
+    assert skipped == [{"code": "C", "reason": "exposure_limit"}]
+
+
+def test_cap_never_blocks_a_risk_reducing_exit():
+    # Over the cap and on margin — the exit must still go through.
+    account = AccountState(cash=-12_000, equity=98_000, exposure=110_000)
+    plan, skipped = plan_paper_tick(
+        [{"market": "us", "code": "NVDA", "desired": "flat"},
+         {"market": "us", "code": "AAPL", "desired": "long"}],
+        {"NVDA": 5.0}, remaining_slots=5, account=account,
+    )
+    assert [(o.code, o.side) for o in plan] == [("NVDA", "sell")]
+    assert skipped == [{"code": "AAPL", "reason": "exposure_limit"}]
+
+
+def test_over_cap_positions_are_never_force_sold():
+    # Wildly over the cap, but every signal says long -> hold, sell nothing.
+    account = AccountState(cash=-50_000, equity=98_000, exposure=150_000)
+    plan, skipped = plan_paper_tick(
+        _long_targets("AAPL", "MSFT"), {"AAPL": 10.0, "MSFT": 5.0},
+        remaining_slots=5, account=account,
+    )
+    assert plan == [] and skipped == []
+
+
+def test_tick_reports_exposure_numbers():
+    deps, _, _ = _deps(watchlist=[("us", "AAPL")], signals={"AAPL": ([_open()], True)})
+    deps.get_account = lambda: AccountState(cash=50_000, equity=100_000, exposure=70_000)
+    d = run_paper_tick(deps, dry_run=True).to_dict()
+    assert d["exposure"] == 70_000 and d["exposure_cap"] == 95_000
+    assert d["entry_headroom"] == 25_000
+    assert d["limit_max_total_exposure_pct"] == ax.MAX_TOTAL_EXPOSURE_PCT

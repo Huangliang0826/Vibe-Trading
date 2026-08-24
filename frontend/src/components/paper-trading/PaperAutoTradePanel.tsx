@@ -19,6 +19,15 @@ function statusLabel(raw: string | null): string {
   return s || "OK";
 }
 
+const SKIP_REASONS: Record<string, string> = {
+  exposure_limit: "已达总敞口上限",
+  insufficient_cash: "现金不足",
+  daily_trade_limit: "已达当日交易笔数上限",
+};
+function skipReason(raw: string): string {
+  return SKIP_REASONS[raw] ?? (raw.startsWith("signal_error") ? `信号计算失败(${raw.slice(13)})` : raw);
+}
+
 function amount(o: { notional: number | null; quantity: number | null }): string {
   if (o.notional != null) return `$${o.notional.toLocaleString("en-US")}`;
   if (o.quantity != null) return `${o.quantity} 股`;
@@ -103,7 +112,7 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
         <div>
           <h2 className="app-panel-title">自动交易 · 跟随稳健信号</h2>
           <p className="text-[11px] text-muted-foreground">
-            按走势预测稳健策略把账户对齐到目标持仓 · 每日≤5笔 · 单笔≤$10k · 仅美股 · 手动触发
+            按走势预测稳健策略把账户对齐到目标持仓 · 每日≤5笔 · 单笔≤$10k · 总敞口≤净值95% · 仅美股
           </p>
         </div>
         <button
@@ -161,6 +170,14 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
             <span>已执行</span>
             <span>今日已用 <span className="font-semibold text-foreground tabular-nums">{r.daily_count_after}/{r.limit_max_trades_per_day}</span> 笔</span>
+            <span>
+              敞口 <span className={cn("font-semibold tabular-nums",
+                r.exposure > r.exposure_cap ? "text-amber-600 dark:text-amber-400" : "text-foreground")}>
+                ${Math.round(r.exposure).toLocaleString("en-US")}
+              </span>
+              <span className="text-muted-foreground"> / 上限 ${Math.round(r.exposure_cap).toLocaleString("en-US")}</span>
+            </span>
+            <span>可开仓额度 <span className="font-semibold text-foreground tabular-nums">${Math.round(r.entry_headroom).toLocaleString("en-US")}</span></span>
             {r.halted && <span className="inline-flex items-center gap-1 text-red-500"><AlertTriangle className="h-3 w-3" />kill switch 已触发,执行会被拦截</span>}
             <span>{r.as_of}</span>
           </div>
@@ -172,7 +189,7 @@ export function PaperAutoTradePanel({ halted, onAfterExecute }: { halted: boolea
               <summary className="cursor-pointer">跳过 {r.skipped.length} 项</summary>
               <ul className="mt-1 space-y-0.5">
                 {r.skipped.map((s, i) => (
-                  <li key={`${s.code}-${i}`}><span className="font-mono">{s.code}</span> · {s.reason}</li>
+                  <li key={`${s.code}-${i}`}><span className="font-mono">{s.code}</span> · {skipReason(s.reason)}</li>
                 ))}
               </ul>
             </details>
