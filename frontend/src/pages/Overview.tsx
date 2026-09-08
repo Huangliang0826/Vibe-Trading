@@ -443,6 +443,9 @@ export function shouldRenderHistoricalEvents(view: CardView, _market: WatchlistM
 
 function StockChartCard({ code, market, id }: { code: string; market: WatchlistMarket; id?: string }) {
   const [view, setView] = useState<CardView>("price");
+  // Chart overlay (MA/MACD) + the AI read. Off by default; the indicator
+  // table under the chart shows regardless.
+  const [overlayIndicators, setOverlayIndicators] = useState(false);
   const [name, setName] = useState(code);
 
   // Price view state
@@ -558,6 +561,20 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
               {label}
             </button>
           ))}
+          {view === "price" && (
+            <button
+              onClick={() => setOverlayIndicators((v) => !v)}
+              title="在图上叠加 MA/MACD,并生成 AI 走势总结"
+              className={cn(
+                "px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors",
+                overlayIndicators
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted",
+              )}
+            >
+              指标
+            </button>
+          )}
         </div>
       </div>
 
@@ -573,6 +590,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
             quote={quote}
             metrics={historyMetrics}
             symbol={name || code}
+            overlayIndicators={overlayIndicators}
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>

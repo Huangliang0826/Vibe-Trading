@@ -22,6 +22,8 @@ interface Props {
   metrics?: WatchlistHistoryMetrics | null;
   /** Shown to the AI summary so it names the right instrument. */
   symbol?: string;
+  /** Draw MA/MACD on the chart. The data panel below shows regardless. */
+  overlayIndicators?: boolean;
 }
 
 /** Max drawdown over the displayed window + recovery time of that episode.
@@ -116,17 +118,17 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   return val.slice(5); // MM-DD
 }
 
-export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null, metrics = null, symbol = "" }: Props) {
+export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null, metrics = null, symbol = "", overlayIndicators = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
-  // Off by default: the overlays are opt-in, and they cost a third chart grid.
-  const [showIndicators, setShowIndicators] = useState(false);
   // Intraday bars are not daily closes, so MA/MACD periods would be meaningless.
   const indicatorsAvailable = period !== "1D" && bars.length >= MIN_BARS_FOR_INDICATORS;
-  const indicatorsOn = showIndicators && indicatorsAvailable;
+  // Chart overlay is opt-in (it costs a third grid); the readout below is not.
+  const indicatorsOn = overlayIndicators && indicatorsAvailable;
+  const showPanel = indicatorsAvailable;
   const rows = useMemo(
-    () => (indicatorsOn ? indicatorRows(bars) : []),
-    [indicatorsOn, bars],
+    () => (showPanel ? indicatorRows(bars) : []),
+    [showPanel, bars],
   );
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
@@ -134,6 +136,9 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
 
   // Auto-summarise whenever the panel is open for a given symbol/window, so the
   // read is there without a second click. Keyed so switching period re-runs it.
+  // The table is always on screen, but the AI read is only fetched when the
+  // user opens 指标 — otherwise every watchlist card would fire an LLM call on
+  // page load. Re-runs when the symbol or window changes.
   useEffect(() => {
     if (!indicatorsOn) { setAiSummary(null); setAiError(null); return; }
     const snapshot = indicatorSnapshot(bars);
@@ -379,21 +384,6 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
               {p}
             </button>
           ))}
-          <button
-            onClick={() => setShowIndicators((v) => !v)}
-            disabled={!indicatorsAvailable}
-            title={indicatorsAvailable
-              ? "叠加 MA50 / MA200 与 MACD,并给出走势文字解读"
-              : "指标需要日线数据(1D 为分时)且至少约 30 个交易日"}
-            className={cn(
-              "ml-1 px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors border disabled:opacity-40",
-              indicatorsOn
-                ? "bg-primary/10 text-primary border-primary/30"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted border-transparent",
-            )}
-          >
-            指标
-          </button>
         </div>
       </div>
 
@@ -452,9 +442,11 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
         <div key="chart" ref={ref} style={{ height: indicatorsOn ? height + 90 : height }} />
       )}
 
-      {indicatorsOn && (
+      {showPanel && (
         <div className="mt-3 rounded-xl border bg-card">
-          {/* AI read first — the table below is the evidence behind it. */}
+          {/* AI read first — the table below is the evidence behind it.
+              Only fetched once 指标 is switched on. */}
+          {indicatorsOn && (
           <div className="border-b px-4 py-3">
             <div className="mb-1.5 flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
@@ -464,15 +456,16 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
             {aiError ? (
               <p className="text-sm text-red-500">{aiError}</p>
             ) : aiSummary ? (
-              <p className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">{aiSummary}</p>
+              <p className="whitespace-pre-wrap text-[13px] leading-6 text-foreground/90">{aiSummary}</p>
             ) : (
               <p className="text-sm text-muted-foreground">正在综合各项指标生成趋势判断…</p>
             )}
           </div>
+          )}
 
           {rows.length > 0 && (
             <div className="px-4 py-3">
-              <table className="w-full text-sm">
+              <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b text-xs text-muted-foreground">
                     <th className="pb-2 text-left font-medium">指标</th>
