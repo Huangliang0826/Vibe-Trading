@@ -3,8 +3,6 @@ import { LayoutDashboard, RefreshCw, TrendingUp, TrendingDown, Plus, X, Loader2,
 import { api, type HistoricalEventPeriod, type MarketIndex, type WatchlistQuote, type PriceHistoryPeriod, type PriceHistoryBar, type WatchlistHistoryResponse, type WatchlistMarket, type ValuationMetric, type ValuationPeriod, type ValuationPoint } from "@/lib/api";
 import { PriceHistoryChart } from "@/components/charts/PriceHistoryChart";
 import { HistoricalEventsView } from "@/components/charts/HistoricalEventsView";
-import { CapitalFlowPanel } from "@/components/charts/CapitalFlowPanel";
-import { StockEventsPanel } from "@/components/charts/StockEventsPanel";
 import { ValuationChart } from "@/components/charts/ValuationChart";
 import { cn } from "@/lib/utils";
 import { historyCacheKey, quoteCacheKey, readOverviewCache, writeOverviewCache, pruneOverviewCache } from "@/lib/overview-price-cache";
@@ -401,23 +399,42 @@ function WatchlistColumn({
 // between the price chart and valuation series (PE / PB / market cap); each
 // view owns its own timeframe selector and data fetch.
 
-type CardView = "price" | "historical_events" | "capital" | "events" | ValuationMetric;
+type CardView = "price" | "historical_events" | ValuationMetric;
 
 const VIEW_TABS: { key: CardView; label: string }[] = [
   { key: "price", label: "价格" },
   { key: "pe", label: "市盈率" },
   { key: "pb", label: "市净率" },
-  { key: "mktcap", label: "市值" },
 ];
 
-export function stockChartViewTabs(market: WatchlistMarket): { key: CardView; label: string }[] {
-  const tabs = [...VIEW_TABS, { key: "historical_events" as CardView, label: "重大历史事件" }];
-  // 资金面 / 事件(融资融券·股东户数 / 龙虎榜·解禁)仅 A 股有数据源
-  if (market === "cn") {
-    tabs.push({ key: "capital", label: "资金面" });
-    tabs.push({ key: "events", label: "事件" });
+/** Fund-like instruments (ETF / 基金) have no meaningful PE or PB. */
+export function isFundLike(market: WatchlistMarket, code: string): boolean {
+  const digits = String(code).replace(/\D/g, "");
+  if (!digits) return false;
+  // A 股 ETF/LOF: 15xxxx (深) 与 51/56/58xxxx (沪)
+  if (market === "cn") return /^(15|51|56|58)/.test(digits);
+  // 港股 ETF 主要集中在 2800-2849 / 3000-3199 / 7200-7599(含槓桿反向)
+  if (market === "hk") {
+    const n = Number(digits);
+    return (n >= 2800 && n <= 2849) || (n >= 3000 && n <= 3199) || (n >= 7200 && n <= 7599);
   }
-  return tabs;
+  return false;
+}
+
+/** Whether PE / PB tabs have a data source for this symbol. */
+export function supportsValuation(market: WatchlistMarket, code: string): boolean {
+  // The valuation source carries no US PE/PB at all — every US symbol returns
+  // an empty series, so the tabs would only ever render a blank chart.
+  if (market === "us") return false;
+  return !isFundLike(market, code);
+}
+
+export function stockChartViewTabs(market: WatchlistMarket, code = ""): { key: CardView; label: string }[] {
+  // 市值 / 重大历史事件 暂时隐藏(实现保留,改回只需放回此列表)。
+  // 资金面 / 事件 已移除。
+  return VIEW_TABS.filter(
+    (tab) => tab.key === "price" || supportsValuation(market, code),
+  );
 }
 
 export function shouldRenderHistoricalEvents(view: CardView, _market: WatchlistMarket): boolean {
@@ -503,7 +520,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
   // Clearing stale points + toggling loading happens here (not in onClick) so
   // loading can never get stuck: the same effect that sets it always clears it.
   useEffect(() => {
-    if (view === "price" || view === "historical_events" || view === "capital" || view === "events") return;
+    if (view === "price" || view === "historical_events") return;
     let cancelled = false;
     setValLoading(true);
     setValPoints([]);
@@ -522,7 +539,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
           <span className="font-mono text-xs text-muted-foreground ml-1">{code}</span>
         </span>
         <div className="flex gap-1">
-          {stockChartViewTabs(market).map(({ key, label }) => (
+          {stockChartViewTabs(market, code).map(({ key, label }) => (
             <button
               key={key}
               onClick={() => {
@@ -567,10 +584,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
           bars={bars}
           onPeriodChange={setHistoricalPeriod}
         />
-      ) : view === "capital" ? (
-        <CapitalFlowPanel code={code} />
-      ) : view === "events" ? (
-        <StockEventsPanel code={code} />
+
       ) : (
         <ValuationChart
           points={valPoints}
