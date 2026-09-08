@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { LineChart, Loader2, AlertTriangle, TrendingUp, RefreshCw } from "lucide-react";
-import { api, type WatchlistMarket, type ForecastResponse, type HSTechBestStrategyResponse, type TradeSignal } from "@/lib/api";
+import { api, type WatchlistMarket, type ForecastResponse, type HSTechBestStrategyResponse, type TradeSignal, type ShortCandidate } from "@/lib/api";
 import { ForecastChart } from "@/components/charts/ForecastChart";
 import { cn } from "@/lib/utils";
 import {
@@ -157,12 +157,14 @@ function RecentSignalsPanel({
   signals,
   loadingCount,
   errorCount,
+  shorts,
 }: {
   signals: RecentStrategySignal[];
   loadingCount: number;
   errorCount: number;
+  shorts: ShortCandidate[];
 }) {
-  if (!signals.length && loadingCount === 0 && errorCount === 0) return null;
+  if (!signals.length && loadingCount === 0 && errorCount === 0 && !shorts.length) return null;
   return (
     <div className="app-panel">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -224,6 +226,62 @@ function RecentSignalsPanel({
         </div>
       ) : (
         <p className="mt-3 text-xs text-muted-foreground">最近 7 天暂无开仓或平仓信号。</p>
+      )}
+
+      {shorts.length > 0 && (
+        <div className="mt-5 border-t pt-4">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <h3 className="text-sm font-semibold">最值得做空</h3>
+            <p className="text-[11px] text-muted-foreground">
+              按 TimesFM 预测中位跌幅排序 · 仅供研究,策略本身不做空
+            </p>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {shorts.map((c) => (
+              <div
+                key={`${c.market}-${c.code}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => scrollToForecastCard(c.market as WatchlistMarket, c.code)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    scrollToForecastCard(c.market as WatchlistMarket, c.code);
+                  }
+                }}
+                title={`查看 ${c.name} 的预测图表`}
+                className="cursor-pointer rounded-2xl border bg-card px-3.5 py-3 transition hover:border-primary/40 hover:bg-muted/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-normal text-foreground">
+                      {c.name}
+                      <span className="ml-1 font-mono text-xs text-muted-foreground">{c.code}</span>
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {c.strategy_flat
+                        ? `策略也空仓${c.strategy_label ? ` · ${c.strategy_label}` : ""}`
+                        : "⚠ 策略仍做多,方向矛盾"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-md bg-red-500/10 px-2 py-1 text-xs font-medium text-red-600 tabular-nums dark:text-red-400">
+                    {c.expected_return_pct.toFixed(1)}%
+                  </span>
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground tabular-nums">
+                  {c.horizon_days} 日预测区间 [{c.downside_return_pct.toFixed(0)}%, {c.upside_return_pct.toFixed(0)}%]
+                  <span className={cn("ml-2", c.signal_to_band < 0.25 && "text-amber-600 dark:text-amber-400")}>
+                    信噪 {c.signal_to_band.toFixed(2)}
+                  </span>
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+            信噪 = 预期跌幅 ÷ 区间宽度。数值远小于 1 说明预测区间远宽于跌幅本身,方向性证据很弱——
+            信号体检目前也未证实预测方向有统计显著优势,请当作待查线索而非交易建议。
+          </p>
+        </div>
       )}
     </div>
   );
@@ -706,6 +764,16 @@ export function Forecast() {
     return () => { cancelled = true; };
   }, [watchlistItems, loadBestStrategy]);
 
+  const [shortCandidates, setShortCandidates] = useState<ShortCandidate[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    // Cheap: reads the per-day forecast caches the background warm-up fills.
+    api.getShortCandidates(6)
+      .then((r) => { if (!cancelled) setShortCandidates(r.candidates); })
+      .catch(() => { if (!cancelled) setShortCandidates([]); });
+    return () => { cancelled = true; };
+  }, [watchlistItems.length]);
+
   const recentSignals = useMemo(
     () => recentSignalsFromBestStrategies(watchlistItems, bestByKey, daysAgoISO(7)),
     [watchlistItems, bestByKey],
@@ -753,7 +821,7 @@ export function Forecast() {
         </div>
       ) : (
         <div className="space-y-4">
-          <RecentSignalsPanel signals={recentSignals} loadingCount={bestLoadingCount} errorCount={bestErrorCount} />
+          <RecentSignalsPanel signals={recentSignals} loadingCount={bestLoadingCount} errorCount={bestErrorCount} shorts={shortCandidates} />
           <ForecastWatchlistLinks items={watchlistItems} states={bestByKey} />
           {watchlistItems.map((item) => (
             <LazyForecastCard

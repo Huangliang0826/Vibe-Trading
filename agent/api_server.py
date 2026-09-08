@@ -4511,6 +4511,52 @@ def _redact_account(account: dict) -> dict:
     return {k: v for k, v in account.items() if k not in {"account_number", "account_id"}}
 
 
+@app.get("/forecast/short-candidates")
+async def get_short_candidates_endpoint(limit: int = Query(5, ge=1, le=20)):
+    """Watchlist symbols whose forecast cone points down hardest.
+
+    Reads the same per-day caches the forecast page uses (warmed in the
+    background), so this is cheap. Informational only — the paper executor is
+    long-only and never acts on it.
+    """
+    from src.forecast.short_candidates import build_short_candidates
+
+    def fetch_forecast(market: str, code: str) -> dict:
+        return asyncio.run_coroutine_threadsafe(
+            get_forecast(market, code, months=3,
+                         context=_FORECAST_WARM_CONTEXT,
+                         display_history=_FORECAST_WARM_DISPLAY_HISTORY,
+                         nocache=0),
+            loop,
+        ).result()
+
+    def fetch_strategy(market: str, code: str) -> tuple[bool, str]:
+        payload = asyncio.run_coroutine_threadsafe(
+            get_forecast_best_paper_strategy(
+                Response(), market, code,
+                start_date="2020-01-01", end_date="", refresh=False, strategy="",
+            ),
+            loop,
+        ).result()
+        from src.paper_trading.auto_executor import desired_position
+        trades = (payload.get("best") or {}).get("trades") or []
+        flat = desired_position(trades, bool(payload.get("reliable"))) == "flat"
+        label = ((payload.get("best") or {}).get("strategy") or {}).get("label") or ""
+        return flat, label
+
+    loop = asyncio.get_running_loop()
+    targets = _forecast_warm_targets()
+    ranked, skipped = await asyncio.to_thread(
+        build_short_candidates, targets, fetch_forecast, fetch_strategy, limit=limit,
+    )
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "evaluated": len(targets),
+        "candidates": [c.to_dict() for c in ranked],
+        "skipped": skipped,
+    }
+
+
 @app.get("/live/paper-snapshot", dependencies=[Depends(require_auth)])
 async def trading_snapshot_endpoint(
     profile_id: str = Query("alpaca-paper-trade", max_length=64),

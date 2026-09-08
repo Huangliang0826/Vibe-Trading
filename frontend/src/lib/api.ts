@@ -174,6 +174,28 @@ export interface PaperTickState {
   error: string | null;
   already_running?: boolean;
 }
+export interface ShortCandidate {
+  market: string;
+  code: string;
+  name: string;
+  last_close: number;
+  expected_return_pct: number;
+  downside_return_pct: number;
+  upside_return_pct: number;
+  band_width_pct: number;
+  /** |expected| / band width — how much of the move is signal vs cone noise. */
+  signal_to_band: number;
+  strategy_flat: boolean;
+  strategy_label: string;
+  horizon_days: number;
+}
+export interface ShortCandidatesResponse {
+  as_of: string;
+  evaluated: number;
+  candidates: ShortCandidate[];
+  skipped: { code: string; reason: string }[];
+}
+
 export interface PaperScheduleState {
   enabled: boolean;
   last_run_date: string | null;
@@ -292,6 +314,8 @@ export const api = {
   runPaperTick: (dryRun: boolean) =>
     request<PaperTickState>(`/live/paper-tick?dry_run=${dryRun}`, { method: "POST" }),
   getPaperTick: () => request<PaperTickState>("/live/paper-tick"),
+  getShortCandidates: (limit = 5) =>
+    request<ShortCandidatesResponse>(`/forecast/short-candidates?limit=${limit}`),
   getPaperSchedule: () => request<PaperScheduleState>("/live/paper-schedule"),
   setPaperSchedule: (enabled: boolean) =>
     request<PaperScheduleState>("/live/paper-schedule", { method: "POST", body: JSON.stringify({ enabled }) }),

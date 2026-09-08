@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const apiMock = vi.hoisted(() => ({
   getForecast: vi.fn(),
   getForecastBestPaperStrategy: vi.fn(),
+  getShortCandidates: vi.fn().mockResolvedValue({ candidates: [] }),
 }));
 
 vi.mock("@/lib/api", async (original) => ({ ...(await original<object>()), api: apiMock }));
