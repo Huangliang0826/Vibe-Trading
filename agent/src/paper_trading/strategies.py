@@ -307,6 +307,85 @@ def generate_volatility_target(
     return signal_map
 
 
+# ── ATR Risk Budget ─────────────────────────────────────────────────────────
+
+def generate_atr_risk_budget(
+    holdings: List[PaperHolding],
+    data_map: Dict[str, pd.DataFrame],
+    params: Dict[str, Any],
+) -> Dict[str, pd.Series]:
+    """Size by risk budget, not by conviction — a drawdown-first allocator.
+
+    The premise, taken from this project's own evidence: direction is not
+    reliably predictable on liquid large caps (the edge scorecard finds no
+    statistically significant signal, and 買入持有 wins outright on most
+    watchlist names), but *volatility is* — ATR and realised vol are strongly
+    autocorrelated. So nothing here tries to time entries. Exposure is a
+    function of measured risk only:
+
+    1. Risk budget: hold ``risk_per_trade`` of equity against an
+       ``atr_mult``-wide ATR stop, i.e. weight ~ risk / (atr_mult * ATR/price).
+       Position size therefore falls as the stop widens.
+    2. Volatility cap: never exceed the weight that a ``target_vol`` ceiling
+       allows on realised volatility.
+    3. Trend filter as a dimmer, not a switch: below the long moving average,
+       scale to ``bear_weight`` rather than going flat. A regime filter that
+       cuts to zero converts an unpredictable direction call into a large
+       binary bet — exactly the failure mode this strategy avoids.
+    4. Drawdown brake: as the position falls from its own peak, scale down
+       further, reaching ``dd_floor_weight`` at ``max_drawdown``.
+
+    Weights are smoothed so the position does not churn on daily ATR noise.
+    """
+    atr_window = max(int(params.get("atr_window", 14)), 2)
+    atr_mult = max(float(params.get("atr_mult", 3.0)), 0.5)
+    risk_per_trade = min(max(float(params.get("risk_per_trade", 0.02)), 0.001), 0.5)
+    target_vol = max(float(params.get("target_vol", 0.20)), 0.01)
+    vol_window = max(int(params.get("vol_window", 20)), 5)
+    trend_window = max(int(params.get("trend_window", 200)), 20)
+    bear_weight = min(max(float(params.get("bear_weight", 0.4)), 0.0), 1.0)
+    max_drawdown = min(max(float(params.get("max_drawdown", 0.25)), 0.02), 0.9)
+    dd_floor_weight = min(max(float(params.get("dd_floor_weight", 0.25)), 0.0), 1.0)
+    smooth_window = max(int(params.get("smooth_window", 5)), 1)
+
+    signal_map: Dict[str, pd.Series] = {}
+    for h in holdings:
+        code = _to_code(h)
+        frame = data_map.get(code)
+        if frame is None or frame.empty:
+            continue
+        close = frame["close"].astype(float)
+        if close.empty:
+            continue
+        # Fall back to the close when the source carries no high/low, so the
+        # strategy still runs — just with true range collapsed to close moves.
+        high = frame["high"].astype(float) if "high" in frame else close
+        low = frame["low"].astype(float) if "low" in frame else close
+
+        atr_pct = (_atr(high, low, close, atr_window) / close.replace(0, np.nan)).replace(0, np.nan)
+        risk_weight = risk_per_trade / (atr_mult * atr_pct)
+
+        realised_vol = close.pct_change().rolling(
+            vol_window, min_periods=max(3, vol_window // 2)
+        ).std() * np.sqrt(252)
+        vol_weight = target_vol / realised_vol.replace(0, np.nan)
+
+        weight = pd.concat([risk_weight, vol_weight], axis=1).min(axis=1).clip(lower=0.0, upper=1.0)
+
+        trend = close.rolling(trend_window, min_periods=max(20, trend_window // 4)).mean()
+        weight = weight.where(close >= trend, weight * bear_weight)
+
+        # Distance below the position's own running peak, as a 0..1 brake.
+        peak = close.cummax()
+        drawdown = (close / peak - 1.0).abs()
+        brake = 1.0 - (1.0 - dd_floor_weight) * (drawdown / max_drawdown).clip(upper=1.0)
+        weight = weight * brake
+
+        weight = weight.rolling(smooth_window, min_periods=1).mean()
+        signal_map[code] = (weight.fillna(0.0).clip(0.0, 1.0) * _weight(h)).reindex(close.index).fillna(0.0)
+    return signal_map
+
+
 # ── Drawdown Rebalance ──────────────────────────────────────────────────────
 
 def generate_drawdown_rebalance(
@@ -1338,6 +1417,8 @@ def generate_signals(
         return generate_rsi_reversion(holdings, data_map, params)
     if strategy_name == "volatility_target":
         return generate_volatility_target(holdings, data_map, params)
+    if strategy_name == "atr_risk_budget":
+        return generate_atr_risk_budget(holdings, data_map, params)
     if strategy_name == "drawdown_rebalance":
         return generate_drawdown_rebalance(holdings, data_map, params)
     if strategy_name == "trend_volatility_filter":

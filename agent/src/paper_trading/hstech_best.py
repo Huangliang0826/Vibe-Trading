@@ -55,6 +55,7 @@ STRATEGY_LABELS: dict[str, str] = {
     "price_volume_efficiency": "量价效率轮动",
     "ma200_timing": "200日均线择时",
     "value_averaging": "价值平均定投",
+    "atr_risk_budget": "ATR 风险预算",
 }
 
 STRATEGY_PRINCIPLES: dict[str, str] = {
@@ -65,6 +66,7 @@ STRATEGY_PRINCIPLES: dict[str, str] = {
     "moving_average_cross": "策略原理：用短期均线和长期均线判断趋势，短线上穿长线时持有，下穿时离场。",
     "rsi_reversion": "策略原理：用 RSI 判断超买超卖，超卖时低吸，反弹到偏热区间后卖出。",
     "volatility_target": "策略原理：根据近期波动率动态调仓，波动越高仓位越低，优先控制风险暴露。",
+    "atr_risk_budget": "策略原理：不预测涨跌，只按风险定仓位。以 ATR 止损宽度反推仓位（波动越大仓位越小），再受组合波动率上限约束；跌破长期均线只降仓不清仓，回撤加深时进一步减仓。目标是用明显更小的回撤换取接近买入持有的收益。",
     "drawdown_rebalance": "策略原理：价格从高点回撤越多越提高仓位，接近前高时降低仓位锁定恢复收益。",
     "smart_dca": "策略原理：在普通定投基础上根据均线偏离和波动率调整投入倍率，低估多投、过热少投。",
     "dca_then_hold": "策略原理：把资金分三年逐月投入，完成建仓后长期持有。",

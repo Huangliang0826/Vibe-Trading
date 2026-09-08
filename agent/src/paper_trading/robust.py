@@ -43,6 +43,7 @@ _PERTURB_SPECS: Dict[str, List[tuple]] = {
     "ma200_timing": [("window", 200)],
     "rsi_reversion": [("window", 14), ("buy_below", 35.0)],
     "volatility_target": [("target_vol", 0.18)],
+    "atr_risk_budget": [("atr_mult", 3.0), ("target_vol", 0.20), ("risk_per_trade", 0.02)],
     "drawdown_rebalance": [("first_level", 0.05), ("third_level", 0.15)],
     "trend_volatility_filter": [("ma_window", 120), ("target_vol", 0.18)],
     "donchian_breakout": [("entry_window", 55), ("exit_window", 20)],
