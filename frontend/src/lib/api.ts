@@ -1346,7 +1346,8 @@ export interface PaperStrategyConfig {
     | "accelerated_dca_entry"
     | "deep_drawdown_recovery"
     | "ma200_timing"
-    | "value_averaging";
+    | "value_averaging"
+    | "atr_risk_budget";
   params: Record<string, unknown>;
 }
 

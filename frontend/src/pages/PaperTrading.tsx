@@ -97,7 +97,8 @@ type StrategyName =
   | "accelerated_dca_entry"
   | "deep_drawdown_recovery"
   | "ma200_timing"
-  | "value_averaging";
+  | "value_averaging"
+  | "atr_risk_budget";
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] = [
   { value: "buy_and_hold", label: "Buy & Hold", desc: "买入并持有，不做任何调仓" },
@@ -131,6 +132,7 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string; desc: string }[] =
   { value: "price_volume_efficiency", label: "量价效率轮动", desc: "买上涨高效且放量确认、下跌风险较低的标的" },
   { value: "ma200_timing", label: "200日均线择时", desc: "站上200日均线满仓，跌破清仓持币，避开深度熊市" },
   { value: "value_averaging", label: "价值平均定投", desc: "市值沿目标路径逐月增长，跌多补、涨多卖，低买高卖" },
+  { value: "atr_risk_budget", label: "ATR 风险预算", desc: "不预测涨跌，只按 ATR 与波动率定仓位；回撤加深时减仓（对照组，实测跑输买入持有）" },
 ];
 
 const STRATEGY_LABELS = Object.fromEntries(
@@ -185,6 +187,7 @@ const STRATEGY_PRINCIPLES: Record<StrategyName, string> = {
   deep_drawdown_recovery: "策略原理：价格相对此前三年的最高收盘价下跌40%后开始建仓，将资金分十份、每隔一个月投入一份；收盘价达到加权平均成本的140%后锁定退出计划，从下一交易日开始分五份、每隔一个月卖出一份。触发退出后即使价格回落也继续执行。",
   ma200_timing: "策略原理：收盘价站上200日均线时满仓持有，跌破则清仓持币等待，用最简单的长期趋势过滤避开深度熊市；代价是震荡市里可能被反复打止损。",
   value_averaging: "策略原理：让持仓市值沿预定路径逐月增长——低于路径就补足缺口（跌得越多买得越多），高于路径就卖出盈余落袋，比普通定投更贴近低买高卖。",
+  atr_risk_budget: "策略原理：不预测涨跌，只按已测风险定仓位——以 ATR 止损宽度反推仓位（波动越大仓位越小），再受组合波动率上限约束；跌破长期均线只降仓不清仓，回撤加深时进一步减仓。注意：作为对照组保留，14 只自选股实测显示它把平均最大回撤从 -68.7% 降到 -24.1%，但中位 Calmar 由 0.31 跌至 0.04，仅 1/14 胜出，不建议实盘使用。",
 };
 
 function strategyParamsFor(name: StrategyName, dcaFrequency: string, gridCount: number): Record<string, unknown> {
