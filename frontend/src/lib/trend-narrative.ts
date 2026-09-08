@@ -69,75 +69,89 @@ export function indicatorSnapshot(bars: TrendBar[]): IndicatorSnapshot | null {
   };
 }
 
-export function describeTrend(bars: TrendBar[]): string[] {
-  const closes = bars.map((b) => b.close).filter((c) => Number.isFinite(c));
-  if (closes.length < MIN_BARS_FOR_INDICATORS) {
-    return [`数据点不足,无法计算指标(至少需要约 ${MIN_BARS_FOR_INDICATORS} 个交易日)。`];
-  }
+export interface IndicatorRow {
+  /** Indicator label, e.g. "MACD (12,26,9)". */
+  name: string;
+  /** The raw numbers, kept compact enough for a table cell. */
+  value: string;
+  /** What those numbers currently say. */
+  reading: string;
+  /** Directional colouring for the reading cell. */
+  tone: "up" | "down" | "neutral";
+}
 
-  const notes: string[] = [];
-  const price = last(closes) as number;
+/** The caveat shown under the table — these indicators describe, not predict. */
+export const INDICATOR_CAVEAT =
+  "以上为对已发生走势的描述,不构成交易建议——本项目的信号体检尚未证实这些指标具有统计显著的预测力。";
 
-  const { dif, signal, histogram } = calcMACD(closes);
-  const d = last(dif), sg = last(signal), h = last(histogram);
-  const prevH = histogram[histogram.length - 2];
-  if (d != null && sg != null && h != null) {
-    const above = d > sg;
-    const zone = d > 0 ? "零轴上方" : "零轴下方";
-    let cross = "";
-    if (prevH != null) {
-      if (prevH <= 0 && h > 0) cross = ",刚出现金叉";
-      else if (prevH >= 0 && h < 0) cross = ",刚出现死叉";
-    }
-    const widening = prevH != null && Math.abs(h) > Math.abs(prevH);
-    notes.push(
-      `MACD:DIF ${above ? "位于 DEA 上方" : "跌破 DEA"},在${zone}${cross};` +
-      `柱状体${h >= 0 ? "为正" : "为负"}且${widening ? "在放大" : "在收窄"},` +
-      `即${above ? "上行" : "下行"}动能${widening ? "仍在增强" : "正在减弱"}。`,
-    );
-  }
+const n2 = (v: number) => v.toFixed(2);
 
-  const ma50 = last(calcMA(closes, 50)), ma200 = last(calcMA(closes, 200));
-  if (ma50 != null && ma200 != null) {
-    notes.push(
-      `均线:价格${price >= ma50 ? "位于 50 日均线之上" : "跌破 50 日均线"},` +
-      `50 日均线${ma50 >= ma200 ? "高于" : "低于"} 200 日均线(${ma50 >= ma200 ? "多头排列" : "空头排列"})。`,
-    );
-  } else if (ma50 != null) {
-    notes.push(
-      `均线:价格${price >= ma50 ? "位于 50 日均线之上" : "跌破 50 日均线"}` +
-      `(当前区间不足 200 日,长期均线未计算)。`,
-    );
-  }
-
-  const r = last(calcRSI(closes));
-  if (r != null) {
-    const state = r >= 70 ? "进入超买区" : r <= 30 ? "进入超卖区" : "处于中性区间";
-    notes.push(`RSI(14):${r.toFixed(1)},${state}。`);
-  }
-
+/** Structured readout for the indicator table. */
+export function indicatorRows(bars: TrendBar[]): IndicatorRow[] {
   const snap = indicatorSnapshot(bars);
-  if (snap?.boll) {
-    const { pctB, bandwidthPct, upper, lower } = snap.boll;
-    const where = pctB >= 1 ? "已突破上轨"
-      : pctB <= 0 ? "已跌破下轨"
-      : pctB >= 0.8 ? "贴近上轨"
-      : pctB <= 0.2 ? "贴近下轨"
-      : "运行于通道中部";
-    notes.push(
-      `BOLL(20,2):价格${where}(上轨 ${upper.toFixed(2)} / 下轨 ${lower.toFixed(2)});` +
-      `带宽为中轨的 ${bandwidthPct.toFixed(1)}%,${bandwidthPct < 10 ? "通道收窄,波动被压缩" : "通道较宽,波动较大"}。`,
-    );
-  }
-  if (snap?.atr) {
-    notes.push(
-      `ATR(14):${snap.atr.value.toFixed(2)},约为现价的 ${snap.atr.pctOfPrice.toFixed(2)}%——` +
-      `即近期日均真实波动幅度,可用于估算止损距离与仓位。`,
-    );
-  } else if (snap) {
-    notes.push("ATR(14):当前数据缺少最高/最低价,无法计算真实波幅。");
+  if (!snap) return [];
+  const rows: IndicatorRow[] = [];
+
+  if (snap.macd) {
+    const { dif, dea, hist, prevHist } = snap.macd;
+    const above = dif > dea;
+    const widening = prevHist != null && Math.abs(hist) > Math.abs(prevHist);
+    let cross = "";
+    if (prevHist != null) {
+      if (prevHist <= 0 && hist > 0) cross = "金叉 · ";
+      else if (prevHist >= 0 && hist < 0) cross = "死叉 · ";
+    }
+    rows.push({
+      name: "MACD (12,26,9)",
+      value: `DIF ${n2(dif)} / DEA ${n2(dea)}`,
+      reading: `${cross}${dif > 0 ? "零轴上方" : "零轴下方"},${above ? "多头" : "空头"}动能${widening ? "增强" : "减弱"}`,
+      tone: above ? "up" : "down",
+    });
   }
 
-  notes.push("以上是对已发生走势的描述,不构成交易建议——本项目的信号体检尚未证实这些指标具有统计显著的预测力。");
-  return notes;
+  const { ma50, ma200 } = snap.ma;
+  if (ma50 != null) {
+    const bull = ma200 != null ? ma50 >= ma200 : snap.price >= ma50;
+    rows.push({
+      name: "均线 MA50 / MA200",
+      value: ma200 != null ? `${n2(ma50)} / ${n2(ma200)}` : `${n2(ma50)} / —`,
+      reading: ma200 != null
+        ? `${bull ? "多头排列" : "空头排列"},价格${snap.price >= ma50 ? "在 MA50 之上" : "跌破 MA50"}`
+        : `价格${snap.price >= ma50 ? "在 MA50 之上" : "跌破 MA50"}(区间不足 200 日)`,
+      tone: bull ? "up" : "down",
+    });
+  }
+
+  if (snap.rsi != null) {
+    const r = snap.rsi;
+    rows.push({
+      name: "RSI (14)",
+      value: r.toFixed(1),
+      reading: r >= 70 ? "超买区" : r <= 30 ? "超卖区" : "中性区间",
+      tone: r >= 70 ? "down" : r <= 30 ? "up" : "neutral",
+    });
+  }
+
+  if (snap.boll) {
+    const { pctB, bandwidthPct, upper, lower } = snap.boll;
+    const where = pctB >= 1 ? "突破上轨" : pctB <= 0 ? "跌破下轨"
+      : pctB >= 0.8 ? "贴近上轨" : pctB <= 0.2 ? "贴近下轨" : "通道中部";
+    rows.push({
+      name: "BOLL (20,2)",
+      value: `${n2(lower)} – ${n2(upper)}`,
+      reading: `${where},带宽 ${bandwidthPct.toFixed(1)}%(${bandwidthPct < 10 ? "收窄" : "较宽"})`,
+      tone: pctB >= 0.8 ? "up" : pctB <= 0.2 ? "down" : "neutral",
+    });
+  }
+
+  rows.push(snap.atr
+    ? {
+        name: "ATR (14)",
+        value: `${n2(snap.atr.value)}(${snap.atr.pctOfPrice.toFixed(2)}%)`,
+        reading: "日均真实波幅,可作止损距离参考",
+        tone: "neutral",
+      }
+    : { name: "ATR (14)", value: "—", reading: "数据缺少最高/最低价,无法计算", tone: "neutral" });
+
+  return rows;
 }

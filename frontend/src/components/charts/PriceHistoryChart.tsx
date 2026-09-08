@@ -3,8 +3,9 @@ import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
+import { Loader2, Sparkles } from "lucide-react";
 import { calcMA, calcMACD } from "@/lib/indicators";
-import { MIN_BARS_FOR_INDICATORS, describeTrend, indicatorSnapshot } from "@/lib/trend-narrative";
+import { INDICATOR_CAVEAT, MIN_BARS_FOR_INDICATORS, indicatorRows, indicatorSnapshot } from "@/lib/trend-narrative";
 import { api } from "@/lib/api";
 import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistHistoryMetrics, WatchlistQuote } from "@/lib/api";
 
@@ -123,27 +124,29 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
   // Intraday bars are not daily closes, so MA/MACD periods would be meaningless.
   const indicatorsAvailable = period !== "1D" && bars.length >= MIN_BARS_FOR_INDICATORS;
   const indicatorsOn = showIndicators && indicatorsAvailable;
-  const trendNotes = useMemo(
-    () => (indicatorsOn ? describeTrend(bars) : []),
+  const rows = useMemo(
+    () => (indicatorsOn ? indicatorRows(bars) : []),
     [indicatorsOn, bars],
   );
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  const runAiSummary = async () => {
+  // Auto-summarise whenever the panel is open for a given symbol/window, so the
+  // read is there without a second click. Keyed so switching period re-runs it.
+  useEffect(() => {
+    if (!indicatorsOn) { setAiSummary(null); setAiError(null); return; }
     const snapshot = indicatorSnapshot(bars);
-    if (!snapshot) { setAiError("数据点不足,无法生成总结。"); return; }
-    setAiBusy(true); setAiError(null);
-    try {
-      const r = await api.getIndicatorSummary({ symbol, name: symbol, period, snapshot });
-      setAiSummary(r.summary);
-    } catch (e) {
-      setAiError(e instanceof Error ? e.message : "AI 总结失败");
-    } finally {
-      setAiBusy(false);
-    }
-  };
+    if (!snapshot) { setAiSummary(null); setAiError("数据点不足,无法生成总结。"); return; }
+    let cancelled = false;
+    setAiBusy(true); setAiError(null); setAiSummary(null);
+    api.getIndicatorSummary({ symbol, name: symbol, period, snapshot })
+      .then((r) => { if (!cancelled) setAiSummary(r.summary); })
+      .catch((e) => { if (!cancelled) setAiError(e instanceof Error ? e.message : "AI 总结失败"); })
+      .finally(() => { if (!cancelled) setAiBusy(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [indicatorsOn, symbol, period, bars.length]);
 
   const hasData = bars.length >= 2;
   const firstClose = hasData ? bars[0].close : 0;
@@ -449,46 +452,64 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
         <div key="chart" ref={ref} style={{ height: indicatorsOn ? height + 90 : height }} />
       )}
 
-      {indicatorsOn && trendNotes.length > 0 && (
-        <div className="mt-2 rounded-lg border bg-muted/20 px-3 py-2.5">
-          <div className="mb-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-0.5 w-3 rounded" style={{ background: "#f59e0b" }} />MA50 / DEA
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-0.5 w-3 rounded" style={{ background: "#8b5cf6" }} />MA200
-            </span>
-            <span>下方副图为 MACD(12,26,9)</span>
-          </div>
-          <ul className="space-y-1 text-[11px] leading-5 text-muted-foreground">
-            {trendNotes.map((note, i) => (
-              <li key={i} className={cn(i === trendNotes.length - 1 && "text-muted-foreground/70")}>{note}</li>
-            ))}
-          </ul>
-
-          <div className="mt-2.5 border-t pt-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium">AI 总结 · DeepSeek</span>
-              <button
-                onClick={runAiSummary}
-                disabled={aiBusy}
-                className="rounded-md border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-              >
-                {aiBusy ? "生成中…" : aiSummary ? "重新生成" : "生成总结"}
-              </button>
+      {indicatorsOn && (
+        <div className="mt-3 rounded-xl border bg-card">
+          {/* AI read first — the table below is the evidence behind it. */}
+          <div className="border-b px-4 py-3">
+            <div className="mb-1.5 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold">AI 总结</span>
+              {aiBusy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
             </div>
-            {aiError && <p className="mt-1 text-[11px] text-red-500">{aiError}</p>}
-            {aiSummary && (
-              <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-5 text-foreground/90">{aiSummary}</p>
-            )}
-            {!aiSummary && !aiError && !aiBusy && (
-              <p className="mt-1 text-[11px] text-muted-foreground/70">
-                把上面全部指标交给 DeepSeek 归纳趋势并指出指标间的印证或矛盾。
-              </p>
+            {aiError ? (
+              <p className="text-sm text-red-500">{aiError}</p>
+            ) : aiSummary ? (
+              <p className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">{aiSummary}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">正在综合各项指标生成趋势判断…</p>
             )}
           </div>
+
+          {rows.length > 0 && (
+            <div className="px-4 py-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th className="pb-2 text-left font-medium">指标</th>
+                    <th className="pb-2 text-right font-medium">数值</th>
+                    <th className="pb-2 pl-4 text-left font-medium">解读</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.name} className="border-b last:border-0">
+                      <td className="py-2 whitespace-nowrap font-medium">{r.name}</td>
+                      <td className="py-2 text-right tabular-nums text-muted-foreground">{r.value}</td>
+                      <td className={cn(
+                        "py-2 pl-4",
+                        r.tone === "up" && "text-emerald-600 dark:text-emerald-400",
+                        r.tone === "down" && "text-red-500",
+                        r.tone === "neutral" && "text-muted-foreground",
+                      )}>{r.reading}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3 rounded" style={{ background: "#f59e0b" }} />MA50 / DEA
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3 rounded" style={{ background: "#8b5cf6" }} />MA200
+                </span>
+                <span>副图为 MACD(12,26,9)</span>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground/70">{INDICATOR_CAVEAT}</p>
+            </div>
+          )}
         </div>
       )}
+
     </div>
   );
 }

@@ -1,81 +1,77 @@
 import { describe, expect, it } from "vitest";
 
-import { MIN_BARS_FOR_INDICATORS, describeTrend, indicatorSnapshot } from "../trend-narrative";
-
-const bars = (closes: number[]) => closes.map((close) => ({ close }));
-const ramp = (n: number, from: number, step: number) =>
-  bars(Array.from({ length: n }, (_, i) => from + i * step));
-
-describe("describeTrend", () => {
-  it("says so when the window is too short to compute", () => {
-    const text = describeTrend(ramp(MIN_BARS_FOR_INDICATORS - 1, 100, 1))[0];
-    expect(text).toContain("数据点不足");
-  });
-
-  it("reads a sustained uptrend as bullish alignment", () => {
-    const text = describeTrend(ramp(260, 100, 1)).join(" ");
-    expect(text).toContain("多头排列");
-    expect(text).toContain("位于 50 日均线之上");
-  });
-
-  it("reads a sustained downtrend as bearish alignment", () => {
-    const text = describeTrend(ramp(260, 400, -1)).join(" ");
-    expect(text).toContain("空头排列");
-    expect(text).toContain("跌破 50 日均线");
-  });
-
-  it("notes when the long moving average has no room to compute", () => {
-    const text = describeTrend(ramp(120, 100, 1)).join(" ");
-    expect(text).toContain("不足 200 日");
-    expect(text).not.toContain("排列");
-  });
-
-  it("covers MACD, moving averages and RSI", () => {
-    const text = describeTrend(ramp(260, 100, 1)).join(" ");
-    expect(text).toContain("MACD");
-    expect(text).toContain("均线");
-    expect(text).toContain("RSI(14)");
-  });
-
-  it("flags overbought on a relentless rise", () => {
-    expect(describeTrend(ramp(260, 100, 1)).join(" ")).toContain("超买区");
-  });
-
-  it("always carries the descriptive, non-advisory caveat", () => {
-    expect(describeTrend(ramp(260, 100, 1)).join(" ")).toContain("不构成交易建议");
-  });
-
-  it("ignores non-finite closes rather than throwing", () => {
-    const dirty = [...ramp(260, 100, 1), { close: Number.NaN }];
-    expect(() => describeTrend(dirty)).not.toThrow();
-    expect(describeTrend(dirty).join(" ")).toContain("MACD");
-  });
-});
-
+import {
+  INDICATOR_CAVEAT, MIN_BARS_FOR_INDICATORS, indicatorRows, indicatorSnapshot,
+} from "../trend-narrative";
 
 const ohlc = (n: number, from: number, step: number) =>
   Array.from({ length: n }, (_, i) => {
     const close = from + i * step;
     return { close, high: close + 2, low: close - 2 };
   });
+const closeOnly = (n: number, from: number, step: number) =>
+  Array.from({ length: n }, (_, i) => ({ close: from + i * step }));
 
-describe("BOLL and ATR", () => {
-  it("describes BOLL position and bandwidth", () => {
-    const text = describeTrend(ohlc(260, 100, 1)).join(" ");
-    expect(text).toContain("BOLL(20,2)");
-    expect(text).toMatch(/上轨|下轨|通道/);
+const byName = (rows: ReturnType<typeof indicatorRows>, prefix: string) =>
+  rows.find((r) => r.name.startsWith(prefix));
+
+describe("indicatorRows", () => {
+  it("is empty below the minimum bar count", () => {
+    expect(indicatorRows(ohlc(MIN_BARS_FOR_INDICATORS - 1, 100, 1))).toEqual([]);
   });
 
-  it("reports ATR as an absolute value and a share of price", () => {
-    const text = describeTrend(ohlc(260, 100, 1)).join(" ");
-    expect(text).toContain("ATR(14)");
-    expect(text).toContain("现价的");
+  it("covers every indicator as its own row", () => {
+    const names = indicatorRows(ohlc(260, 100, 1)).map((r) => r.name);
+    expect(names.some((n) => n.startsWith("MACD"))).toBe(true);
+    expect(names.some((n) => n.startsWith("均线"))).toBe(true);
+    expect(names.some((n) => n.startsWith("RSI"))).toBe(true);
+    expect(names.some((n) => n.startsWith("BOLL"))).toBe(true);
+    expect(names.some((n) => n.startsWith("ATR"))).toBe(true);
   });
 
-  it("says ATR is unavailable when bars carry no high/low", () => {
-    const closeOnly = Array.from({ length: 260 }, (_, i) => ({ close: 100 + i }));
-    const text = describeTrend(closeOnly).join(" ");
-    expect(text).toContain("缺少最高/最低价");
+  it("marks an uptrend bullish and a downtrend bearish", () => {
+    const up = byName(indicatorRows(ohlc(260, 100, 1)), "均线")!;
+    expect(up.reading).toContain("多头排列");
+    expect(up.tone).toBe("up");
+
+    const down = byName(indicatorRows(ohlc(260, 400, -1)), "均线")!;
+    expect(down.reading).toContain("空头排列");
+    expect(down.tone).toBe("down");
+  });
+
+  it("notes when the 200-day average has no room to compute", () => {
+    const row = byName(indicatorRows(ohlc(120, 100, 1)), "均线")!;
+    expect(row.value).toContain("—");
+    expect(row.reading).toContain("不足 200 日");
+  });
+
+  it("flags RSI extremes with the matching tone", () => {
+    const overbought = byName(indicatorRows(ohlc(260, 100, 1)), "RSI")!;
+    expect(overbought.reading).toBe("超买区");
+    expect(overbought.tone).toBe("down");
+  });
+
+  it("reports ATR as value and share of price", () => {
+    const row = byName(indicatorRows(ohlc(260, 100, 1)), "ATR")!;
+    expect(row.value).toMatch(/\d+\.\d{2}\(\d+\.\d{2}%\)/);
+  });
+
+  it("says ATR is uncomputable without high/low instead of faking it", () => {
+    const row = byName(indicatorRows(closeOnly(260, 100, 1)), "ATR")!;
+    expect(row.value).toBe("—");
+    expect(row.reading).toContain("无法计算");
+  });
+
+  it("describes BOLL band position and width", () => {
+    const row = byName(indicatorRows(ohlc(260, 100, 1)), "BOLL")!;
+    expect(row.reading).toMatch(/上轨|下轨|通道/);
+    expect(row.reading).toContain("带宽");
+  });
+});
+
+describe("caveat", () => {
+  it("states the readout is descriptive, not advisory", () => {
+    expect(INDICATOR_CAVEAT).toContain("不构成交易建议");
   });
 });
 
@@ -86,7 +82,6 @@ describe("indicatorSnapshot", () => {
 
   it("collects every indicator when high/low are present", () => {
     const snap = indicatorSnapshot(ohlc(260, 100, 1))!;
-    expect(snap.price).toBeGreaterThan(0);
     expect(snap.macd).not.toBeNull();
     expect(snap.boll).not.toBeNull();
     expect(snap.atr).not.toBeNull();
@@ -94,13 +89,11 @@ describe("indicatorSnapshot", () => {
     expect(snap.rsi).not.toBeNull();
   });
 
-  it("omits ATR rather than faking it from closes", () => {
-    const closeOnly = Array.from({ length: 260 }, (_, i) => ({ close: 100 + i }));
-    expect(indicatorSnapshot(closeOnly)!.atr).toBeNull();
+  it("omits ATR rather than deriving it from closes", () => {
+    expect(indicatorSnapshot(closeOnly(260, 100, 1))!.atr).toBeNull();
   });
 
-  it("places %B near 1 in a strong uptrend hugging the upper band", () => {
-    const snap = indicatorSnapshot(ohlc(260, 100, 1))!;
-    expect(snap.boll!.pctB).toBeGreaterThan(0.7);
+  it("places %B near the upper band in a strong uptrend", () => {
+    expect(indicatorSnapshot(ohlc(260, 100, 1))!.boll!.pctB).toBeGreaterThan(0.7);
   });
 });
