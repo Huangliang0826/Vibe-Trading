@@ -35,8 +35,12 @@ export function pruneOverviewCache(keep = Math.floor(MAX_ENTRIES / 2)): number {
   return removed;
 }
 
+/** Bump when the cached bar shape changes so stale entries are not reused.
+ *  v2 added high/low, which ATR needs — v1 entries would silently disable it. */
+const HISTORY_SHAPE_VERSION = "v2";
+
 export function historyCacheKey(market: string, code: string, period: string): string {
-  return `history:${market}:${code.toUpperCase()}:${period.toUpperCase()}`;
+  return `history:${HISTORY_SHAPE_VERSION}:${market}:${code.toUpperCase()}:${period.toUpperCase()}`;
 }
 
 export function quoteCacheKey(market: string, code: string): string {

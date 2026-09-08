@@ -314,6 +314,11 @@ export const api = {
   runPaperTick: (dryRun: boolean) =>
     request<PaperTickState>(`/live/paper-tick?dry_run=${dryRun}`, { method: "POST" }),
   getPaperTick: () => request<PaperTickState>("/live/paper-tick"),
+  getIndicatorSummary: (body: {
+    symbol: string; name: string; period: string; snapshot: unknown;
+  }) => request<{ summary: string; model: string }>("/forecast/indicator-summary", {
+    method: "POST", body: JSON.stringify(body),
+  }),
   getShortCandidates: (limit = 5) =>
     request<ShortCandidatesResponse>(`/forecast/short-candidates?limit=${limit}`),
   getPaperSchedule: () => request<PaperScheduleState>("/live/paper-schedule"),
@@ -894,6 +899,9 @@ export interface PriceHistoryBar {
   date: string;
   close: number;
   volume: number;
+  /** Present for daily bars whose source carries them; needed for ATR. */
+  high?: number;
+  low?: number;
 }
 
 export interface WatchlistHistoryResponse {

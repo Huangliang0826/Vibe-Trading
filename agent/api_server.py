@@ -2256,7 +2256,12 @@ def _resolve_symbol_name(code: str, market: str) -> str:
 
 
 def _df_to_bars(df, intraday: bool) -> list[dict]:
-    """Serialize an OHLCV DataFrame to [{date, close, volume}] rows."""
+    """Serialize an OHLCV DataFrame to [{date, close, volume, high, low}] rows.
+
+    ``high``/``low`` are included so range-based indicators (ATR) can be
+    computed client-side; they are omitted when the source lacks them rather
+    than faked from the close, which would understate true range.
+    """
     import math
     import pandas as pd
 
@@ -2271,7 +2276,15 @@ def _df_to_bars(df, intraday: bool) -> list[dict]:
         except (ValueError, TypeError):
             continue
         date_str = ts.strftime(fmt) if hasattr(ts, "strftime") else str(ts)[: (16 if intraday else 10)]
-        rows.append({"date": date_str, "close": round(close_val, 4), "volume": vol_val})
+        bar = {"date": date_str, "close": round(close_val, 4), "volume": vol_val}
+        for field in ("high", "low"):
+            try:
+                v = float(row[field])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if pd.notna(v) and math.isfinite(v) and v > 0:
+                bar[field] = round(v, 4)
+        rows.append(bar)
     return rows
 
 
@@ -4511,6 +4524,37 @@ def _redact_account(account: dict) -> dict:
         inner = {k: v for k, v in inner.items() if k not in {"account_number", "account_id", "id"}}
         account = {**account, "account": inner}
     return {k: v for k, v in account.items() if k not in {"account_number", "account_id"}}
+
+
+class IndicatorSummaryRequest(BaseModel):
+    """Indicator values the chart already computed, for the AI read."""
+    symbol: str = Field("", max_length=32)
+    name: str = Field("", max_length=64)
+    period: str = Field("", max_length=8)
+    snapshot: dict
+
+
+@app.post("/forecast/indicator-summary", dependencies=[Depends(require_auth)])
+async def indicator_summary_endpoint(payload: IndicatorSummaryRequest):
+    """Summarise the chart's indicators with DeepSeek.
+
+    The client sends the values it plotted so the AI describes exactly what the
+    user sees, rather than recomputing from a possibly different window.
+    """
+    from src.forecast.indicator_ai import ANALYSIS_VERSION, MODEL_NAME, summarize_indicators
+
+    try:
+        text = await asyncio.to_thread(
+            summarize_indicators,
+            symbol=payload.symbol, name=payload.name,
+            period=payload.period, snapshot=payload.snapshot,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - provider/network failures
+        logger.warning("indicator summary failed for %s: %s", payload.symbol, exc)
+        raise HTTPException(status_code=502, detail=f"AI 总结失败: {exc}") from exc
+    return {"summary": text, "model": MODEL_NAME, "version": ANALYSIS_VERSION}
 
 
 @app.get("/forecast/short-candidates")

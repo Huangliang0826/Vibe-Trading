@@ -572,6 +572,7 @@ function StockChartCard({ code, market, id }: { code: string; market: WatchlistM
             showRisk
             quote={quote}
             metrics={historyMetrics}
+            symbol={name || code}
           />
           {error && <p className="text-xs text-red-500 dark:text-red-400 mt-2">{error}</p>}
         </>

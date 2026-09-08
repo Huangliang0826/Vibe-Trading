@@ -111,3 +111,31 @@ export function calcKDJ(highs: number[], lows: number[], closes: number[], perio
   }
   return { k, d, j };
 }
+
+/** Average True Range (Wilder). Needs high/low; returns nulls without them. */
+export function calcATR(
+  highs: number[], lows: number[], closes: number[], period = 14,
+): N[] {
+  const n = closes.length;
+  const out: N[] = new Array(n).fill(null);
+  if (n <= period || highs.length !== n || lows.length !== n) return out;
+
+  const tr: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (i === 0) { tr.push(highs[i] - lows[i]); continue; }
+    tr.push(Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1]),
+    ));
+  }
+  let atr = 0;
+  for (let i = 1; i <= period; i++) atr += tr[i];
+  atr /= period;
+  out[period] = atr;
+  for (let i = period + 1; i < n; i++) {
+    atr = (atr * (period - 1) + tr[i]) / period;
+    out[i] = atr;
+  }
+  return out;
+}

@@ -4,7 +4,8 @@ import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
 import { calcMA, calcMACD } from "@/lib/indicators";
-import { MIN_BARS_FOR_INDICATORS, describeTrend } from "@/lib/trend-narrative";
+import { MIN_BARS_FOR_INDICATORS, describeTrend, indicatorSnapshot } from "@/lib/trend-narrative";
+import { api } from "@/lib/api";
 import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistHistoryMetrics, WatchlistQuote } from "@/lib/api";
 
 export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "4Y", "5Y", "ALL"];
@@ -18,6 +19,8 @@ interface Props {
   showRisk?: boolean;
   quote?: WatchlistQuote | null;
   metrics?: WatchlistHistoryMetrics | null;
+  /** Shown to the AI summary so it names the right instrument. */
+  symbol?: string;
 }
 
 /** Max drawdown over the displayed window + recovery time of that episode.
@@ -112,7 +115,7 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
   return val.slice(5); // MM-DD
 }
 
-export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null, metrics = null }: Props) {
+export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null, metrics = null, symbol = "" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
   // Off by default: the overlays are opt-in, and they cost a third chart grid.
@@ -124,6 +127,23 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
     () => (indicatorsOn ? describeTrend(bars) : []),
     [indicatorsOn, bars],
   );
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const runAiSummary = async () => {
+    const snapshot = indicatorSnapshot(bars);
+    if (!snapshot) { setAiError("数据点不足,无法生成总结。"); return; }
+    setAiBusy(true); setAiError(null);
+    try {
+      const r = await api.getIndicatorSummary({ symbol, name: symbol, period, snapshot });
+      setAiSummary(r.summary);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "AI 总结失败");
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   const hasData = bars.length >= 2;
   const firstClose = hasData ? bars[0].close : 0;
@@ -445,6 +465,28 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
               <li key={i} className={cn(i === trendNotes.length - 1 && "text-muted-foreground/70")}>{note}</li>
             ))}
           </ul>
+
+          <div className="mt-2.5 border-t pt-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium">AI 总结 · DeepSeek</span>
+              <button
+                onClick={runAiSummary}
+                disabled={aiBusy}
+                className="rounded-md border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+              >
+                {aiBusy ? "生成中…" : aiSummary ? "重新生成" : "生成总结"}
+              </button>
+            </div>
+            {aiError && <p className="mt-1 text-[11px] text-red-500">{aiError}</p>}
+            {aiSummary && (
+              <p className="mt-1.5 whitespace-pre-wrap text-[11px] leading-5 text-foreground/90">{aiSummary}</p>
+            )}
+            {!aiSummary && !aiError && !aiBusy && (
+              <p className="mt-1 text-[11px] text-muted-foreground/70">
+                把上面全部指标交给 DeepSeek 归纳趋势并指出指标间的印证或矛盾。
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
