@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from src.config.paths import get_runtime_root
@@ -21,6 +21,25 @@ from src.config.paths import get_runtime_root
 MARKET_TZ = ZoneInfo("America/New_York")
 # Fire after the 09:30 ET open — 10:00 ET lets the opening print settle.
 RUN_AFTER = time(10, 0)
+# US regular-session close. Before it, today's daily bar is still a live,
+# moving print — anything computed from it is not reproducible.
+MARKET_CLOSE = time(16, 0)
+
+
+def last_settled_session(now_et: datetime) -> date:
+    """Most recent trading day whose daily bar is final.
+
+    Weekend- and close-time aware only; there is no holiday calendar here. On the
+    day after a holiday this can name the holiday itself, which is harmless: the
+    date is used as an inclusive upper bound, so a day with no bar just yields
+    the previous one.
+    """
+    day = now_et.date()
+    if day.weekday() < 5 and now_et.timetz().replace(tzinfo=None) < MARKET_CLOSE:
+        day -= timedelta(days=1)  # today's bar is still moving
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
 
 
 def _path():
