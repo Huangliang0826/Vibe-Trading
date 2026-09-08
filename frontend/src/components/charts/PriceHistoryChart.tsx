@@ -1,11 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { echarts } from "@/lib/echarts";
 import { getChartTheme } from "@/lib/chart-theme";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { cn } from "@/lib/utils";
+import { calcMA, calcMACD } from "@/lib/indicators";
+import { MIN_BARS_FOR_INDICATORS, describeTrend } from "@/lib/trend-narrative";
 import type { PriceHistoryBar, PriceHistoryPeriod, WatchlistHistoryMetrics, WatchlistQuote } from "@/lib/api";
 
-export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"];
+export const PRICE_PERIODS: PriceHistoryPeriod[] = ["1D", "1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "4Y", "5Y", "ALL"];
 
 interface Props {
   bars: PriceHistoryBar[];
@@ -113,6 +115,15 @@ function formatAxisLabel(val: string, period: PriceHistoryPeriod): string {
 export function PriceHistoryChart({ bars, period, onPeriodChange, loading = false, height = 300, showRisk = false, quote = null, metrics = null }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { dark } = useDarkMode();
+  // Off by default: the overlays are opt-in, and they cost a third chart grid.
+  const [showIndicators, setShowIndicators] = useState(false);
+  // Intraday bars are not daily closes, so MA/MACD periods would be meaningless.
+  const indicatorsAvailable = period !== "1D" && bars.length >= MIN_BARS_FOR_INDICATORS;
+  const indicatorsOn = showIndicators && indicatorsAvailable;
+  const trendNotes = useMemo(
+    () => (indicatorsOn ? describeTrend(bars) : []),
+    [indicatorsOn, bars],
+  );
 
   const hasData = bars.length >= 2;
   const firstClose = hasData ? bars[0].close : 0;
@@ -143,15 +154,26 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
     const positive = closes[closes.length - 1] >= closes[0];
     const lineColor = positive ? t.upColor : t.downColor;
 
+    // Indicator overlays (opt-in). MACD gets its own grid below volume.
+    const ma50 = indicatorsOn ? calcMA(closes, 50) : [];
+    const ma200 = indicatorsOn ? calcMA(closes, 200) : [];
+    const m = indicatorsOn ? calcMACD(closes) : null;
+
     const chart = echarts.init(ref.current);
 
     chart.setOption({
       backgroundColor: "transparent",
       animation: false,
-      grid: [
-        { left: 52, right: 8, top: 8, bottom: 40, height: "60%" },
-        { left: 52, right: 8, top: "76%", bottom: 0, height: "18%" },
-      ],
+      grid: indicatorsOn
+        ? [
+            { left: 52, right: 8, top: 8, height: "46%" },
+            { left: 52, right: 8, top: "58%", height: "12%" },
+            { left: 52, right: 8, top: "76%", height: "20%" },
+          ]
+        : [
+            { left: 52, right: 8, top: 8, bottom: 40, height: "60%" },
+            { left: 52, right: 8, top: "76%", bottom: 0, height: "18%" },
+          ],
       xAxis: [
         {
           type: "category",
@@ -167,7 +189,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           data: dates,
           gridIndex: 1,
           axisLine: { lineStyle: { color: t.axisColor } },
-          axisLabel: {
+          axisLabel: indicatorsOn ? { show: false } : {
             fontSize: 10,
             color: t.textColor,
             interval: "auto",
@@ -177,6 +199,21 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           axisTick: { show: false },
           splitLine: { show: false },
         },
+        ...(indicatorsOn ? [{
+          type: "category",
+          data: dates,
+          gridIndex: 2,
+          axisLine: { lineStyle: { color: t.axisColor } },
+          axisLabel: {
+            fontSize: 10,
+            color: t.textColor,
+            interval: "auto",
+            hideOverlap: true,
+            formatter: (val: string) => formatAxisLabel(val, period),
+          },
+          axisTick: { show: false },
+          splitLine: { show: false },
+        }] : []),
       ],
       yAxis: [
         {
@@ -196,6 +233,15 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           axisLine: { show: false },
           axisTick: { show: false },
         },
+        ...(indicatorsOn ? [{
+          type: "value",
+          scale: true,
+          gridIndex: 2,
+          splitLine: { lineStyle: { color: t.gridColor } },
+          axisLabel: { fontSize: 9, color: t.textColor },
+          axisLine: { show: false },
+          axisTick: { show: false },
+        }] : []),
       ],
       series: [
         {
@@ -232,6 +278,22 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           },
           barMaxWidth: 6,
         },
+        ...(indicatorsOn && m ? [
+          { type: "line", name: "MA50", data: ma50, xAxisIndex: 0, yAxisIndex: 0,
+            symbol: "none", lineStyle: { color: "#f59e0b", width: 1 }, z: 3 },
+          { type: "line", name: "MA200", data: ma200, xAxisIndex: 0, yAxisIndex: 0,
+            symbol: "none", lineStyle: { color: "#8b5cf6", width: 1 }, z: 3 },
+          { type: "bar", name: "MACD", data: m.histogram, xAxisIndex: 2, yAxisIndex: 2,
+            barMaxWidth: 6,
+            itemStyle: {
+              color: (p: { data: number | null }) =>
+                (p.data ?? 0) >= 0 ? t.volumeUp : t.volumeDown,
+            } },
+          { type: "line", name: "DIF", data: m.dif, xAxisIndex: 2, yAxisIndex: 2,
+            symbol: "none", lineStyle: { color: t.upColor, width: 1 } },
+          { type: "line", name: "DEA", data: m.signal, xAxisIndex: 2, yAxisIndex: 2,
+            symbol: "none", lineStyle: { color: "#f59e0b", width: 1 } },
+        ] : []),
       ],
       tooltip: {
         trigger: "axis",
@@ -259,7 +321,7 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [bars, dark, period]);
+  }, [bars, dark, period, indicatorsOn]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -294,6 +356,21 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
               {p}
             </button>
           ))}
+          <button
+            onClick={() => setShowIndicators((v) => !v)}
+            disabled={!indicatorsAvailable}
+            title={indicatorsAvailable
+              ? "叠加 MA50 / MA200 与 MACD,并给出走势文字解读"
+              : "指标需要日线数据(1D 为分时)且至少约 30 个交易日"}
+            className={cn(
+              "ml-1 px-2.5 py-0.5 rounded-md text-xs font-medium transition-colors border disabled:opacity-40",
+              indicatorsOn
+                ? "bg-primary/10 text-primary border-primary/30"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted border-transparent",
+            )}
+          >
+            指标
+          </button>
         </div>
       </div>
 
@@ -349,7 +426,26 @@ export function PriceHistoryChart({ bars, period, onPeriodChange, loading = fals
           暂无数据
         </div>
       ) : (
-        <div key="chart" ref={ref} style={{ height }} />
+        <div key="chart" ref={ref} style={{ height: indicatorsOn ? height + 90 : height }} />
+      )}
+
+      {indicatorsOn && trendNotes.length > 0 && (
+        <div className="mt-2 rounded-lg border bg-muted/20 px-3 py-2.5">
+          <div className="mb-1 flex items-center gap-3 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-0.5 w-3 rounded" style={{ background: "#f59e0b" }} />MA50 / DEA
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-0.5 w-3 rounded" style={{ background: "#8b5cf6" }} />MA200
+            </span>
+            <span>下方副图为 MACD(12,26,9)</span>
+          </div>
+          <ul className="space-y-1 text-[11px] leading-5 text-muted-foreground">
+            {trendNotes.map((note, i) => (
+              <li key={i} className={cn(i === trendNotes.length - 1 && "text-muted-foreground/70")}>{note}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

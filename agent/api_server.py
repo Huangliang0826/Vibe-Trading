@@ -2303,12 +2303,14 @@ def _price_period_baseline_date(period: str, today):
 
     if period == "YTD":
         return today.replace(year=today.year - 1, month=12, day=31)
-    if period == "1M":
-        year = today.year if today.month > 1 else today.year - 1
-        month = today.month - 1 if today.month > 1 else 12
+    months = {"1M": 1, "3M": 3, "6M": 6}.get(period)
+    if months:
+        total = today.year * 12 + (today.month - 1) - months
+        year, month = divmod(total, 12)
+        month += 1
         day = min(today.day, calendar.monthrange(year, month)[1])
         return today.replace(year=year, month=month, day=day)
-    years = {"1Y": 1, "3Y": 3, "5Y": 5}.get(period)
+    years = {"1Y": 1, "2Y": 2, "3Y": 3, "4Y": 4, "5Y": 5}.get(period)
     if years:
         try:
             return today.replace(year=today.year - years)
@@ -2573,7 +2575,7 @@ async def get_watchlist_history(
 ):
     """Historical daily close + volume for a single watchlist symbol."""
     response.headers["Cache-Control"] = "no-store"
-    _VALID = {"1D", "1M", "YTD", "1Y", "3Y", "5Y", "ALL"}
+    _VALID = {"1D", "1M", "3M", "6M", "YTD", "1Y", "2Y", "3Y", "4Y", "5Y", "ALL"}
     period = period.upper()
     if period not in _VALID:
         raise HTTPException(status_code=400, detail=f"period must be one of {sorted(_VALID)}")
