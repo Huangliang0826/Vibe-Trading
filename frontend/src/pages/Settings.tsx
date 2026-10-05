@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { BarChart3, Database, Gauge, KeyRound, Loader2, RotateCcw, Save, Server, Settings2, SlidersHorizontal } from "lucide-react";
+import { BarChart3, Database, Gauge, KeyRound, Loader2, Radar, RotateCcw, Save, Server, Settings2, SlidersHorizontal } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, isAuthRequiredError, type DataSourceSettings, type LLMProviderOption, type LLMSettings } from "@/lib/api";
 import { getApiAuthKey, setApiAuthKey } from "@/lib/apiAuth";
 import { Analytics } from "@/pages/Analytics";
 import { EdgeScorecard } from "@/pages/EdgeScorecard";
+import { Scanner } from "@/pages/Scanner";
 import { cn } from "@/lib/utils";
 
 interface LLMFormState {
@@ -485,13 +486,16 @@ function SettingsConfiguration() {
   );
 }
 
-type SettingsTab = "configuration" | "analytics" | "edge";
+type SettingsTab = "configuration" | "analytics" | "edge" | "scanner";
 
 export function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const activeTab: SettingsTab =
-    tabParam === "analytics" ? "analytics" : tabParam === "edge" ? "edge" : "configuration";
+    tabParam === "analytics" ? "analytics"
+    : tabParam === "edge" ? "edge"
+    : tabParam === "scanner" ? "scanner"
+    : "configuration";
 
   const selectTab = (tab: SettingsTab) => {
     const next = new URLSearchParams(searchParams);
@@ -531,6 +535,18 @@ export function Settings() {
           <button
             type="button"
             role="tab"
+            aria-selected={activeTab === "scanner"}
+            onClick={() => selectTab("scanner")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
+              activeTab === "scanner" ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Radar className="h-4 w-4" />机会扫描
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeTab === "analytics"}
             onClick={() => selectTab("analytics")}
             className={cn(
@@ -543,6 +559,7 @@ export function Settings() {
         </div>
       </div>
       {activeTab === "analytics" ? <Analytics embedded />
+        : activeTab === "scanner" ? <Scanner embedded />
         : activeTab === "edge" ? <EdgeScorecard embedded />
         : <SettingsConfiguration />}
     </div>

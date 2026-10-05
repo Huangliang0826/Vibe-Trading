@@ -106,7 +106,7 @@ function MarketSelector({
   );
 }
 
-export function Scanner() {
+export function Scanner({ embedded = false }: { embedded?: boolean }) {
   const [universe, setUniverse] = useState<ScanUniverse>("hstech");
   const [data, setData] = useState<ScanData | null>(null);
   const [prevData, setPrevData] = useState<ScanData | null>(null);
@@ -264,7 +264,7 @@ export function Scanner() {
 
   if (loading) {
     return (
-      <div className="app-page app-page-compact">
+      <div className={cn("app-page app-page-compact", embedded && "app-page-embedded")}>
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
         <div className="flex h-[55vh] flex-col items-center justify-center gap-2 text-muted-foreground">
           <div className="flex items-center">
@@ -281,7 +281,7 @@ export function Scanner() {
 
   if (error || !data) {
     return (
-      <div className="app-page app-page-compact">
+      <div className={cn("app-page app-page-compact", embedded && "app-page-embedded")}>
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
         <div className="flex h-[55vh] flex-col items-center justify-center gap-3 text-muted-foreground">
           <AlertTriangle className="h-8 w-8" />
@@ -312,7 +312,7 @@ export function Scanner() {
   const isLatest = dateIdx === 0;
 
   return (
-    <div className="app-page app-page-compact">
+    <div className={cn("app-page app-page-compact", embedded && "app-page-embedded")}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <MarketSelector value={universe} onChange={setUniverse} disabled={refreshing} />
         <div className="app-segmented" aria-label="视图切换">

@@ -192,6 +192,9 @@
   }
 
   .app-page-compact { max-width: 64rem; }
+  /* A page rendered inside the settings tab host: the tab bar already supplies
+     the gap above, so drop the page's own top padding. */
+  .app-page-embedded { @apply pt-4 sm:pt-5 lg:pt-6; }
   .app-page-wide { max-width: 80rem; }
 
   .app-page-header {

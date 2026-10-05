@@ -11,13 +11,15 @@ import { analyticsSessionId, trackProductEvent } from "@/lib/analytics";
 import { APP_VERSION } from "@/lib/version";
 
 const SHOW_HSTECH_NAV = false;
+// Moved into 设置 → 机会扫描; the /scanner route stays for deep links.
+const SHOW_SCANNER_NAV = false;
 
 const NAV = [
   { to: "/overview", icon: LayoutDashboard, label: "总览" },
   { to: "/paper-trading", icon: Briefcase, label: "模拟盘" },
   { to: "/forecast", icon: LineChart, label: "走势预测" },
   { to: "/hstech", icon: Cpu, label: "恒生科技", hidden: !SHOW_HSTECH_NAV },
-  { to: "/scanner", icon: Radar, label: "机会扫描" },
+  { to: "/scanner", icon: Radar, label: "机会扫描", hidden: !SHOW_SCANNER_NAV },
   { to: "/news-center", icon: Newspaper, label: "新闻中心" },
   { to: "/research-analysis", icon: FileSearch, label: "投研分析" },
   { to: "/learning", icon: GraduationCap, label: "量化学习" },
