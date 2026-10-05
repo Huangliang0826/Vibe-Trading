@@ -1,12 +1,13 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+
+// Read as text through Vite rather than node:fs, so the suite needs no Node
+// type declarations and no assumption about the working directory.
+import src from "../PaperTrading.tsx?raw";
 
 /** The paper-trading strategy catalog is hardcoded in the frontend while the
  *  backend keeps its own list, so a strategy added on one side can silently
  *  fail to appear on the other — which is exactly what happened with
  *  atr_risk_budget. These tests keep the frontend's three places in step. */
-const src = readFileSync(resolve(process.cwd(), "src/pages/PaperTrading.tsx"), "utf-8");
 
 const optionValues = [...src.matchAll(/\{ value: "(\w+)"/g)].map((m) => m[1]);
 const unionMembers = (() => {
