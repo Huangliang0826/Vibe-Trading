@@ -69,6 +69,8 @@ export default defineConfig(({ mode }) => {
         "^/research/": apiProxy,
         "^/learning/": apiProxy,
         "^/forecast/": apiProxy,
+        // 带斜杠:``/growth`` 本身是 SPA 页面路由,只有 ``/growth/...`` 是 API。
+        "^/growth/": apiProxy,
         "^/hstech/": apiProxy,
       },
     },

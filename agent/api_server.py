@@ -5601,6 +5601,9 @@ register_historical_event_routes(app, require_auth=require_local_or_auth)
 from src.api.learning_routes import register_learning_routes  # noqa: E402
 register_learning_routes(app, require_auth=require_local_or_auth)
 
+from src.api.growth_routes import register_growth_routes  # noqa: E402
+register_growth_routes(app, require_auth=require_local_or_auth)
+
 
 # ============================================================================
 # Main Entry Point

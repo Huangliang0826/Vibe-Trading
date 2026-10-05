@@ -88,6 +88,93 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 }
 
+// ── 个人成长 ────────────────────────────────────────────────────────────────
+// 状态存在后端而不是 localStorage:打卡多在手机上,回顾多在电脑上,存浏览器
+// 会把同一个人的数据劈成两份。
+
+export interface GrowthStep {
+  day: number;
+  title: string;
+  detail: string;
+  minutes: number;
+}
+
+export interface GrowthDomainPlan {
+  checkpoint: string;
+  why: string;
+  min_version: string;
+  steps: GrowthStep[];
+  /** ai = 模型生成;fallback = 模型不可用时的确定性计划 */
+  source: "ai" | "fallback";
+}
+
+export interface GrowthDomainProgress {
+  domain: string;
+  label: string;
+  done: number;
+  total: number;
+  percent: number;
+  /** 下一个未完成的步骤;全部完成时为 null */
+  next_step: GrowthStep | null;
+  /** 今天已完成的那一步;还没打卡时为 null */
+  today_step: GrowthStep | null;
+  done_today: boolean;
+  /** 今天记录的感受 1~3,没记为 null */
+  feeling_today: number | null;
+  dots: ("done" | "next" | "todo")[];
+  checkpoint: string;
+  min_version: string;
+  why: string;
+}
+
+export interface GrowthCheckpointStatus {
+  start_date: string;
+  due_date: string;
+  elapsed_days: number;
+  days_left: number;
+  due: boolean;
+}
+
+export interface GrowthOverview {
+  today: string;
+  streak: number;
+  /** 连续断两天才为 true——断一天不打扰 */
+  nudge: boolean;
+  domains: GrowthDomainProgress[];
+  done_today: number;
+  domain_count: number;
+  total_done: number;
+  total_steps: number;
+  percent: number;
+  checkpoint: GrowthCheckpointStatus;
+}
+
+export interface GrowthState {
+  configured: boolean;
+  /** 计划正在后台生成——四个领域要一两分钟,所以接口立即返回,进度靠轮询 */
+  generating?: boolean;
+  ready?: number;
+  total?: number;
+  start_date?: string;
+  chronotype?: string;
+  intake?: Record<string, { level: string; minutes: number }>;
+  plan?: Record<string, GrowthDomainPlan>;
+  checkpoints?: Record<string, { start?: string; end?: string }>;
+  overview?: GrowthOverview;
+}
+
+export interface GrowthOptions {
+  days: number;
+  minutes: number[];
+  chronotypes: { key: string; label: string }[];
+  domains: { key: string; label: string; levels: { key: string; label: string }[] }[];
+}
+
+export interface GrowthIntakeBody {
+  chronotype: string;
+  domains: Record<string, { level: string; minutes: number }>;
+}
+
 export interface UploadResult {
   status: string;
   file_path: string;
@@ -426,6 +513,28 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+
+  // 个人成长:选项来自后端,避免前后端各存一份点选目录导致漂移
+  getGrowthOptions: () => request<GrowthOptions>("/growth/options"),
+  getGrowthState: () => request<GrowthState>("/growth/state"),
+  createGrowthPlan: (body: GrowthIntakeBody) =>
+    request<GrowthState>("/growth/plan", { method: "POST", body: JSON.stringify(body) }),
+  growthCheckin: (domain: string, feeling?: number) =>
+    request<GrowthState>("/growth/checkin", {
+      method: "POST",
+      body: JSON.stringify({ domain, feeling }),
+    }),
+  growthUndoCheckin: (domain: string) =>
+    request<GrowthState>("/growth/checkin/undo", {
+      method: "POST",
+      body: JSON.stringify({ domain }),
+    }),
+  growthSetCheckpoint: (domain: string, which: "start" | "end", value: string) =>
+    request<GrowthState>("/growth/checkpoint", {
+      method: "POST",
+      body: JSON.stringify({ domain, which, value }),
+    }),
+  resetGrowth: () => request<{ configured: boolean }>("/growth/reset", { method: "POST" }),
 
   getNewsCenterDates: () => request<string[]>("/news-center/dates"),
   getNewsCenterArticles: (filters: NewsCenterFilters = {}) => {

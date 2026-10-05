@@ -1,540 +1,624 @@
-import { useCallback, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { CalendarCheck, ClipboardList, Flag, Pause, Pencil, Sprout, Target, Trash2, TrendingUp } from "lucide-react";
+/** 个人成长:睡眠 / 健身 / 荷兰语 / 英语 的两周计划与每日打卡。
+ *
+ *  设计出发点是一句用户原话:"我不想自己去设置复杂的计划"。所以:
+ *
+ *  * 建计划只有点选,没有一个必填的输入框——其余由模型展开成 14 天具体动作。
+ *  * 每天的反馈压到一次点击。点完立刻给回应(连续天数、进度格子前进一格),
+ *    而不是存起来等以后某个报表。
+ *  * 进步要能被指着说,所以每个领域都有检查点:第 1 天记一条基线,两周后再记
+ *    一条,界面把两条并排摆出来。
+ *
+ *  状态全部存后端(见 agent/src/growth),手机打卡和电脑回顾是同一份数据。
+ */
+import { useCallback, useEffect, useState } from "react";
+import {
+  BookOpen, Check, Dumbbell, Flame, Languages, Loader2, Moon, RotateCcw,
+  Sparkles, Sprout, Undo2,
+} from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  BLOCKERS,
-  MAX_MAINTAIN,
-  admissionBlock,
-  buildWeeklyReview,
-  countRole,
-  loadGrowth,
-  missedTwoDays,
-  newId,
-  saveGrowth,
-  validateGoal,
-  ymd,
-  type Blocker,
-  type DailyLog,
-  type Goal,
-  type GoalDraft,
-  type GoalRole,
-  type GrowthData,
-  type PracticeKind,
-} from "@/lib/growth/store";
+  api, type GrowthDomainProgress, type GrowthOptions, type GrowthState,
+} from "@/lib/api";
 
-const ROLE_META: Record<GoalRole, { label: string; className: string }> = {
-  main: { label: "主攻", className: "bg-primary/10 text-primary" },
-  maintain: { label: "维持", className: "bg-info/10 text-info" },
-  paused: { label: "暂停", className: "bg-muted text-muted-foreground" },
+const DOMAIN_ICONS: Record<string, typeof Moon> = {
+  sleep: Moon,
+  fitness: Dumbbell,
+  dutch: Languages,
+  english: BookOpen,
 };
 
-const inputCls =
-  "w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
-const btnPrimary =
-  "inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60";
-const btnGhost = "inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground";
+const FEELINGS = [
+  { value: 1, label: "有点难" },
+  { value: 2, label: "还行" },
+  { value: 3, label: "不错" },
+] as const;
 
-function useGrowth() {
-  const [data, setData] = useState<GrowthData>(() => loadGrowth());
-  const update = useCallback((fn: (d: GrowthData) => GrowthData) => {
-    setData((prev) => {
-      const next = fn(prev);
-      if (next !== prev) saveGrowth(next);
-      return next;
-    });
-  }, []);
-  return { data, update };
-}
+const chip =
+  "rounded-full border px-3 py-1.5 text-sm transition-colors hover:border-primary/50";
+const chipOn = "border-primary bg-primary/10 font-medium text-primary";
+const chipOff = "border-border text-muted-foreground";
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function PageHeader({ subtitle }: { subtitle: string }) {
   return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium">{label}</span>
-      {children}
-      {hint && <span className="block text-[11px] text-muted-foreground">{hint}</span>}
-    </label>
+    <div className="flex items-start gap-4">
+      <div className="mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10">
+        <Sprout className="h-5 w-5" strokeWidth={1.8} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="page-kicker">Personal growth</p>
+        <h1 className="mt-1.5 text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[32px]">
+          个人成长
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">{subtitle}</p>
+      </div>
+    </div>
   );
 }
 
-// ── 目标引擎 + 聚焦管理器 ─────────────────────────────────────────────────────
-function emptyDraft(role: GoalRole): GoalDraft {
-  return {
-    domain: "",
-    outcome: "",
-    measure: "",
-    deadline: "",
-    role,
-    dose: "",
-    estimateHours: null,
-    milestones: ["", "", ""],
-    weeklyMinutes: 0,
-    intention: "",
-    minVersion: "",
-  };
+// ── 建计划:全部点选 ─────────────────────────────────────────────────────────
+
+interface Picks {
+  on: boolean;
+  level: string;
+  minutes: number;
 }
 
-function GoalForm({
-  goals,
-  initial,
-  editingId,
-  today,
-  onSave,
-  onCancel,
-}: {
-  goals: Goal[];
-  initial: GoalDraft;
-  editingId?: string;
-  today: string;
-  onSave: (d: GoalDraft) => void;
-  onCancel: () => void;
-}) {
-  const [d, setD] = useState<GoalDraft>(initial);
-  const [errors, setErrors] = useState<string[]>([]);
-  const set = <K extends keyof GoalDraft>(k: K, v: GoalDraft[K]) => setD((p) => ({ ...p, [k]: v }));
-  const block = admissionBlock(goals, d.role, editingId);
+function Setup({ options, onCreated }: { options: GrowthOptions; onCreated: (s: GrowthState) => void }) {
+  const [picks, setPicks] = useState<Record<string, Picks>>(() =>
+    Object.fromEntries(
+      options.domains.map((d) => [d.key, { on: true, level: d.levels[0].key, minutes: options.minutes[0] }]),
+    ),
+  );
+  const [chronotype, setChronotype] = useState(options.chronotypes[0].key);
+  const [busy, setBusy] = useState(false);
 
-  const submit = () => {
-    const errs = validateGoal(d, today);
-    if (block) errs.unshift(block);
-    setErrors(errs);
-    if (errs.length === 0) onSave(d);
+  const chosen = options.domains.filter((d) => picks[d.key]?.on);
+
+  const submit = async () => {
+    if (!chosen.length) return;
+    setBusy(true);
+    try {
+      onCreated(await api.createGrowthPlan({
+        chronotype,
+        domains: Object.fromEntries(
+          chosen.map((d) => [d.key, { level: picks[d.key].level, minutes: picks[d.key].minutes }]),
+        ),
+      }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "生成失败");
+      setBusy(false);
+    }
   };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader subtitle={`选几下就好,剩下的交给 AI 排。两周后有一次检查点,能看出变化。`} />
+
+      <div className="space-y-4">
+        {options.domains.map((domain) => {
+          const pick = picks[domain.key];
+          const Icon = DOMAIN_ICONS[domain.key] ?? Sprout;
+          const set = (patch: Partial<Picks>) =>
+            setPicks((prev) => ({ ...prev, [domain.key]: { ...prev[domain.key], ...patch } }));
+
+          return (
+            <div
+              key={domain.key}
+              className={cn(
+                "space-y-4 rounded-2xl border bg-card p-5 transition-opacity",
+                !pick.on && "opacity-55",
+              )}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Icon className="h-[18px] w-[18px] text-primary" strokeWidth={1.8} />
+                  <span className="text-[15px] font-medium">{domain.label}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => set({ on: !pick.on })}
+                  className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+                >
+                  {pick.on ? "这次不做" : "加回来"}
+                </button>
+              </div>
+
+              {pick.on && (
+                <>
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">现在的状态</p>
+                    <div className="flex flex-wrap gap-2">
+                      {domain.levels.map((level) => (
+                        <button
+                          key={level.key}
+                          type="button"
+                          onClick={() => set({ level: level.key })}
+                          className={cn(chip, pick.level === level.key ? chipOn : chipOff)}
+                        >
+                          {level.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">每天能给</p>
+                    <div className="flex flex-wrap gap-2">
+                      {options.minutes.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => set({ minutes: m })}
+                          className={cn(chip, pick.minutes === m ? chipOn : chipOff)}
+                        >
+                          {m} 分钟
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="space-y-2 rounded-2xl border bg-card p-5">
+        <p className="text-xs text-muted-foreground">我的作息</p>
+        <div className="flex flex-wrap gap-2">
+          {options.chronotypes.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setChronotype(c.key)}
+              className={cn(chip, chronotype === c.key ? chipOn : chipOff)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={submit}
+        disabled={busy || !chosen.length}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3.5 text-[15px] font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50 sm:w-auto"
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+        {busy ? "正在排计划…" : `生成 ${options.days} 天计划`}
+      </button>
+    </div>
+  );
+}
+
+function Generating({ ready, total }: { ready: number; total: number }) {
+  return (
+    <div className="space-y-6">
+      <PageHeader subtitle="正在为每个领域排 14 天的具体动作。" />
+      <div className="space-y-4 rounded-2xl border bg-card p-6">
+        <div className="flex items-center gap-2.5 text-sm font-medium">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          已排好 {ready} / {total} 个领域
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-all duration-500"
+            style={{ width: `${total ? (ready / total) * 100 : 0}%` }}
+          />
+        </div>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          一个领域要二三十秒,四个大约一两分钟。可以先去别的页面,排好了回来就在。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── 每天 ─────────────────────────────────────────────────────────────────────
+
+function Dots({ dots }: { dots: GrowthDomainProgress["dots"] }) {
+  return (
+    <div className="flex flex-wrap gap-1" aria-hidden="true">
+      {dots.map((kind, i) => (
+        <span
+          key={i}
+          className={cn(
+            "h-1.5 w-[14px] rounded-full",
+            kind === "done" && "bg-primary",
+            kind === "next" && "bg-primary/40",
+            kind === "todo" && "bg-muted-foreground/15",
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
+function DomainCard({
+  item,
+  onCheckin,
+  onUndo,
+}: {
+  item: GrowthDomainProgress;
+  onCheckin: (domain: string, feeling?: number) => Promise<void>;
+  onUndo: (domain: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const Icon = DOMAIN_ICONS[item.domain] ?? Sprout;
+  // 打完卡后显示刚做完的那一步,而不是明天的内容——否则"今天完成"会贴在一个
+  // 还没做的动作上。
+  const step = item.done_today ? item.today_step : item.next_step;
+  const finished = item.next_step === null && !item.done_today;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "space-y-4 rounded-2xl border bg-card p-5 transition-colors",
+        item.done_today && "border-primary/35 bg-primary/[0.04]",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <Icon className="h-[18px] w-[18px] text-primary" strokeWidth={1.8} />
+          <span className="text-[15px] font-medium">{item.label}</span>
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">{item.done}</span> / {item.total} 天
+        </span>
+      </div>
+
+      <Dots dots={item.dots} />
+
+      {finished || !step ? (
+        <p className="text-sm text-muted-foreground">这个领域两周的内容已经全部做完了。</p>
+      ) : (
+        <div className="space-y-1">
+          <p className="text-[15px] font-medium">{step.title}</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">{step.detail}</p>
+          <p className="text-xs text-muted-foreground/80">约 {step.minutes} 分钟</p>
+        </div>
+      )}
+
+      {item.next_step !== null && !item.done_today && (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => onCheckin(item.domain))}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            做完了
+          </button>
+          {item.min_version && (
+            <p className="text-xs text-muted-foreground">
+              状态不好?做这个也算:{item.min_version}
+            </p>
+          )}
+        </>
+      )}
+
+      {item.done_today && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+              <Check className="h-4 w-4" />今天完成
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => onUndo(item.domain))}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+            >
+              <Undo2 className="h-3 w-3" />撤销
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">感觉如何?</span>
+            {FEELINGS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                disabled={busy}
+                onClick={() => run(() => onCheckin(item.domain, f.value))}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-50",
+                  item.feeling_today === f.value ? chipOn : chipOff,
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CheckpointPanel({
+  state,
+  onSave,
+}: {
+  state: GrowthState;
+  onSave: (domain: string, which: "start" | "end", value: string) => Promise<void>;
+}) {
+  const overview = state.overview!;
+  const marks = state.checkpoints ?? {};
+  const due = overview.checkpoint.due;
 
   return (
     <div className="space-y-4 rounded-2xl border bg-card p-5">
-      <p className="text-sm font-medium">{editingId ? "编辑目标" : "新目标"}:做到时是什么样子?怎么测?什么时候?</p>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="领域">
-          <input className={inputCls} value={d.domain} onChange={(e) => set("domain", e.target.value)} placeholder="荷兰语 / 健身 / 睡眠" />
-        </Field>
-        <Field label="角色" hint={`主攻最多 1 个,维持最多 ${MAX_MAINTAIN} 个`}>
-          <select className={inputCls} value={d.role} onChange={(e) => set("role", e.target.value as GoalRole)}>
-            <option value="main">主攻</option>
-            <option value="maintain">维持</option>
-            <option value="paused">暂停</option>
-          </select>
-        </Field>
-      </div>
-      <Field label="可观察的结果">
-        <input className={inputCls} value={d.outcome} onChange={(e) => set("outcome", e.target.value)} placeholder="能用荷兰语和陌生人连续交谈 15 分钟" />
-      </Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="测量方法">
-          <input className={inputCls} value={d.measure} onChange={(e) => set("measure", e.target.value)} placeholder="以录音为证" />
-        </Field>
-        <Field label="截止日期">
-          <input type="date" className={inputCls} value={d.deadline} min={today} onChange={(e) => set("deadline", e.target.value)} />
-        </Field>
-      </div>
-      {d.role === "maintain" && (
-        <Field label="维持剂量" hint="只求不退步,系统不提示进步不足">
-          <input className={inputCls} value={d.dose} onChange={(e) => set("dose", e.target.value)} placeholder="每天 15 分钟阅读 / 每周 2 次训练" />
-        </Field>
-      )}
-      {d.role !== "maintain" && (
-        <>
-          <div className="space-y-2">
-            <span className="text-xs font-medium">三个月度里程碑</span>
-            {d.milestones.map((m, i) => (
-              <input
-                key={i}
-                className={inputCls}
-                value={m}
-                onChange={(e) => set("milestones", d.milestones.map((x, j) => (j === i ? e.target.value : x)))}
-                placeholder={`第 ${i + 1} 个月`}
-              />
-            ))}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="每周投入(分钟)" hint="写投入量,不写结果——投入是自己能控制的">
-              <input
-                type="number"
-                min={0}
-                className={inputCls}
-                value={d.weeklyMinutes || ""}
-                onChange={(e) => set("weeklyMinutes", Number(e.target.value) || 0)}
-                placeholder="180"
-              />
-            </Field>
-            <Field label="所需投入估算(小时,可选)" hint="用于进度预测">
-              <input
-                type="number"
-                min={0}
-                className={inputCls}
-                value={d.estimateHours ?? ""}
-                onChange={(e) => set("estimateHours", e.target.value ? Number(e.target.value) : null)}
-                placeholder="600"
-              />
-            </Field>
-          </div>
-          <Field label="执行意图" hint="在什么时间、什么地点、做完什么之后,我就做什么">
-            <input className={inputCls} value={d.intention} onChange={(e) => set("intention", e.target.value)} placeholder="每天早餐后,在书桌前,上 30 分钟荷兰语课" />
-          </Field>
-          <Field label="2 分钟最小版本" hint="状态差的日子只做这个,保住节奏">
-            <input className={inputCls} value={d.minVersion} onChange={(e) => set("minVersion", e.target.value)} placeholder="听 2 分钟荷兰语播客" />
-          </Field>
-        </>
-      )}
-      {errors.length > 0 && (
-        <ul className="space-y-1 rounded-lg bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
-          {errors.map((e) => (
-            <li key={e}>· {e}</li>
-          ))}
-        </ul>
-      )}
-      <div className="flex gap-2">
-        <button type="button" className={btnPrimary} onClick={submit}>
-          保存目标
-        </button>
-        <button type="button" className="rounded-xl px-4 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={onCancel}>
-          取消
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function GoalsPanel({ data, update, today }: { data: GrowthData; update: (fn: (d: GrowthData) => GrowthData) => void; today: string }) {
-  const [editing, setEditing] = useState<{ id?: string; draft: GoalDraft } | null>(null);
-  const sorted = useMemo(() => {
-    const order: Record<GoalRole, number> = { main: 0, maintain: 1, paused: 2 };
-    return [...data.goals].sort((a, b) => order[a.role] - order[b.role]);
-  }, [data.goals]);
-
-  const save = (d: GoalDraft) => {
-    update((prev) => {
-      if (editing?.id) return { ...prev, goals: prev.goals.map((g) => (g.id === editing.id ? { ...g, ...d } : g)) };
-      return { ...prev, goals: [...prev.goals, { ...d, id: newId("goal"), createdAt: today }] };
-    });
-    setEditing(null);
-  };
-
-  const setRole = (id: string, role: GoalRole) => update((prev) => ({ ...prev, goals: prev.goals.map((g) => (g.id === id ? { ...g, role } : g)) }));
-  const remove = (id: string) => {
-    if (!window.confirm("删除这个目标及其签到记录?")) return;
-    update((prev) => ({ goals: prev.goals.filter((g) => g.id !== id), logs: prev.logs.filter((l) => l.goalId !== id), version: 1 }));
-  };
-
-  const nextRole: GoalRole = countRole(data.goals, "main") === 0 ? "main" : "maintain";
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>聚焦:</span>
-        <span className={cn("rounded-full px-2 py-0.5", ROLE_META.main.className)}>主攻 {countRole(data.goals, "main")}/1</span>
-        <span className={cn("rounded-full px-2 py-0.5", ROLE_META.maintain.className)}>
-          维持 {countRole(data.goals, "maintain")}/{MAX_MAINTAIN}
-        </span>
-        <span className={cn("rounded-full px-2 py-0.5", ROLE_META.paused.className)}>暂停 {countRole(data.goals, "paused")}</span>
-      </div>
-
-      {editing ? (
-        <GoalForm
-          key={editing.id ?? "new"}
-          goals={data.goals}
-          initial={editing.draft}
-          editingId={editing.id}
-          today={today}
-          onSave={save}
-          onCancel={() => setEditing(null)}
-        />
-      ) : (
-        <button type="button" className={btnPrimary} onClick={() => setEditing({ draft: emptyDraft(nextRole) })}>
-          <Target className="h-4 w-4" /> 新建目标
-        </button>
-      )}
-
-      {sorted.length === 0 && !editing && (
-        <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-          还没有目标。先把一个愿望写成可检验的目标:可观察的结果 + 测量方法 + 截止日期。
+      <div>
+        <h2 className="text-[15px] font-medium">两周检查点</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {due
+            ? "到期了。再测一次,和第 1 天的记录放在一起看。"
+            : `还有 ${overview.checkpoint.days_left} 天到期(${overview.checkpoint.due_date})。先把第 1 天的基线记下来,否则到时候没有对比的对象。`}
         </p>
-      )}
+      </div>
 
-      {sorted.map((g) => (
-        <div key={g.id} className={cn("space-y-2 rounded-2xl border bg-card p-4", g.role === "paused" && "opacity-70")}>
-          <div className="flex items-start gap-2">
-            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", ROLE_META[g.role].className)}>{ROLE_META[g.role].label}</span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">
-                {g.domain}:{g.outcome}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                测量:{g.measure} · 截止 {g.deadline}
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-1">
-              <button type="button" className={btnGhost} onClick={() => setEditing({ id: g.id, draft: { ...g } })} aria-label="编辑">
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-              {g.role !== "paused" && (
-                <button type="button" className={btnGhost} onClick={() => setRole(g.id, "paused")} aria-label="暂停">
-                  <Pause className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <button type="button" className={btnGhost} onClick={() => remove(g.id)} aria-label="删除">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-          {g.role === "maintain" && <p className="text-xs">最低剂量:{g.dose}</p>}
-          {g.role !== "maintain" && (
-            <div className="space-y-1 text-xs">
-              <p>
-                每周投入 <b>{g.weeklyMinutes}</b> 分钟 · {g.intention}
-              </p>
-              {g.minVersion && <p className="text-muted-foreground">最小版本:{g.minVersion}</p>}
-              {g.milestones.some((m) => m.trim()) && (
-                <ol className="list-inside list-decimal text-muted-foreground">
-                  {g.milestones.filter((m) => m.trim()).map((m) => (
-                    <li key={m}>{m}</li>
-                  ))}
-                </ol>
+      <div className="space-y-4">
+        {overview.domains.map((item) => {
+          const mark = marks[item.domain] ?? {};
+          const slot: "start" | "end" = mark.start ? "end" : "start";
+          const both = Boolean(mark.start && mark.end);
+
+          return (
+            <div key={item.domain} className="space-y-2 border-t pt-4 first:border-t-0 first:pt-0">
+              <p className="text-sm font-medium">{item.label}</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">{item.checkpoint}</p>
+
+              {both ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="rounded-lg bg-muted/60 px-2.5 py-1 text-muted-foreground">
+                    第 1 天 · {mark.start}
+                  </span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="rounded-lg bg-primary/10 px-2.5 py-1 font-medium text-primary">
+                    第 {overview.checkpoint.elapsed_days + 1} 天 · {mark.end}
+                  </span>
+                </div>
+              ) : (
+                <CheckpointInput
+                  domain={item.domain}
+                  slot={slot}
+                  baseline={mark.start}
+                  disabled={slot === "end" && !due}
+                  onSave={onSave}
+                />
               )}
             </div>
-          )}
-          {g.role === "paused" && (
-            <div className="flex gap-2">
-              {(["main", "maintain"] as const).map((r) => {
-                const blocked = admissionBlock(data.goals, r, g.id);
-                return (
-                  <button
-                    key={r}
-                    type="button"
-                    className={cn(btnGhost, "border")}
-                    disabled={Boolean(blocked)}
-                    title={blocked ?? undefined}
-                    onClick={() => setRole(g.id, r)}
-                  >
-                    恢复为{ROLE_META[r].label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ))}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ── 晚间签到 ─────────────────────────────────────────────────────────────────
-function CheckInPanel({ data, update, today }: { data: GrowthData; update: (fn: (d: GrowthData) => GrowthData) => void; today: string }) {
-  const main = data.goals.find((g) => g.role === "main");
-  const hasMaintain = countRole(data.goals, "maintain") > 0;
-  const existing = main ? data.logs.find((l) => l.goalId === main.id && l.date === today) : undefined;
+function CheckpointInput({
+  domain,
+  slot,
+  baseline,
+  disabled,
+  onSave,
+}: {
+  domain: string;
+  slot: "start" | "end";
+  baseline?: string;
+  disabled: boolean;
+  onSave: (domain: string, which: "start" | "end", value: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const [minutes, setMinutes] = useState(existing?.minutes ?? 30);
-  const [kind, setKind] = useState<PracticeKind>(existing?.kind ?? "output");
-  const [difficulty, setDifficulty] = useState(existing?.difficulty ?? 3);
-  const [maintainDone, setMaintainDone] = useState<boolean | null>(existing?.maintainDone ?? (hasMaintain ? true : null));
-  const [blocker, setBlocker] = useState<Blocker>(existing?.blocker ?? "没有");
-  const [win, setWin] = useState(existing?.win ?? "");
-  const [saved, setSaved] = useState(false);
-
-  if (!main) return <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">先在「目标」里设一个主攻目标,再来签到。</p>;
-
-  const chip = (active: boolean) =>
-    cn("rounded-lg border px-3 py-1.5 text-xs transition", active ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted");
-
-  const submit = () => {
-    const log: DailyLog = { date: today, goalId: main.id, minutes, kind, difficulty, maintainDone: hasMaintain ? maintainDone : null, blocker, win };
-    update((prev) => ({ ...prev, logs: [...prev.logs.filter((l) => !(l.goalId === main.id && l.date === today)), log] }));
-    setSaved(true);
+  const save = async () => {
+    if (!value.trim()) return;
+    setBusy(true);
+    try {
+      await onSave(domain, slot, value);
+      setValue("");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  return (
-    <div className="space-y-5 rounded-2xl border bg-card p-5">
-      {missedTwoDays(data.logs, today) && (
-        <p className="rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          已经两天没签到了。没关系,今天哪怕只做最小版本也算数{main.minVersion ? `:${main.minVersion}` : ""}。
-        </p>
-      )}
-      <div className="space-y-2">
-        <p className="text-sm font-medium">1. 今天在「{main.domain}」上做了什么?投入多少分钟?</p>
-        <div className="flex flex-wrap gap-2">
-          {[0, 2, 15, 30, 45, 60, 90].map((m) => (
-            <button key={m} type="button" className={chip(minutes === m)} onClick={() => setMinutes(m)}>
-              {m} 分钟
-            </button>
-          ))}
-          <input type="number" min={0} className={cn(inputCls, "w-24 py-1.5 text-xs")} value={minutes} onChange={(e) => setMinutes(Math.max(0, Number(e.target.value) || 0))} />
-        </div>
-        <div className="flex gap-2">
-          {(["input", "output"] as const).map((k) => (
-            <button key={k} type="button" className={chip(kind === k)} onClick={() => setKind(k)}>
-              {k === "input" ? "输入(听、读)" : "输出(说、写、训练)"}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <p className="text-sm font-medium">2. 难度几分?(1 很轻松,5 很吃力;理想 3~4)</p>
-        <div className="flex gap-2">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button key={n} type="button" className={chip(difficulty === n)} onClick={() => setDifficulty(n)}>
-              {n}
-            </button>
-          ))}
-        </div>
-      </div>
-      {hasMaintain && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium">3. 维持目标完成了最低剂量吗?</p>
-          <div className="flex gap-2">
-            <button type="button" className={chip(maintainDone === true)} onClick={() => setMaintainDone(true)}>
-              是
-            </button>
-            <button type="button" className={chip(maintainDone === false)} onClick={() => setMaintainDone(false)}>
-              否
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="space-y-2">
-        <p className="text-sm font-medium">{hasMaintain ? 4 : 3}. 今天最大的拦路虎是什么?</p>
-        <div className="flex flex-wrap gap-2">
-          {BLOCKERS.map((b) => (
-            <button key={b} type="button" className={chip(blocker === b)} onClick={() => setBlocker(b)}>
-              {b}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <p className="text-sm font-medium">{hasMaintain ? 5 : 4}. 今天做到的一件事是什么?</p>
-        <input className={inputCls} value={win} onChange={(e) => setWin(e.target.value)} placeholder="不论大小" />
-      </div>
-      <div className="flex items-center gap-3">
-        <button type="button" className={btnPrimary} onClick={submit}>
-          <CalendarCheck className="h-4 w-4" /> {existing ? "更新今日签到" : "完成签到"}
-        </button>
-        {saved && <span className="text-xs text-primary">已记录。明天见 👋</span>}
-      </div>
-    </div>
-  );
-}
-
-// ── 每周复盘 ─────────────────────────────────────────────────────────────────
-function ReviewPanel({ data, today }: { data: GrowthData; today: string }) {
-  const r = useMemo(() => buildWeeklyReview(data, today), [data, today]);
-  if (!r) return <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">设定主攻目标并签到一周后,这里会生成复盘报告。</p>;
-
-  const delta = r.completion !== null && r.prevCompletion !== null ? r.completion - r.prevCompletion : null;
-  const rows: { icon: typeof Flag; title: string; body: React.ReactNode }[] = [
-    {
-      icon: TrendingUp,
-      title: "本周投入",
-      body:
-        r.completion === null ? (
-          `${r.doneMinutes} 分钟`
-        ) : (
-          <>
-            {r.doneMinutes}/{r.plannedMinutes} 分钟,完成 <b>{r.completion}%</b>
-            {delta !== null && <span className="text-muted-foreground">(较上周 {delta >= 0 ? `+${delta}` : delta} 个百分点)</span>}
-          </>
-        ),
-    },
-    {
-      icon: Flag,
-      title: "头号拦路虎",
-      body: r.topBlocker ? `「${r.topBlocker.blocker}」出现 ${r.topBlocker.count} 次` : "本周没有记录到拦路虎",
-    },
-    {
-      icon: CalendarCheck,
-      title: "进度预测",
-      body: r.forecast ? (
-        <>
-          按当前速度预计 <b>{r.forecast.date}</b> 达成
-          {r.forecast.late && <span className="text-amber-600 dark:text-amber-400">,晚于截止日期:要么增加投入,要么延后截止,要么缩小目标</span>}
-        </>
-      ) : (
-        "填写「所需投入估算」并持续签到后可预测"
-      ),
-    },
-    { icon: Target, title: "唯一调整", body: r.adjustment },
-    { icon: Sprout, title: "本周亮点", body: r.highlight ?? "本周还没有记录收获" },
-  ];
-
-  return (
-    <div className="space-y-3 rounded-2xl border bg-card p-5">
+  if (disabled) {
+    return (
       <p className="text-xs text-muted-foreground">
-        {r.weekStart} ~ {r.weekEnd} · 签到 {r.loggedDays}/7 天
+        基线已记:{baseline}。两周到期后再来记结果。
       </p>
-      {rows.map(({ icon: Icon, title, body }, i) => (
-        <div key={title} className="flex gap-3">
-          <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-            <Icon className="h-3.5 w-3.5" />
-          </div>
-          <div className="min-w-0 text-sm">
-            <p className="text-xs font-medium text-muted-foreground">
-              {i + 1}. {title}
-            </p>
-            <p className="mt-0.5">{body}</p>
-          </div>
-        </div>
-      ))}
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && save()}
+        placeholder={slot === "start" ? "现在测出来是多少?" : "两周后测出来是多少?"}
+        className="min-w-0 flex-1 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary/60"
+      />
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy || !value.trim()}
+        className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:opacity-40"
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "记下"}
+      </button>
     </div>
   );
 }
 
-// ── 页面 ───────────────────────────────────────────────────────────────────
-type Tab = "goals" | "checkin" | "review";
-const TABS = [
-  { key: "goals", label: "目标", icon: Target },
-  { key: "checkin", label: "晚间签到", icon: CalendarCheck },
-  { key: "review", label: "每周复盘", icon: ClipboardList },
-] as const;
+function TodayBoard({
+  state,
+  setState,
+}: {
+  state: GrowthState;
+  setState: (s: GrowthState) => void;
+}) {
+  const overview = state.overview!;
+  const allDone = overview.done_today === overview.domain_count;
 
-export function Growth() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const raw = searchParams.get("tab");
-  const tab: Tab = raw === "checkin" || raw === "review" ? raw : "goals";
-  const { data, update } = useGrowth();
-  const today = ymd(new Date());
+  const call = async (fn: () => Promise<GrowthState>) => {
+    try {
+      setState(await fn());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "操作失败");
+    }
+  };
 
-  const selectTab = (t: Tab) => {
-    const next = new URLSearchParams(searchParams);
-    if (t === "goals") next.delete("tab");
-    else next.set("tab", t);
-    setSearchParams(next, { replace: true });
+  const reset = async () => {
+    if (!window.confirm("重新来过会清掉现在的计划和打卡记录,确定吗?")) return;
+    try {
+      await api.resetGrowth();
+      setState({ configured: false });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "重置失败");
+    }
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 px-4 py-7 sm:px-6 sm:py-9">
-      <div className="flex items-start gap-4">
-        <div className="mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10">
-          <Sprout className="h-5 w-5" strokeWidth={1.8} />
+    <div className="space-y-6">
+      <PageHeader
+        subtitle={
+          allDone
+            ? "今天四项都做完了。明天见。"
+            : `今天还剩 ${overview.domain_count - overview.done_today} 项,每项几分钟。`
+        }
+      />
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-xs text-muted-foreground">连续</p>
+          <p className="mt-1 inline-flex items-baseline gap-1">
+            <span className="text-2xl font-semibold tabular-nums">{overview.streak}</span>
+            <span className="text-xs text-muted-foreground">天</span>
+            {overview.streak >= 3 && <Flame className="h-3.5 w-3.5 text-primary" />}
+          </p>
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="page-kicker">Personal growth</p>
-          <h1 className="mt-1.5 text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[32px]">个人成长</h1>
-          <p className="mt-2 text-sm text-muted-foreground">明确目标 → 有效行动 → 获得反馈 → 调整方法,让循环每天转起来</p>
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-xs text-muted-foreground">今天</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {overview.done_today}
+            <span className="text-xs font-normal text-muted-foreground"> / {overview.domain_count}</span>
+          </p>
+        </div>
+        <div className="rounded-2xl border bg-card p-4">
+          <p className="text-xs text-muted-foreground">距检查点</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {overview.checkpoint.days_left}
+            <span className="text-xs font-normal text-muted-foreground"> 天</span>
+          </p>
         </div>
       </div>
 
-      <div role="tablist" aria-label="成长栏目" className="inline-flex rounded-lg border bg-muted/30 p-1">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => selectTab(key)}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
-              tab === key ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
+      {overview.nudge && (
+        <p className="rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
+          断了两天。不用补回来,从今天的最小版本重新开始就行。
+        </p>
+      )}
+
+      <div className="space-y-4">
+        {overview.domains.map((item) => (
+          <DomainCard
+            key={item.domain}
+            item={item}
+            onCheckin={async (domain, feeling) => call(() => api.growthCheckin(domain, feeling))}
+            onUndo={async (domain) => call(() => api.growthUndoCheckin(domain))}
+          />
         ))}
       </div>
 
-      {tab === "goals" && <GoalsPanel data={data} update={update} today={today} />}
-      {tab === "checkin" && <CheckInPanel key={today} data={data} update={update} today={today} />}
-      {tab === "review" && <ReviewPanel data={data} today={today} />}
+      <CheckpointPanel
+        state={state}
+        onSave={async (domain, which, value) => call(() => api.growthSetCheckpoint(domain, which, value))}
+      />
+
+      <button
+        type="button"
+        onClick={reset}
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+      >
+        <RotateCcw className="h-3 w-3" />重新排一份计划
+      </button>
     </div>
+  );
+}
+
+// ── 页面 ─────────────────────────────────────────────────────────────────────
+
+export function Growth() {
+  const [state, setState] = useState<GrowthState | null>(null);
+  const [options, setOptions] = useState<GrowthOptions | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [opts, current] = await Promise.all([api.getGrowthOptions(), api.getGrowthState()]);
+      setOptions(opts);
+      setState(current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载失败");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // 生成期间轮询,每排好一个领域进度条就前进一格。
+  useEffect(() => {
+    if (!state?.generating) return;
+    const timer = window.setInterval(() => {
+      void api.getGrowthState().then(setState).catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [state?.generating]);
+
+  const shell = (children: React.ReactNode) => (
+    <div className="mx-auto max-w-3xl space-y-8 px-4 py-7 sm:px-6 sm:py-9">{children}</div>
+  );
+
+  if (error) {
+    return shell(
+      <>
+        <PageHeader subtitle="数据来自后端,手机和电脑看到的是同一份。" />
+        <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+          {error}
+        </p>
+      </>,
+    );
+  }
+
+  if (!state || !options) {
+    return shell(
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />载入中…
+      </div>,
+    );
+  }
+
+  if (state.generating) {
+    return shell(<Generating ready={state.ready ?? 0} total={state.total ?? 0} />);
+  }
+
+  return shell(
+    state.configured
+      ? <TodayBoard state={state} setState={setState} />
+      : <Setup options={options} onCreated={setState} />,
   );
 }
