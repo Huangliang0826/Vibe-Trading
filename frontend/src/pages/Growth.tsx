@@ -11,15 +11,17 @@
  *  状态全部存后端(见 agent/src/growth),手机打卡和电脑回顾是同一份数据。
  */
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   BookOpen, Check, Dumbbell, Flame, Languages, Loader2, Moon, RotateCcw,
-  Sparkles, Sprout, Undo2,
+  MessagesSquare, Sparkles, Sprout, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   api, type GrowthDomainProgress, type GrowthOptions, type GrowthState,
 } from "@/lib/api";
+import { EnglishDrill } from "@/pages/growth/EnglishDrill";
 
 const DOMAIN_ICONS: Record<string, typeof Moon> = {
   sleep: Moon,
@@ -561,7 +563,16 @@ function TodayBoard({
 
 // ── 页面 ─────────────────────────────────────────────────────────────────────
 
+const TABS = [
+  { key: "today", label: "每天", icon: Sprout },
+  { key: "english", label: "英语句型", icon: MessagesSquare },
+] as const;
+
+type Tab = (typeof TABS)[number]["key"];
+
 export function Growth() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: Tab = searchParams.get("tab") === "english" ? "english" : "today";
   const [state, setState] = useState<GrowthState | null>(null);
   const [options, setOptions] = useState<GrowthOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -589,9 +600,47 @@ export function Growth() {
     return () => window.clearInterval(timer);
   }, [state?.generating]);
 
+  const selectTab = (next: Tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "today") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  };
+
   const shell = (children: React.ReactNode) => (
-    <div className="mx-auto max-w-3xl space-y-8 px-4 py-7 sm:px-6 sm:py-9">{children}</div>
+    <div className="mx-auto max-w-3xl space-y-8 px-4 py-7 sm:px-6 sm:py-9">
+      <div role="tablist" aria-label="成长栏目" className="inline-flex rounded-lg border bg-muted/30 p-1">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => selectTab(key)}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
+              tab === key
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+      {children}
+    </div>
   );
+
+  if (tab === "english") {
+    return shell(
+      <>
+        <PageHeader subtitle="100 个高频句型,练到交流时不用想就能调出来。" />
+        <EnglishDrill />
+      </>,
+    );
+  }
 
   if (error) {
     return shell(

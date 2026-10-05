@@ -25,6 +25,40 @@ def state_path() -> Path:
     return get_runtime_root() / "growth" / "state.json"
 
 
+def english_path() -> Path:
+    """英语句型的复习进度。与两周计划分开存:节奏不同,寿命也不同——
+    计划每两周重排一次,这份进度要跨越很多个两周累积下去。"""
+    return get_runtime_root() / "growth" / "english.json"
+
+
+def read_english() -> dict:
+    try:
+        data = json.loads(english_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    reviews = data.get("reviews") if isinstance(data, dict) else None
+    return reviews if isinstance(reviews, dict) else {}
+
+
+def write_english(reviews: dict) -> dict:
+    path = english_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": STATE_VERSION, "reviews": reviews}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return reviews
+
+
+def clear_english() -> None:
+    try:
+        english_path().unlink()
+    except OSError:
+        pass
+
+
 def read_state() -> Optional[dict]:
     """返回已保存的计划;尚未创建或文件损坏时返回 None。"""
     try:

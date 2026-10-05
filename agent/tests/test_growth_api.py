@@ -218,3 +218,84 @@ def test_state_file_is_not_world_readable(client, tmp_path):
 
     mode = (tmp_path / "growth" / "state.json").stat().st_mode & 0o777
     assert mode == 0o600
+
+
+# ── 英语句型 ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def english_client(tmp_path: Path, monkeypatch) -> TestClient:
+    monkeypatch.setattr(store, "english_path", lambda: tmp_path / "growth" / "english.json")
+    return TestClient(api_server.app, client=("127.0.0.1", 50000))
+
+
+def test_english_opens_with_a_session_of_new_patterns(english_client):
+    data = english_client.get("/growth/english").json()
+
+    assert data["stats"] == {**data["stats"], "total": 100, "started": 0, "automatic": 0}
+    assert len(data["session"]) == data["new_per_day"]
+    assert all(item["status"] == "new" for item in data["session"])
+
+
+def test_english_session_items_carry_the_cue_but_the_drill_still_needs_the_answer(english_client):
+    item = english_client.get("/growth/english").json()["session"][0]
+
+    assert item["cue"] and item["frame"] and len(item["examples"]) >= 2
+
+
+def test_a_review_persists_and_moves_the_pattern_forward(english_client):
+    first = english_client.get("/growth/english").json()["session"][0]["id"]
+
+    english_client.post("/growth/english/review", json={"pattern_id": first, "grade": "instant"})
+    data = english_client.get("/growth/english").json()
+
+    assert data["stats"]["started"] == 1
+    assert data["stats"]["reviewed_today"] == 1
+    # 答对的那条今天不该再出现。
+    assert first not in [item["id"] for item in data["session"]]
+
+
+def test_a_blank_keeps_the_pattern_in_todays_session(english_client):
+    first = english_client.get("/growth/english").json()["session"][0]["id"]
+
+    data = english_client.post(
+        "/growth/english/review", json={"pattern_id": first, "grade": "again"},
+    ).json()
+
+    assert first in [item["id"] for item in data["session"]]
+
+
+def test_english_rejects_an_invalid_grade(english_client):
+    response = english_client.post(
+        "/growth/english/review", json={"pattern_id": "the-thing-is", "grade": "perfect"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_the_full_catalog_is_available_with_each_patterns_box(english_client):
+    english_client.post("/growth/english/review",
+                        json={"pattern_id": "the-thing-is", "grade": "instant"})
+
+    data = english_client.get("/growth/english/patterns").json()
+
+    assert len(data["patterns"]) == 100
+    by_id = {p["id"]: p for p in data["patterns"]}
+    assert by_id["the-thing-is"]["box"] == 1
+    assert by_id["it-depends-on"]["box"] == -1  # 还没练过
+
+
+def test_english_reset_clears_progress(english_client):
+    english_client.post("/growth/english/review",
+                        json={"pattern_id": "the-thing-is", "grade": "instant"})
+
+    data = english_client.post("/growth/english/reset").json()
+
+    assert data["stats"]["started"] == 0
+
+
+def test_english_progress_file_is_not_world_readable(english_client, tmp_path):
+    english_client.post("/growth/english/review",
+                        json={"pattern_id": "the-thing-is", "grade": "instant"})
+
+    mode = (tmp_path / "growth" / "english.json").stat().st_mode & 0o777
+    assert mode == 0o600

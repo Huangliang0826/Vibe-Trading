@@ -175,6 +175,45 @@ export interface GrowthIntakeBody {
   domains: Record<string, { level: string; minutes: number }>;
 }
 
+// 英语句型:100 个高频框架的间隔重复练习。评分是"取回花了多久",不是对错。
+export type EnglishGrade = "again" | "slow" | "instant";
+
+export interface EnglishPattern {
+  id: string;
+  frame: string;
+  group: string;
+  group_label: string;
+  meaning: string;
+  /** 中文情境提示——练习时只给这个,英文要自己产出 */
+  cue: string;
+  examples: string[];
+  status?: "new" | "review";
+  /** 0~4;-1 表示还没练过(仅出现在整份清单里) */
+  box?: number;
+  seen?: number;
+}
+
+export interface EnglishStats {
+  total: number;
+  started: number;
+  /** 走到最后一盒的条数——真正要追的数字 */
+  automatic: number;
+  due_today: number;
+  reviewed_today: number;
+  box_counts: Record<string, number>;
+}
+
+export interface EnglishState {
+  today: string;
+  session: EnglishPattern[];
+  stats: EnglishStats;
+  shaky: { id: string; frame: string; meaning: string; seen: number }[];
+  grades: EnglishGrade[];
+  new_per_day: number;
+  session_limit: number;
+  groups: { key: string; label: string }[];
+}
+
 export interface UploadResult {
   status: string;
   file_path: string;
@@ -535,6 +574,17 @@ export const api = {
       body: JSON.stringify({ domain, which, value }),
     }),
   resetGrowth: () => request<{ configured: boolean }>("/growth/reset", { method: "POST" }),
+  getEnglish: () => request<EnglishState>("/growth/english"),
+  reviewEnglish: (pattern_id: string, grade: EnglishGrade) =>
+    request<EnglishState>("/growth/english/review", {
+      method: "POST",
+      body: JSON.stringify({ pattern_id, grade }),
+    }),
+  getEnglishPatterns: () =>
+    request<{ groups: { key: string; label: string }[]; patterns: EnglishPattern[] }>(
+      "/growth/english/patterns",
+    ),
+  resetEnglish: () => request<EnglishState>("/growth/english/reset", { method: "POST" }),
 
   getNewsCenterDates: () => request<string[]>("/news-center/dates"),
   getNewsCenterArticles: (filters: NewsCenterFilters = {}) => {

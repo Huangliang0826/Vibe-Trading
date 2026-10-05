@@ -22,10 +22,14 @@ from src.growth.plan import (
     CHRONOTYPES, DOMAIN_LABELS, DOMAINS, LEVELS, MINUTE_CHOICES, PLAN_DAYS,
     DomainIntake, Intake, fallback_plan, generate_domain_plan,
 )
+from src.growth.english import (
+    GRADES, NEW_PER_DAY, SESSION_LIMIT, apply_review, build_session, shaky, stats,
+)
+from src.growth.english_patterns import GROUPS, PATTERNS
 from src.growth.progress import build_overview
 from src.growth.store import (
-    apply_checkin, clear_state, new_state, read_state, set_checkpoint,
-    undo_checkin, write_state,
+    apply_checkin, clear_english, clear_state, new_state, read_english,
+    read_state, set_checkpoint, undo_checkin, write_english, write_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -107,6 +111,12 @@ class CheckinRequest(BaseModel):
 
 class DomainRequest(BaseModel):
     domain: str = Field(..., max_length=16)
+
+
+class ReviewRequest(BaseModel):
+    pattern_id: str = Field(..., max_length=64)
+    #: again(想不起来)/ slow(卡壳)/ instant(脱口而出)
+    grade: str = Field(..., max_length=8)
 
 
 class CheckpointRequest(BaseModel):
@@ -237,5 +247,49 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
     async def reset():
         clear_state()
         return {"configured": False}
+
+    # ── 英语句型 ──────────────────────────────────────────────────────────────
+
+    def _english_payload(reviews: dict) -> dict:
+        today = _today()
+        return {
+            "today": today,
+            "session": build_session(reviews, today),
+            "stats": stats(reviews, today),
+            "shaky": shaky(reviews),
+            "grades": list(GRADES),
+            "new_per_day": NEW_PER_DAY,
+            "session_limit": SESSION_LIMIT,
+            "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
+        }
+
+    @router.get("/english")
+    async def english():
+        """今天要练的条目 + 进度。整份 100 条清单由 /english/patterns 单独给。"""
+        return _english_payload(read_english())
+
+    @router.get("/english/patterns")
+    async def english_patterns():
+        reviews = read_english()
+        return {
+            "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
+            "patterns": [
+                {**p.to_dict(), "box": int((reviews.get(p.id) or {}).get("box", -1))}
+                for p in PATTERNS
+            ],
+        }
+
+    @router.post("/english/review")
+    async def english_review(payload: ReviewRequest):
+        try:
+            updated = apply_review(read_english(), payload.pattern_id, payload.grade, _today())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _english_payload(write_english(updated))
+
+    @router.post("/english/reset")
+    async def english_reset():
+        clear_english()
+        return _english_payload({})
 
     app.include_router(router)
