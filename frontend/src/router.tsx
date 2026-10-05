@@ -42,6 +42,9 @@ const PaperTrading = lazy(() =>
 const Learning = lazy(() =>
   import("@/pages/Learning").then((m) => ({ default: m.Learning })),
 );
+const Growth = lazy(() =>
+  import("@/pages/Growth").then((m) => ({ default: m.Growth })),
+);
 function PageLoader() {
   return (
     <div className="flex h-[60vh] items-center justify-center text-muted-foreground">
@@ -77,6 +80,7 @@ export const router = createBrowserRouter([
       { path: "/hstech", element: wrap(HSTech) },
       { path: "/paper-trading", element: wrap(PaperTrading) },
       { path: "/learning", element: wrap(Learning) },
+      { path: "/growth", element: wrap(Growth) },
       { path: "/edge", element: <Navigate to="/settings?tab=edge" replace /> },
       { path: "/analytics", element: <Navigate to="/settings?tab=analytics" replace /> },
       { path: "/alpha-zoo", element: wrap(AlphaZoo) },
