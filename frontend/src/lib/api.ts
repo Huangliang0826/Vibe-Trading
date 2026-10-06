@@ -183,6 +183,9 @@ export interface EnglishPattern {
   frame: string;
   group: string;
   group_label: string;
+  /** core 基础 / mid 中级 / high 高级 */
+  level: string;
+  level_label: string;
   meaning: string;
   /** 中文情境提示——练习时只给这个,英文要自己产出 */
   cue: string;
@@ -209,9 +212,11 @@ export interface EnglishState {
   stats: EnglishStats;
   shaky: { id: string; frame: string; meaning: string; seen: number }[];
   grades: EnglishGrade[];
-  new_per_day: number;
-  session_limit: number;
+  /** null 表示不限量 */
+  new_per_day: number | null;
+  session_limit: number | null;
   groups: { key: string; label: string }[];
+  levels: { key: string; label: string; total: number }[];
 }
 
 export interface UploadResult {
@@ -581,9 +586,11 @@ export const api = {
       body: JSON.stringify({ pattern_id, grade }),
     }),
   getEnglishPatterns: () =>
-    request<{ groups: { key: string; label: string }[]; patterns: EnglishPattern[] }>(
-      "/growth/english/patterns",
-    ),
+    request<{
+      groups: { key: string; label: string }[];
+      levels: { key: string; label: string; total: number }[];
+      patterns: EnglishPattern[];
+    }>("/growth/english/patterns"),
   resetEnglish: () => request<EnglishState>("/growth/english/reset", { method: "POST" }),
 
   getNewsCenterDates: () => request<string[]>("/news-center/dates"),

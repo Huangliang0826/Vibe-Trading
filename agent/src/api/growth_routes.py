@@ -25,7 +25,9 @@ from src.growth.plan import (
 from src.growth.english import (
     GRADES, NEW_PER_DAY, SESSION_LIMIT, apply_review, build_session, shaky, stats,
 )
-from src.growth.english_patterns import GROUPS, PATTERNS
+# 别名:``LEVELS`` 在 plan 里是每个领域的起点选项,同名导入会把它整个盖掉。
+from src.growth.english_patterns import LEVELS as ENGLISH_LEVELS
+from src.growth.english_patterns import GROUPS, LEVEL_TOTALS, PATTERNS
 from src.growth.progress import build_overview
 from src.growth.store import (
     apply_checkin, clear_english, clear_state, new_state, read_english,
@@ -261,7 +263,11 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             "new_per_day": NEW_PER_DAY,
             "session_limit": SESSION_LIMIT,
             "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
+            "levels": _levels(),
         }
+
+    def _levels() -> list[dict]:
+        return [{"key": k, "label": v, "total": LEVEL_TOTALS[k]} for k, v in ENGLISH_LEVELS.items()]
 
     @router.get("/english")
     async def english():
@@ -273,6 +279,7 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         reviews = read_english()
         return {
             "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
+            "levels": _levels(),
             "patterns": [
                 {**p.to_dict(), "box": int((reviews.get(p.id) or {}).get("box", -1))}
                 for p in PATTERNS

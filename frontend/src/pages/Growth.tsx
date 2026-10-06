@@ -636,7 +636,7 @@ export function Growth() {
   if (tab === "english") {
     return shell(
       <>
-        <PageHeader subtitle="100 个高频句型,练到交流时不用想就能调出来。" />
+        <PageHeader subtitle="基础到高级的高频句型,练到交流时不用想就能调出来。" />
         <EnglishDrill />
       </>,
     );

@@ -228,12 +228,20 @@ def english_client(tmp_path: Path, monkeypatch) -> TestClient:
     return TestClient(api_server.app, client=("127.0.0.1", 50000))
 
 
-def test_english_opens_with_a_session_of_new_patterns(english_client):
+def test_english_opens_with_the_whole_catalog_and_no_daily_cap(english_client):
     data = english_client.get("/growth/english").json()
 
-    assert data["stats"] == {**data["stats"], "total": 100, "started": 0, "automatic": 0}
-    assert len(data["session"]) == data["new_per_day"]
+    assert data["stats"] == {**data["stats"], "total": 200, "started": 0, "automatic": 0}
+    assert data["new_per_day"] is None and data["session_limit"] is None
+    assert len(data["session"]) == 200
     assert all(item["status"] == "new" for item in data["session"])
+
+
+def test_the_session_starts_at_the_easiest_level(english_client):
+    session = english_client.get("/growth/english").json()["session"]
+
+    assert session[0]["level"] == "core"
+    assert [item["level"] for item in session[:100]] == ["core"] * 100
 
 
 def test_english_session_items_carry_the_cue_but_the_drill_still_needs_the_answer(english_client):
@@ -278,7 +286,12 @@ def test_the_full_catalog_is_available_with_each_patterns_box(english_client):
 
     data = english_client.get("/growth/english/patterns").json()
 
-    assert len(data["patterns"]) == 100
+    assert len(data["patterns"]) == 200
+    assert data["levels"] == [
+        {"key": "core", "label": "基础", "total": 100},
+        {"key": "mid", "label": "中级", "total": 50},
+        {"key": "high", "label": "高级", "total": 50},
+    ]
     by_id = {p["id"]: p for p in data["patterns"]}
     assert by_id["the-thing-is"]["box"] == 1
     assert by_id["it-depends-on"]["box"] == -1  # 还没练过
@@ -299,3 +312,13 @@ def test_english_progress_file_is_not_world_readable(english_client, tmp_path):
 
     mode = (tmp_path / "growth" / "english.json").stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_domain_levels_and_english_levels_do_not_collide(client):
+    # 两边都叫 LEVELS:同名导入曾经把领域起点选项整个盖掉。
+    options = client.get("/growth/options").json()
+
+    by_key = {d["key"]: d for d in options["domains"]}
+    assert [lv["key"] for lv in by_key["sleep"]["levels"]] == [
+        "hard_to_sleep", "too_short", "irregular",
+    ]

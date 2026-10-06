@@ -26,10 +26,10 @@ GRADES = ("again", "slow", "instant")
 INTERVALS = (1, 2, 4, 9, 21)
 MAX_BOX = len(INTERVALS) - 1
 
-#: 每天最多引入几个新句型。一次灌太多,第二天的复习量会直接劝退。
-NEW_PER_DAY = 8
-#: 单次练习的条目上限。十几条、几分钟能做完,才可能每天都做。
-SESSION_LIMIT = 20
+#: 每天引入多少新句型、单轮练多少条,都不设上限(``None``)——想练多少练多少。
+#: 两个参数保留下来是因为顺序仍然有意义:到期的复习永远排在新内容前面。
+NEW_PER_DAY: int | None = None
+SESSION_LIMIT: int | None = None
 
 
 def _add_days(day: str, n: int) -> str:
@@ -77,12 +77,12 @@ def introduced_today(reviews: dict, today: str) -> int:
     return sum(1 for e in reviews.values() if e.get("first") == today)
 
 
-def build_session(reviews: dict, today: str, *, new_per_day: int = NEW_PER_DAY,
-                  limit: int = SESSION_LIMIT) -> list[dict]:
-    """今天要练的条目:先清到期的,再按余额补新的。
+def build_session(reviews: dict, today: str, *, new_per_day: int | None = NEW_PER_DAY,
+                  limit: int | None = SESSION_LIMIT) -> list[dict]:
+    """今天要练的条目:先清到期的,再补新的。
 
     到期的永远优先于新的——积压的复习才是记忆真正流失的地方,新鲜感不该
-    排在它前面。
+    排在它前面。``new_per_day`` 与 ``limit`` 为 ``None`` 表示不限量。
     """
     due = [
         (entry, PATTERN_BY_ID[pid])
@@ -94,18 +94,21 @@ def build_session(reviews: dict, today: str, *, new_per_day: int = NEW_PER_DAY,
     items = [
         {**pattern.to_dict(), "status": "review", "box": int(entry.get("box", 0)),
          "seen": int(entry.get("seen", 0))}
-        for entry, pattern in due[:limit]
+        for entry, pattern in (due if limit is None else due[:limit])
     ]
 
-    budget = max(0, new_per_day - introduced_today(reviews, today))
-    room = max(0, limit - len(items))
-    if budget and room:
-        fresh = [p for p in PATTERNS if p.id not in reviews]
-        items += [
-            {**p.to_dict(), "status": "new", "box": 0, "seen": 0}
-            for p in fresh[: min(budget, room)]
-        ]
-    return items
+    room = None if limit is None else max(0, limit - len(items))
+    budget = None if new_per_day is None else max(0, new_per_day - introduced_today(reviews, today))
+    if room == 0 or budget == 0:
+        return items
+
+    fresh = [p for p in PATTERNS if p.id not in reviews]
+    caps = [c for c in (room, budget) if c is not None]
+    if caps:
+        fresh = fresh[: min(caps)]
+    return items + [
+        {**p.to_dict(), "status": "new", "box": 0, "seen": 0} for p in fresh
+    ]
 
 
 def stats(reviews: dict, today: str) -> dict:

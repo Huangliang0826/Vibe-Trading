@@ -63,9 +63,14 @@ function Card({
   return (
     <div className="space-y-5 rounded-2xl border bg-card p-5 sm:p-6">
       <div className="flex items-center justify-between gap-3">
-        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-          {item.group_label}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+            {item.group_label}
+          </span>
+          <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+            {item.level_label}
+          </span>
+        </div>
         <span className="text-xs tabular-nums text-muted-foreground">
           {item.status === "new" ? "新句型" : `第 ${(item.box ?? 0) + 1} 盒`} · {index + 1} / {total}
         </span>
@@ -132,7 +137,7 @@ function Card({
   );
 }
 
-function Catalog() {
+function Catalog({ levels }: { levels: EnglishState["levels"] }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<EnglishPattern[] | null>(null);
 
@@ -141,10 +146,14 @@ function Catalog() {
     void api.getEnglishPatterns().then((d) => setRows(d.patterns)).catch(() => setRows([]));
   }, [open, rows]);
 
-  const grouped = (rows ?? []).reduce<Record<string, EnglishPattern[]>>((acc, p) => {
-    (acc[p.group_label] ??= []).push(p);
-    return acc;
-  }, {});
+  const byLevel = (key: string) =>
+    (rows ?? []).filter((p) => p.level === key).reduce<Record<string, EnglishPattern[]>>(
+      (acc, p) => {
+        (acc[p.group_label] ??= []).push(p);
+        return acc;
+      },
+      {},
+    );
 
   return (
     <div className="rounded-2xl border bg-card">
@@ -153,7 +162,9 @@ function Catalog() {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between gap-3 p-5 text-left"
       >
-        <span className="text-[15px] font-medium">全部 100 条句型</span>
+        <span className="text-[15px] font-medium">
+          全部 {levels.reduce((n, l) => n + l.total, 0)} 条句型
+        </span>
         <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
 
@@ -162,24 +173,34 @@ function Catalog() {
           {rows === null ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : (
-            Object.entries(grouped).map(([label, items]) => (
-              <div key={label} className="space-y-2">
-                <p className="text-xs font-medium text-primary">{label}</p>
-                <ul className="space-y-1.5">
-                  {items.map((p) => (
-                    <li key={p.id} className="flex items-baseline justify-between gap-3 text-sm">
-                      <span className="min-w-0">
-                        <span className="font-medium">{p.frame}</span>
-                        <span className="ml-2 text-muted-foreground">{p.meaning}</span>
-                      </span>
-                      {(p.box ?? -1) >= 0 && (
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                          {p.box === 4 ? "已自动化" : `第 ${(p.box ?? 0) + 1} 盒`}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+            levels.map((level) => (
+              <div key={level.key} className="space-y-4">
+                <p className="text-sm font-semibold">
+                  {level.label}
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    {level.total} 条
+                  </span>
+                </p>
+                {Object.entries(byLevel(level.key)).map(([label, items]) => (
+                  <div key={label} className="space-y-2">
+                    <p className="text-xs font-medium text-primary">{label}</p>
+                    <ul className="space-y-1.5">
+                      {items.map((p) => (
+                        <li key={p.id} className="flex items-baseline justify-between gap-3 text-sm">
+                          <span className="min-w-0">
+                            <span className="font-medium">{p.frame}</span>
+                            <span className="ml-2 text-muted-foreground">{p.meaning}</span>
+                          </span>
+                          {(p.box ?? -1) >= 0 && (
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                              {p.box === 4 ? "已自动化" : `第 ${(p.box ?? 0) + 1} 盒`}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
               </div>
             ))
           )}
@@ -305,7 +326,7 @@ export function EnglishDrill() {
         </div>
       )}
 
-      <Catalog />
+      <Catalog levels={state.levels} />
 
       <button
         type="button"

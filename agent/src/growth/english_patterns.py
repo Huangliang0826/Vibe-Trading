@@ -18,6 +18,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+#: 难度级别。新句型按这个顺序引入:先把基础的练顺,再往上加。
+LEVELS = {"core": "基础", "mid": "中级", "high": "高级"}
+
 GROUPS = {
     "A": "缓和与委婉",
     "B": "观点与立场",
@@ -35,6 +38,7 @@ class Pattern:
     id: str
     frame: str
     group: str
+    level: str
     meaning: str
     #: 中文情境提示。练习时只显示这个,英文要自己产出。
     cue: str
@@ -44,10 +48,15 @@ class Pattern:
     def group_label(self) -> str:
         return GROUPS[self.group]
 
+    @property
+    def level_label(self) -> str:
+        return LEVELS[self.level]
+
     def to_dict(self) -> dict:
         return {
             "id": self.id, "frame": self.frame, "group": self.group,
-            "group_label": self.group_label, "meaning": self.meaning,
+            "group_label": self.group_label, "level": self.level,
+            "level_label": self.level_label, "meaning": self.meaning,
             "cue": self.cue, "examples": list(self.examples),
         }
 
@@ -470,10 +479,21 @@ _RAW: tuple[tuple, ...] = (
 )
 
 
+from src.growth.english_patterns_more import _RAW_HIGH, _RAW_MID  # noqa: E402
+
+
+def _build(raw: tuple[tuple, ...], level: str) -> list[Pattern]:
+    return [
+        Pattern(id=i, frame=f, group=g, level=level, meaning=m, cue=c, examples=tuple(e))
+        for i, f, g, m, c, e in raw
+    ]
+
+
+#: 顺序即引入顺序:基础 → 中级 → 高级。新句型按这个顺序发,所以难度自然递进。
 PATTERNS: tuple[Pattern, ...] = tuple(
-    Pattern(id=i, frame=f, group=g, meaning=m, cue=c, examples=tuple(e))
-    for i, f, g, m, c, e in _RAW
+    _build(_RAW, "core") + _build(_RAW_MID, "mid") + _build(_RAW_HIGH, "high")
 )
 
 PATTERN_BY_ID = {p.id: p for p in PATTERNS}
 TOTAL = len(PATTERNS)
+LEVEL_TOTALS = {key: sum(1 for p in PATTERNS if p.level == key) for key in LEVELS}

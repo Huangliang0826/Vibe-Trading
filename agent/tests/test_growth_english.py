@@ -6,17 +6,27 @@ from src.growth.english import (
     MAX_BOX, apply_review, build_session, introduced_today,
     new_reviews, shaky, stats,
 )
-from src.growth.english_patterns import GROUPS, PATTERN_BY_ID, PATTERNS, TOTAL
+from src.growth.english_patterns import (
+    GROUPS, LEVEL_TOTALS, LEVELS, PATTERN_BY_ID, PATTERNS, TOTAL,
+)
 
 TODAY = "2026-10-05"
 
 
 # ── 内容清单 ──────────────────────────────────────────────────────────────────
 
-def test_there_are_exactly_one_hundred_patterns_with_unique_ids():
+def test_the_catalog_has_all_three_levels_with_unique_ids():
     # ID 是复习进度的主键,重复会让两条句型共用一份记录。
-    assert TOTAL == 100
-    assert len(PATTERN_BY_ID) == 100
+    assert LEVEL_TOTALS == {"core": 100, "mid": 50, "high": 50}
+    assert TOTAL == 200
+    assert len(PATTERN_BY_ID) == 200
+
+
+def test_new_patterns_are_introduced_easiest_first():
+    # 新句型按清单顺序发,所以顺序本身就是难度梯度。
+    levels = [p.level for p in PATTERNS]
+
+    assert levels == sorted(levels, key=["core", "mid", "high"].index)
 
 
 def test_every_pattern_carries_what_the_drill_needs():
@@ -27,6 +37,7 @@ def test_every_pattern_carries_what_the_drill_needs():
         assert p.cue.strip(), p.id
         assert len(p.examples) >= 2, p.id
         assert p.group in GROUPS, p.id
+        assert p.level in LEVELS, p.id
 
 
 def test_the_cue_never_gives_the_answer_away():
@@ -111,11 +122,29 @@ def test_review_rejects_an_unknown_pattern_or_grade():
 
 # ── 每日练习的组成 ────────────────────────────────────────────────────────────
 
-def test_the_first_session_is_all_new_and_capped():
+def test_the_first_session_offers_the_whole_catalog_when_unlimited():
+    # 每天学多少由自己定,所以默认不设上限。
+    session = build_session(new_reviews(), TODAY)
+
+    assert len(session) == TOTAL
+    assert {item["status"] for item in session} == {"new"}
+
+
+def test_caps_still_apply_when_asked_for_explicitly():
     session = build_session(new_reviews(), TODAY, new_per_day=8, limit=20)
 
     assert len(session) == 8
-    assert {item["status"] for item in session} == {"new"}
+
+
+def test_an_unlimited_session_still_puts_due_reviews_first():
+    reviews = new_reviews()
+    for pid in list(PATTERN_BY_ID)[:5]:
+        reviews = apply_review(reviews, pid, "again", TODAY)
+
+    session = build_session(reviews, TODAY)
+
+    assert [item["status"] for item in session[:5]] == ["review"] * 5
+    assert len(session) == TOTAL
 
 
 def test_due_reviews_come_before_new_material():
@@ -136,7 +165,7 @@ def test_new_material_stops_once_the_daily_budget_is_used_up():
         reviews = apply_review(reviews, pid, "instant", TODAY)
 
     assert introduced_today(reviews, TODAY) == 8
-    # 今天的新词额度已经用完,再练只应剩下到期的复习。
+    # 显式设了额度就按额度来,用完当天只剩到期的复习。
     session = build_session(reviews, TODAY, new_per_day=8, limit=20)
     assert all(item["status"] == "review" for item in session)
 
@@ -161,12 +190,12 @@ def test_a_pattern_scheduled_for_later_stays_out_of_todays_session():
 
 # ── 进度 ──────────────────────────────────────────────────────────────────────
 
-def test_stats_report_progress_towards_all_one_hundred():
+def test_stats_report_progress_towards_the_whole_catalog():
     reviews = apply_review(new_reviews(), "the-thing-is", "instant", TODAY)
 
     s = stats(reviews, TODAY)
 
-    assert s["total"] == 100 and s["started"] == 1 and s["automatic"] == 0
+    assert s["total"] == TOTAL and s["started"] == 1 and s["automatic"] == 0
     assert s["reviewed_today"] == 1
 
 
