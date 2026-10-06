@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   BookOpen, Check, Dumbbell, Flame, Languages, Loader2, Moon, RotateCcw,
-  MessagesSquare, Sparkles, Sprout, Target, Undo2,
+  MessagesSquare, Sparkles, Sprout, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -30,12 +30,6 @@ const DOMAIN_ICONS: Record<string, typeof Moon> = {
   dutch: Languages,
   english: BookOpen,
 };
-
-const FEELINGS = [
-  { value: 1, label: "有点难" },
-  { value: 2, label: "还行" },
-  { value: 3, label: "不错" },
-] as const;
 
 const chip =
   "rounded-full border px-3 py-1.5 text-sm transition-colors hover:border-primary/50";
@@ -233,13 +227,12 @@ function DomainCard({
   onUndo,
 }: {
   item: GrowthDomainProgress;
-  onCheckin: (domain: string, feeling?: number) => Promise<void>;
+  onCheckin: (domain: string) => Promise<void>;
   onUndo: (domain: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const Icon = DOMAIN_ICONS[item.domain] ?? Sprout;
-  // 打完卡后显示刚做完的那一步,而不是明天的内容——否则"今天完成"会贴在一个
-  // 还没做的动作上。
+  // 打完卡后显示刚做完的那一步,而不是明天的内容。
   const step = item.done_today ? item.today_step : item.next_step;
   const finished = item.next_step === null && !item.done_today;
 
@@ -259,7 +252,7 @@ function DomainCard({
         item.done_today && "border-primary/35 bg-primary/[0.04]",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <Icon className="h-[18px] w-[18px] text-primary" strokeWidth={1.8} />
           <span className="text-[15px] font-medium">{item.label}</span>
@@ -272,12 +265,11 @@ function DomainCard({
       <Dots dots={item.dots} />
 
       {finished || !step ? (
-        <p className="text-sm text-muted-foreground">这个领域两周的内容已经全部做完了。</p>
+        <p className="text-sm text-muted-foreground">这两周的内容已经全部做完了。</p>
       ) : (
         <div className="space-y-1">
           <p className="text-[15px] font-medium">{step.title}</p>
           <p className="text-sm leading-relaxed text-muted-foreground">{step.detail}</p>
-          <p className="text-xs text-muted-foreground/80">约 {step.minutes} 分钟</p>
         </div>
       )}
 
@@ -290,55 +282,40 @@ function DomainCard({
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            做完了
+            做完了 · 约 {step?.minutes} 分钟
           </button>
           {item.min_version && (
-            <p className="text-xs text-muted-foreground">
-              状态不好?做这个也算:{item.min_version}
-            </p>
+            <p className="text-xs text-muted-foreground">状态不好?做这个也算:{item.min_version}</p>
           )}
         </>
       )}
 
       {item.done_today && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-              <Check className="h-4 w-4" />今天完成
-            </span>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(() => onUndo(item.domain))}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-            >
-              <Undo2 className="h-3 w-3" />撤销
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">感觉如何?</span>
-            {FEELINGS.map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                disabled={busy}
-                onClick={() => run(() => onCheckin(item.domain, f.value))}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 text-xs transition-colors disabled:opacity-50",
-                  item.feeling_today === f.value ? chipOn : chipOff,
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+            <Check className="h-4 w-4" />今天完成
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(() => onUndo(item.domain))}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+          >
+            <Undo2 className="h-3 w-3" />撤销
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-function CheckpointPanel({
+/** 两周检查点,压成每个领域一行。
+ *
+ *  原来是一整块面板加四个输入框——那是个表单,正是这个页面最该少的东西。
+ *  现在只在该记的时候露出一个输入框:第 1 天记基线,两周后记结果,记完就
+ *  变成"基线 → 结果"一行对照。
+ */
+function Checkpoint({
   state,
   onSave,
 }: {
@@ -351,49 +328,36 @@ function CheckpointPanel({
 
   return (
     <div className="space-y-4 rounded-2xl border bg-card p-5">
-      <div>
-        <h2 className="text-[15px] font-medium">两周检查点</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {due
-            ? "到期了。再测一次,和第 1 天的记录放在一起看。"
-            : `还有 ${overview.checkpoint.days_left} 天到期(${overview.checkpoint.due_date})。先把第 1 天的基线记下来,否则到时候没有对比的对象。`}
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        {due
+          ? "两周到了,再测一次,和第 1 天的记录放一起看。"
+          : `两周检查点还有 ${overview.checkpoint.days_left} 天(${overview.checkpoint.due_date})。`}
+      </p>
 
-      <div className="space-y-4">
-        {overview.domains.map((item) => {
-          const mark = marks[item.domain] ?? {};
-          const slot: "start" | "end" = mark.start ? "end" : "start";
-          const both = Boolean(mark.start && mark.end);
+      {overview.domains.map((item) => {
+        const mark = marks[item.domain] ?? {};
+        const both = Boolean(mark.start && mark.end);
+        const slot: "start" | "end" = mark.start ? "end" : "start";
 
-          return (
-            <div key={item.domain} className="space-y-2 border-t pt-4 first:border-t-0 first:pt-0">
-              <p className="text-sm font-medium">{item.label}</p>
-              <p className="text-xs leading-relaxed text-muted-foreground">{item.checkpoint}</p>
-
-              {both ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="rounded-lg bg-muted/60 px-2.5 py-1 text-muted-foreground">
-                    第 1 天 · {mark.start}
-                  </span>
-                  <span className="text-muted-foreground">→</span>
-                  <span className="rounded-lg bg-primary/10 px-2.5 py-1 font-medium text-primary">
-                    第 {overview.checkpoint.elapsed_days + 1} 天 · {mark.end}
-                  </span>
-                </div>
-              ) : (
-                <CheckpointInput
-                  domain={item.domain}
-                  slot={slot}
-                  baseline={mark.start}
-                  disabled={slot === "end" && !due}
-                  onSave={onSave}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
+        return (
+          <div key={item.domain} className="space-y-1.5 border-t pt-4 first:border-t-0 first:pt-0">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">{item.label}</span> · {item.checkpoint}
+            </p>
+            {both ? (
+              <p className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded-lg bg-muted/60 px-2.5 py-1 text-muted-foreground">{mark.start}</span>
+                <span className="text-muted-foreground">→</span>
+                <span className="rounded-lg bg-primary/10 px-2.5 py-1 font-medium text-primary">{mark.end}</span>
+              </p>
+            ) : slot === "end" && !due ? (
+              <p className="text-xs text-muted-foreground">基线已记:{mark.start}</p>
+            ) : (
+              <CheckpointInput domain={item.domain} slot={slot} onSave={onSave} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -401,14 +365,10 @@ function CheckpointPanel({
 function CheckpointInput({
   domain,
   slot,
-  baseline,
-  disabled,
   onSave,
 }: {
   domain: string;
   slot: "start" | "end";
-  baseline?: string;
-  disabled: boolean;
   onSave: (domain: string, which: "start" | "end", value: string) => Promise<void>;
 }) {
   const [value, setValue] = useState("");
@@ -425,14 +385,6 @@ function CheckpointInput({
     }
   };
 
-  if (disabled) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        基线已记:{baseline}。两周到期后再来记结果。
-      </p>
-    );
-  }
-
   return (
     <div className="flex flex-wrap items-center gap-2">
       <input
@@ -446,7 +398,7 @@ function CheckpointInput({
         type="button"
         onClick={save}
         disabled={busy || !value.trim()}
-        className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:opacity-40"
+        className="rounded-lg border px-3 py-2 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:opacity-40"
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "记下"}
       </button>
@@ -486,11 +438,11 @@ function TodayBoard({
     <div className="space-y-6">
       <Lede>
         {allDone
-          ? "今天四项都做完了。明天见。"
+          ? "今天都做完了。明天见。"
           : `今天还剩 ${overview.domain_count - overview.done_today} 项,每项几分钟。`}
       </Lede>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl border bg-card p-4">
           <p className="text-xs text-muted-foreground">连续</p>
           <p className="mt-1 inline-flex items-baseline gap-1">
@@ -506,13 +458,6 @@ function TodayBoard({
             <span className="text-xs font-normal text-muted-foreground"> / {overview.domain_count}</span>
           </p>
         </div>
-        <div className="rounded-2xl border bg-card p-4">
-          <p className="text-xs text-muted-foreground">距检查点</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums">
-            {overview.checkpoint.days_left}
-            <span className="text-xs font-normal text-muted-foreground"> 天</span>
-          </p>
-        </div>
       </div>
 
       {overview.nudge && (
@@ -526,13 +471,13 @@ function TodayBoard({
           <DomainCard
             key={item.domain}
             item={item}
-            onCheckin={async (domain, feeling) => call(() => api.growthCheckin(domain, feeling))}
+            onCheckin={async (domain) => call(() => api.growthCheckin(domain))}
             onUndo={async (domain) => call(() => api.growthUndoCheckin(domain))}
           />
         ))}
       </div>
 
-      <CheckpointPanel
+      <Checkpoint
         state={state}
         onSave={async (domain, which, value) => call(() => api.growthSetCheckpoint(domain, which, value))}
       />
@@ -548,8 +493,6 @@ function TodayBoard({
   );
 }
 
-// ── 页面 ─────────────────────────────────────────────────────────────────────
-
 const TABS = [
   { key: "today", label: "每天", icon: Sprout },
   { key: "english", label: "英语句型", icon: MessagesSquare },
@@ -559,8 +502,8 @@ type Tab = (typeof TABS)[number]["key"];
 
 //  英语句型下的两件事:先学,再考。测验是学习的一部分,所以收在它里面。
 const ENGLISH_VIEWS = [
-  { key: "learn", label: "学习", icon: MessagesSquare },
-  { key: "quiz", label: "测试", icon: Target },
+  { key: "learn", label: "学习" },
+  { key: "quiz", label: "测试" },
 ] as const;
 
 type EnglishView = (typeof ENGLISH_VIEWS)[number]["key"];
@@ -569,6 +512,15 @@ const tabClass = (active: boolean) =>
   cn(
     "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
     active ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+  );
+
+//  子栏目用更轻的下划线,和上面那排分段控件区分开——两排一样重的药丸会糊成一团。
+const subTabClass = (active: boolean) =>
+  cn(
+    "border-b-2 pb-2 text-sm transition-colors",
+    active
+      ? "border-primary font-medium text-foreground"
+      : "border-transparent text-muted-foreground hover:text-foreground",
   );
 
 export function Growth() {
@@ -643,17 +595,16 @@ export function Growth() {
   if (tab === "english") {
     return shell(
       <>
-        <div role="tablist" aria-label="英语句型" className="inline-flex rounded-lg border bg-muted/30 p-1">
-          {ENGLISH_VIEWS.map(({ key, label, icon: Icon }) => (
+        <div role="tablist" aria-label="英语句型" className="flex gap-6 border-b">
+          {ENGLISH_VIEWS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
               role="tab"
               aria-selected={view === key}
               onClick={() => selectView(key)}
-              className={tabClass(view === key)}
+              className={subTabClass(view === key)}
             >
-              <Icon className="h-4 w-4" />
               {label}
             </button>
           ))}

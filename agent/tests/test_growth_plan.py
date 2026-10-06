@@ -119,7 +119,7 @@ def test_generate_falls_back_when_the_model_raises():
         def chat(self, messages, **kwargs):
             raise RuntimeError("provider down")
 
-    plan = generate_domain_plan("sleep", DomainIntake(level="too_short", minutes=20), "early",
+    plan = generate_domain_plan("english", DomainIntake(level="read_only", minutes=20), "early",
                                 llm=Boom())
 
     assert plan["source"] == "fallback"
@@ -142,7 +142,7 @@ def test_every_domain_has_a_usable_fallback():
 
 
 def test_fallback_second_week_asks_for_more_than_the_first():
-    plan = fallback_plan("fitness", 20)
+    plan = fallback_plan("english", 20)
 
     assert plan["steps"][7]["minutes"] > plan["steps"][0]["minutes"]
 

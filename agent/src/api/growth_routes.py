@@ -107,9 +107,6 @@ class PlanRequest(BaseModel):
 
 class CheckinRequest(BaseModel):
     domain: str = Field(..., max_length=16)
-    #: 1~3 的一次点选(难受 / 一般 / 不错),可以不填。
-    feeling: Optional[int] = None
-    note: str = Field("", max_length=80)
 
 
 class DomainRequest(BaseModel):
@@ -232,10 +229,7 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
     @router.post("/checkin")
     async def checkin(payload: CheckinRequest):
         try:
-            updated = apply_checkin(
-                _require_state(), domain=payload.domain, today=_today(),
-                feeling=payload.feeling, note=payload.note,
-            )
+            updated = apply_checkin(_require_state(), domain=payload.domain, today=_today())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _payload(write_state(updated))

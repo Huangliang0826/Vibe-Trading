@@ -1,12 +1,12 @@
-/** 英语句型 · 学习页:把句型过一遍,不打分。
+/** 英语句型 · 学习页:把句型一条条过一遍。
  *
- *  仍然是**检索练习**的形式——先只给中文情境,自己把英文说出来,再看答案。
- *  但这里不再自评。自评是主观的,而且刚看完答案的人总会高估自己;真正的
- *  判定交给「测试」页的客观作答。这一页只记"我见过这条"。
+ *  内容一次摊开,没有"先猜再翻"这一步。检索练习归「测试」页——那里是客观
+ *  作答、会计时、会推进复习盒子。在这一页藏答案只是多一次点击:反正点开就看,
+ *  也没人判你猜得对不对。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowRight, Bookmark, ChevronDown, Eye, Loader2, RotateCcw, Sparkles,
+  ArrowRight, Bookmark, ChevronDown, Loader2, RotateCcw, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -41,15 +41,7 @@ function Card({
   onStudied: (id: string) => void;
   onFavorite: (id: string, favorite: boolean) => void;
 }) {
-  // 新句型没见过,无从检索,所以直接摊开让人先读熟;见过的则先自己产出。
-  const [revealed, setRevealed] = useState(item.status === "new");
-
-  useEffect(() => {
-    setRevealed(item.status === "new");
-  }, [item.id, item.status]);
-
-  // 翻到这张卡就算接触过。不能挂在「看答案」上:新句型一上来就是展开的,
-  // 那个按钮压根不渲染,而没练过的句型状态全是 new——等于一条都记不上。
+  // 翻到这张卡就算接触过。
   useEffect(() => {
     onStudied(item.id);
   }, [item.id, onStudied]);
@@ -66,68 +58,52 @@ function Card({
           </span>
         </div>
         <span className="text-xs tabular-nums text-muted-foreground">
-          {item.status === "new" ? "新句型" : `第 ${(item.box ?? 0) + 1} 盒`} · {index + 1} / {total}
+          {index + 1} / {total}
         </span>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs text-muted-foreground">
-          {item.status === "new" ? "先读两遍,再用它造一句自己的话" : "先把英文说出来,再看答案"}
-        </p>
-        <p className="text-[17px] font-medium leading-relaxed">{item.cue}</p>
+      <div>
+        <div className="flex items-start gap-2">
+          <p className="text-[19px] font-semibold tracking-tight">{item.frame}</p>
+          <SpeakButton text={item.frame} label={`朗读句型 ${item.frame}`} className="mt-0.5" />
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{item.meaning}</p>
       </div>
 
-      {revealed ? (
-        <div className="space-y-4 border-t pt-5">
-          <div>
-            <div className="flex items-start gap-2">
-              <p className="text-[19px] font-semibold tracking-tight">{item.frame}</p>
-              <SpeakButton text={item.frame} label={`朗读句型 ${item.frame}`} className="mt-0.5" />
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">{item.meaning}</p>
-          </div>
-          <ul className="space-y-1.5">
-            {item.examples.map((example) => (
-              <li key={example} className="flex items-start gap-2">
-                <SpeakButton text={example} label={`朗读例句 ${example}`} className="-ml-1" />
-                <span className="text-[15px] leading-relaxed text-foreground/85">{example}</span>
-              </li>
-            ))}
-          </ul>
+      <ul className="space-y-1.5">
+        {item.examples.map((example) => (
+          <li key={example} className="flex items-start gap-2">
+            <SpeakButton text={example} label={`朗读例句 ${example}`} className="-ml-1" />
+            <span className="text-[15px] leading-relaxed text-foreground/85">{example}</span>
+          </li>
+        ))}
+      </ul>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => onFavorite(item.id, !item.favorite)}
-              aria-pressed={Boolean(item.favorite)}
-              className={cn(
-                "inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition",
-                item.favorite
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:border-primary/40 hover:text-foreground",
-              )}
-            >
-              <Bookmark className={cn("h-4 w-4", item.favorite && "fill-current")} />
-              {item.favorite ? "已收藏" : "收藏"}
-            </button>
-            <button
-              type="button"
-              onClick={onNext}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
-            >
-              下一句<ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      ) : (
+      <p className="text-sm leading-relaxed text-muted-foreground">{item.cue}</p>
+
+      <div className="grid gap-2 sm:grid-cols-2">
         <button
           type="button"
-          onClick={() => setRevealed(true)}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
+          onClick={() => onFavorite(item.id, !item.favorite)}
+          aria-pressed={Boolean(item.favorite)}
+          className={cn(
+            "inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition",
+            item.favorite
+              ? "border-primary/50 bg-primary/10 text-primary"
+              : "text-muted-foreground hover:border-primary/40 hover:text-foreground",
+          )}
         >
-          <Eye className="h-4 w-4" />看答案
+          <Bookmark className={cn("h-4 w-4", item.favorite && "fill-current")} />
+          {item.favorite ? "已收藏" : "收藏"}
         </button>
-      )}
+        <button
+          type="button"
+          onClick={onNext}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
+        >
+          下一句<ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -314,7 +290,7 @@ export function EnglishDrill() {
         <div className="space-y-2 rounded-2xl border bg-card p-6 text-center">
           <Sparkles className="mx-auto h-5 w-5 text-primary" />
           <p className="text-[15px] font-medium">这一轮都看完了</p>
-          <p className="text-sm text-muted-foreground">去「测试」页考一遍,记住没记住那里说了算。</p>
+          <p className="text-sm text-muted-foreground">去「测试」考一遍,记住没记住那里说了算。</p>
           <button
             type="button"
             onClick={() => void load()}

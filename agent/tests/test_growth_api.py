@@ -53,7 +53,7 @@ INTAKE = {
     "chronotype": "early",
     "domains": {
         "dutch": {"level": "zero", "minutes": 10},
-        "sleep": {"level": "too_short", "minutes": 20},
+        "english": {"level": "read_only", "minutes": 20},
     },
 }
 
@@ -78,10 +78,10 @@ def test_state_reports_not_configured_before_any_plan_exists(client):
     assert client.get("/growth/state").json() == {"configured": False}
 
 
-def test_options_lists_four_domains_with_tap_choices(client):
+def test_options_lists_the_two_language_domains_with_tap_choices(client):
     data = client.get("/growth/options").json()
 
-    assert [d["key"] for d in data["domains"]] == ["sleep", "fitness", "dutch", "english"]
+    assert [d["key"] for d in data["domains"]] == ["dutch", "english"]
     assert data["days"] == PLAN_DAYS
     # 每个领域三档起点,全部可点选
     assert all(len(d["levels"]) == 3 for d in data["domains"])
@@ -96,7 +96,7 @@ def test_checkin_before_a_plan_exists_is_a_404_not_a_crash(client):
 def test_plan_covers_every_requested_domain_for_two_weeks(client):
     data = _plan(client)
 
-    assert set(data["plan"]) == {"dutch", "sleep"}
+    assert set(data["plan"]) == {"dutch", "english"}
     assert all(len(p["steps"]) == PLAN_DAYS for p in data["plan"].values())
     assert all(p["checkpoint"] for p in data["plan"].values())
 
@@ -130,8 +130,8 @@ def test_a_second_submit_while_generating_does_not_start_a_second_job(client):
     assert again["generating"] is True and again["total"] == 2
 
 
-def test_plan_rejects_an_unknown_domain(client):
-    bad = {"chronotype": "early", "domains": {"guitar": {"level": "zero", "minutes": 10}}}
+def test_plan_rejects_a_domain_that_is_no_longer_offered(client):
+    bad = {"chronotype": "early", "domains": {"sleep": {"level": "zero", "minutes": 10}}}
 
     assert client.post("/growth/plan", json=bad).status_code == 400
 
@@ -149,11 +149,11 @@ def test_overview_opens_on_the_first_step_of_each_domain(client):
 def test_checkin_advances_only_its_own_domain(client):
     _plan(client)
 
-    data = client.post("/growth/checkin", json={"domain": "dutch", "feeling": 3}).json()
+    data = client.post("/growth/checkin", json={"domain": "dutch"}).json()
 
     by_domain = {d["domain"]: d for d in data["overview"]["domains"]}
     assert by_domain["dutch"]["done"] == 1 and by_domain["dutch"]["done_today"] is True
-    assert by_domain["sleep"]["done"] == 0
+    assert by_domain["english"]["done"] == 0
 
 
 def test_tapping_twice_in_one_day_does_not_consume_two_days_of_plan(client):
@@ -346,8 +346,8 @@ def test_domain_levels_and_english_levels_do_not_collide(client):
     options = client.get("/growth/options").json()
 
     by_key = {d["key"]: d for d in options["domains"]}
-    assert [lv["key"] for lv in by_key["sleep"]["levels"]] == [
-        "hard_to_sleep", "too_short", "irregular",
+    assert [lv["key"] for lv in by_key["dutch"]["levels"]] == [
+        "zero", "words", "basic_talk",
     ]
 
 

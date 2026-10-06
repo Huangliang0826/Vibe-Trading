@@ -33,13 +33,13 @@ PLAN_DAYS = 14
 #: 实测中正是这样卡了几分钟。超时按失败处理,退回兜底计划。
 REQUEST_TIMEOUT_SECONDS = 60
 
-DOMAINS = ("sleep", "fitness", "dutch", "english")
-DOMAIN_LABELS = {"sleep": "睡眠", "fitness": "健身", "dutch": "荷兰语", "english": "英语"}
+#: 只做语言。睡眠和健身曾经也在这里,但一页四张卡片把真正每天要做的事淹掉了;
+#: 砍到两项之后,"今天还剩什么"一眼就看完。
+DOMAINS = ("dutch", "english")
+DOMAIN_LABELS = {"dutch": "荷兰语", "english": "英语"}
 
 #: 每个领域的起点选项(点选,不填空)。
 LEVELS: dict[str, tuple[tuple[str, str], ...]] = {
-    "sleep": (("hard_to_sleep", "入睡困难"), ("too_short", "睡得着但不够"), ("irregular", "作息不规律")),
-    "fitness": (("sedentary", "几乎不动"), ("occasional", "偶尔运动"), ("regular", "有规律想提升")),
     "dutch": (("zero", "零基础"), ("words", "认得一些词"), ("basic_talk", "能简单对话")),
     "english": (("read_only", "能读不敢说"), ("daily_ok", "日常够用"), ("to_pro", "想到专业水平")),
 }
@@ -203,24 +203,6 @@ def parse_domain_plan(raw: str, *, minutes: int) -> dict:
 #: 模型不可用时用的确定性计划。刻意朴素:第二周只是把第一周的动作加量,
 #: 保证"能用",真正的好计划由模型给。
 _FALLBACK: dict[str, dict[str, str]] = {
-    "sleep": {
-        "checkpoint": "对比第 1 天和第 14 天记录的入睡时间,看平均是否提前 20 分钟",
-        "why": "先把起床时间钉死,节律稳了睡眠时长才跟得上",
-        "min_version": "睡前把手机放到床以外的地方充电",
-        "title_w1": "固定起床 + 睡前无屏",
-        "detail_w1": "每天同一时间起床;睡前这段时间不看手机,记下入睡时间",
-        "title_w2": "延长无屏时段",
-        "detail_w2": "起床时间不变,把睡前无屏时段再往前推,继续记录入睡时间",
-    },
-    "fitness": {
-        "checkpoint": "测一次连续深蹲和靠墙静蹲秒数,和第 1 天的数字比",
-        "why": "自重动作先建立频率,次数的提升两周内看得见",
-        "min_version": "做 5 个深蹲",
-        "title_w1": "自重三件套",
-        "detail_w1": "深蹲、俯卧撑(可跪姿)、靠墙静蹲各一组,留有余力就停",
-        "title_w2": "自重三件套加量",
-        "detail_w2": "同样三个动作,每组比第一周多几次;任何疼痛立刻停",
-    },
     "dutch": {
         "checkpoint": "录一段 1 分钟荷兰语自我介绍,和第 1 天的录音对比",
         "why": "先把发音和高频词跑顺,开口比记单词更快见效",

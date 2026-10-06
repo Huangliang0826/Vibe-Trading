@@ -104,16 +104,11 @@ def new_state(*, plan: dict, intake: dict, chronotype: str, today: str) -> dict:
     }
 
 
-def apply_checkin(
-    state: dict, *, domain: str, today: str, feeling: Optional[int] = None, note: str = "",
-) -> dict:
+def apply_checkin(state: dict, *, domain: str, today: str) -> dict:
     """记录一次完成,返回新的 state。
 
     同一领域同一天只推进一步。重复点击推进两步会把当天的内容悄悄跳过去——
     这正是手机上最容易误触出来的情况,所以在这里挡掉而不是靠界面。
-
-    但当天已有记录时并非什么都不做:感受和备注会写进那一条。界面上"感觉如何"
-    是打完卡之后才出现的,若这里原样返回,那几个按钮就永远存不下东西。
     """
     if domain not in DOMAINS:
         raise ValueError(f"未知领域:{domain}")
@@ -121,34 +116,17 @@ def apply_checkin(
         raise ValueError(f"计划里没有这个领域:{domain}")
 
     checkins = list(state.get("checkins") or [])
-    existing = next(
-        (i for i, c in enumerate(checkins)
-         if c.get("domain") == domain and c.get("date") == today),
-        None,
-    )
-    if existing is not None:
-        if feeling is None and not note.strip():
-            return state  # 纯重复点击:保持幂等
-        updated = dict(checkins[existing])
-        if feeling is not None:
-            updated["feeling"] = max(1, min(3, int(feeling)))
-        if note.strip():
-            updated["note"] = note.strip()[:80]
-        checkins[existing] = updated
-        return {**state, "checkins": checkins}
+    if any(c.get("domain") == domain and c.get("date") == today for c in checkins):
+        return state  # 已完成,保持幂等
 
     steps = (state["plan"][domain].get("steps") or [])
     done = sum(1 for c in checkins if c.get("domain") == domain)
     if done >= len(steps):
         return state  # 本领域已全部完成
 
-    entry = {"date": today, "domain": domain, "day": steps[done]["day"]}
-    if feeling is not None:
-        entry["feeling"] = max(1, min(3, int(feeling)))
-    if note.strip():
-        entry["note"] = note.strip()[:80]
-
-    return {**state, "checkins": [*checkins, entry]}
+    return {**state, "checkins": [
+        *checkins, {"date": today, "domain": domain, "day": steps[done]["day"]},
+    ]}
 
 
 def undo_checkin(state: dict, *, domain: str, today: str) -> dict:
@@ -164,6 +142,8 @@ def set_checkpoint(state: dict, *, domain: str, which: str, value: str) -> dict:
     """记录检查点的基线(start)或两周后的结果(end)。"""
     if which not in ("start", "end"):
         raise ValueError("检查点只能是 start 或 end")
+    if domain not in DOMAINS:
+        raise ValueError(f"未知领域:{domain}")
     marks = {**(state.get("checkpoints") or {})}
     marks[domain] = {**(marks.get(domain) or {}), which: value.strip()[:120]}
     return {**state, "checkpoints": marks}

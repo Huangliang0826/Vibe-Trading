@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Optional
 
-from src.growth.plan import DOMAIN_LABELS, PLAN_DAYS
+from src.growth.plan import DOMAIN_LABELS, DOMAINS, PLAN_DAYS
 
 
 def ymd(value: date) -> str:
@@ -46,8 +46,6 @@ class DomainProgress:
     #: 今天已完成的那一步。打完卡后界面要显示"刚做完的是什么",而不是明天的
     #: 内容——否则"今天完成"会贴在一个还没做的动作上。
     today_step: Optional[dict] = None
-    #: 今天记录的感受 1~3,没记为 None。派生到这里,免得把原始打卡日志发给前端。
-    feeling_today: Optional[int] = None
     #: 14 个格子的状态,done/next/todo,用于一眼看完整体。
     dots: list[str] = field(default_factory=list)
     checkpoint: str = ""
@@ -64,7 +62,6 @@ class DomainProgress:
             "done": self.done, "total": self.total, "percent": self.percent,
             "next_step": self.next_step, "today_step": self.today_step,
             "done_today": self.done_today,
-            "feeling_today": self.feeling_today,
             "dots": self.dots, "checkpoint": self.checkpoint,
             "min_version": self.min_version, "why": self.why,
         }
@@ -92,7 +89,6 @@ def domain_progress(domain: str, plan: dict, checkins: list[dict], today: str) -
         next_step=next_step,
         today_step=today_step,
         done_today=today_entry is not None,
-        feeling_today=today_entry.get("feeling") if today_entry else None,
         dots=dots,
         checkpoint=plan.get("checkpoint", ""),
         min_version=plan.get("min_version", ""),
@@ -150,7 +146,9 @@ def build_overview(state: dict, today: str) -> dict:
     """界面需要的全部派生数据,一次算完。"""
     plan = state.get("plan") or {}
     checkins = state.get("checkins") or []
-    domains = [domain_progress(d, plan[d], checkins, today) for d in plan]
+    # 按 DOMAINS 过滤并排序:早先生成的计划可能还带着已经去掉的领域,
+    # 不该因此逼人重新生成一份。
+    domains = [domain_progress(d, plan[d], checkins, today) for d in DOMAINS if d in plan]
     total_steps = sum(d.total for d in domains)
     total_done = sum(d.done for d in domains)
 
