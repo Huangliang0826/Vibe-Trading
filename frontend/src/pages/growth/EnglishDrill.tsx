@@ -110,14 +110,14 @@ function Card({
   );
 }
 
-function Catalog({ levels }: { levels: EnglishState["levels"] }) {
+function Catalog({ levels, track }: { levels: EnglishState["levels"]; track: string }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<EnglishPattern[] | null>(null);
 
   useEffect(() => {
     if (!open || rows) return;
-    void api.getEnglishPatterns().then((d) => setRows(d.patterns)).catch(() => setRows([]));
-  }, [open, rows]);
+    void api.getEnglishPatterns(track).then((d) => setRows(d.patterns)).catch(() => setRows([]));
+  }, [open, rows, track]);
 
   const byLevel = (key: string) =>
     (rows ?? []).filter((p) => p.level === key).reduce<Record<string, EnglishPattern[]>>(
@@ -136,7 +136,7 @@ function Catalog({ levels }: { levels: EnglishState["levels"] }) {
         className="flex w-full items-center justify-between gap-3 p-5 text-left"
       >
         <span className="text-[15px] font-medium">
-          全部 {levels.reduce((n, l) => n + l.total, 0)} 条句型
+          全部 {levels.reduce((n, l) => n + l.total, 0)} 条
         </span>
         <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
@@ -183,7 +183,7 @@ function Catalog({ levels }: { levels: EnglishState["levels"] }) {
   );
 }
 
-export function EnglishDrill() {
+export function EnglishDrill({ track }: { track: string }) {
   const [state, setState] = useState<EnglishState | null>(null);
   // 本轮的练习队列是本地的。服务端每次打分都会重算"今天到期"的列表,长度会变;
   // 拿索引去指一个会变长的列表,打完一条就会跳过下一条。
@@ -195,7 +195,7 @@ export function EnglishDrill() {
 
   const load = useCallback(async () => {
     try {
-      const next = await api.getEnglish();
+      const next = await api.getEnglish(track);
       setState(next);
       setQueue(next.session);
       setCursor(0);
@@ -261,7 +261,7 @@ export function EnglishDrill() {
   const reset = async () => {
     if (!window.confirm("清空 100 条句型的全部练习进度,确定吗?")) return;
     try {
-      const next = await api.resetEnglish();
+      const next = await api.resetEnglish(track);
       setState(next);
       setQueue(next.session);
       setCursor(0);
@@ -324,7 +324,7 @@ export function EnglishDrill() {
         </div>
       )}
 
-      <Catalog levels={state.levels} />
+      <Catalog levels={state.levels} track={track} />
 
       <button
         type="button"

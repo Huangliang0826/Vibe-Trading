@@ -594,18 +594,27 @@ function TodayBoard({
 
 const TABS = [
   { key: "today", label: "每天", icon: Sprout },
-  { key: "english", label: "英语句型", icon: MessagesSquare },
+  { key: "english", label: "英语", icon: MessagesSquare },
 ] as const;
 
 type Tab = (typeof TABS)[number]["key"];
 
-//  英语句型下的两件事:先学,再考。测验是学习的一部分,所以收在它里面。
+//  英语下的两件事:先学,再考。测验是学习的一部分,所以收在它里面。
 const ENGLISH_VIEWS = [
   { key: "learn", label: "学习" },
   { key: "quiz", label: "测试" },
 ] as const;
 
 type EnglishView = (typeof ENGLISH_VIEWS)[number]["key"];
+
+//  三条并列的内容线。与「学习/测试」同处一行,层级不再加深。
+const ENGLISH_TRACKS = [
+  { key: "frame", label: "句型" },
+  { key: "oneliner", label: "整句" },
+  { key: "collocation", label: "搭配" },
+] as const;
+
+type EnglishTrackKey = (typeof ENGLISH_TRACKS)[number]["key"];
 
 const tabClass = (active: boolean) =>
   cn(
@@ -627,6 +636,9 @@ export function Growth() {
   const raw = searchParams.get("tab");
   const tab: Tab = raw === "english" ? "english" : "today";
   const view: EnglishView = searchParams.get("view") === "quiz" ? "quiz" : "learn";
+  const rawTrack = searchParams.get("track");
+  const track: EnglishTrackKey =
+    rawTrack === "oneliner" || rawTrack === "collocation" ? rawTrack : "frame";
   const [state, setState] = useState<GrowthState | null>(null);
   const [options, setOptions] = useState<GrowthOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -659,6 +671,15 @@ export function Growth() {
     if (nextTab === "today") params.delete("tab");
     else params.set("tab", nextTab);
     params.delete("view");
+    params.delete("track");
+    setSearchParams(params, { replace: true });
+  };
+
+  const selectTrack = (nextTrack: EnglishTrackKey) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", "english");
+    if (nextTrack === "frame") params.delete("track");
+    else params.set("track", nextTrack);
     setSearchParams(params, { replace: true });
   };
 
@@ -694,21 +715,49 @@ export function Growth() {
   if (tab === "english") {
     return shell(
       <>
-        <div role="tablist" aria-label="英语句型" className="flex gap-6 border-b">
-          {ENGLISH_VIEWS.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={view === key}
-              onClick={() => selectView(key)}
-              className={subTabClass(view === key)}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b">
+          <div role="tablist" aria-label="英语栏目" className="flex gap-6">
+            {ENGLISH_VIEWS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={view === key}
+                onClick={() => selectView(key)}
+                className={subTabClass(view === key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div
+            role="tablist"
+            aria-label="内容分类"
+            className="mb-2 inline-flex rounded-lg border bg-muted/30 p-0.5"
+          >
+            {ENGLISH_TRACKS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={track === key}
+                onClick={() => selectTrack(key)}
+                className={cn(
+                  "rounded-md px-3 py-1 text-xs transition-colors",
+                  track === key
+                    ? "bg-background font-medium text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-        {view === "quiz" ? <EnglishQuiz /> : <EnglishDrill />}
+        {/* key 让切换分类时组件重建,队列和游标一起重置 */}
+        {view === "quiz"
+          ? <EnglishQuiz key={track} track={track} />
+          : <EnglishDrill key={track} track={track} />}
       </>,
     );
   }

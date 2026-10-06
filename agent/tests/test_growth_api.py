@@ -224,9 +224,10 @@ def english_client(tmp_path: Path, monkeypatch) -> TestClient:
 def test_english_opens_with_the_whole_catalog(english_client):
     data = english_client.get("/growth/english").json()
 
-    assert data["stats"] == {**data["stats"], "total": 200, "started": 0, "favorites": 0}
+    assert data["stats"] == {**data["stats"], "total": 152, "started": 0, "favorites": 0}
     assert data["fast_ms"] == 6000
-    assert len(data["session"]) == 200
+    assert len(data["session"]) == 152
+    assert [t["key"] for t in data["tracks"]] == ["frame", "oneliner", "collocation"]
 
 
 def test_the_learning_queue_resumes_where_it_was_left(english_client):
@@ -235,7 +236,7 @@ def test_the_learning_queue_resumes_where_it_was_left(english_client):
 
     session = english_client.get("/growth/english").json()["session"]
 
-    assert len(session) == 199
+    assert len(session) == 151
     assert session[0]["id"] != first
 
 
@@ -243,7 +244,7 @@ def test_the_session_starts_at_the_easiest_level(english_client):
     session = english_client.get("/growth/english").json()["session"]
 
     assert session[0]["level"] == "core"
-    assert [item["level"] for item in session[:100]] == ["core"] * 100
+    assert [item["level"] for item in session[:80]] == ["core"] * 80
 
 
 def test_english_session_items_carry_the_cue_but_the_drill_still_needs_the_answer(english_client):
@@ -314,12 +315,9 @@ def test_the_full_catalog_is_available_with_each_patterns_box(english_client):
 
     data = english_client.get("/growth/english/patterns").json()
 
-    assert len(data["patterns"]) == 200
-    assert data["levels"] == [
-        {"key": "core", "label": "基础", "total": 100},
-        {"key": "mid", "label": "中级", "total": 50},
-        {"key": "high", "label": "高级", "total": 50},
-    ]
+    assert len(data["patterns"]) == 152
+    assert {lv["key"] for lv in data["levels"]} == {"core", "mid", "high"}
+    assert sum(lv["total"] for lv in data["levels"]) == 152
     by_id = {p["id"]: p for p in data["patterns"]}
     assert by_id["the-thing-is"]["box"] == 1
     assert by_id["it-depends-on"]["box"] == -1  # 还没练过
@@ -470,3 +468,68 @@ def test_the_calendar_covers_four_weeks(both_client):
 
     assert len(calendar) == 28
     assert calendar[0]["date"] < calendar[-1]["date"]  # 从早到晚
+
+
+# ── 三条线互不干扰 ────────────────────────────────────────────────────────────
+
+def test_each_track_reports_its_own_totals(english_client):
+    sizes = {
+        t: english_client.get(f"/growth/english?track={t}").json()["stats"]["total"]
+        for t in ("frame", "oneliner", "collocation")
+    }
+
+    assert sizes["frame"] == 152 and sizes["oneliner"] == 91 and sizes["collocation"] == 102
+
+
+def test_reading_one_track_does_not_shorten_another(english_client):
+    first = english_client.get("/growth/english?track=frame").json()["session"][0]["id"]
+    english_client.post("/growth/english/studied", json={"pattern_id": first})
+
+    data = english_client.get("/growth/english?track=collocation").json()
+
+    assert len(data["session"]) == 102
+    assert data["stats"]["started"] == 0
+
+
+def test_a_collocation_quiz_offers_the_chinglish_version(english_client):
+    questions = english_client.get("/growth/english/quiz?track=collocation&count=8").json()
+
+    assert questions["track"] == "collocation"
+    for q in questions["questions"]:
+        wrong = next(o for o in q["options"] if o["id"] != q["answer_id"])
+        assert wrong["meaning"] == "直译,英语里不这么说"
+        assert wrong["id"].endswith("#wrong")
+
+
+def test_choosing_the_chinglish_version_is_marked_wrong(english_client):
+    q = english_client.get("/growth/english/quiz?track=collocation&count=1").json()["questions"][0]
+    wrong_id = next(o["id"] for o in q["options"] if o["id"] != q["answer_id"])
+
+    result = english_client.post("/growth/english/answer", json={
+        "pattern_id": q["answer_id"], "chosen_id": wrong_id, "elapsed_ms": 800,
+    }).json()
+
+    assert result["correct"] is False and result["grade"] == "again"
+
+
+def test_answering_in_any_track_counts_towards_the_daily_goal(english_client):
+    # 「每天」那项算的是今天练了多少英语,不该因为分了类就要答三倍。
+    q = english_client.get("/growth/english/quiz?track=collocation&count=1").json()["questions"][0]
+
+    result = english_client.post("/growth/english/answer", json={
+        "pattern_id": q["answer_id"], "chosen_id": q["answer_id"], "elapsed_ms": 800,
+    }).json()
+
+    assert result["today_progress"]["correct"] == 1
+
+
+def test_an_unknown_track_is_a_400(english_client):
+    assert english_client.get("/growth/english?track=nope").status_code == 400
+    assert english_client.get("/growth/english/quiz?track=nope").status_code == 400
+
+
+def test_the_catalog_is_scoped_to_the_requested_track(english_client):
+    data = english_client.get("/growth/english/patterns?track=oneliner").json()
+
+    assert len(data["patterns"]) == 91
+    assert all(p["track"] == "oneliner" for p in data["patterns"])

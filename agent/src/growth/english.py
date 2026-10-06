@@ -19,7 +19,17 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 
-from src.growth.english_patterns import PATTERN_BY_ID, PATTERNS, TOTAL
+from src.growth.english_patterns import (
+    PATTERN_BY_ID, PATTERNS_BY_TRACK, TRACK_TOTALS, TRACKS,
+)
+
+DEFAULT_TRACK = "frame"
+
+
+def _track_patterns(track: str) -> tuple:
+    if track not in TRACKS:
+        raise ValueError(f"未知的分类:{track}")
+    return PATTERNS_BY_TRACK[track]
 
 GRADES = ("again", "slow", "instant")
 
@@ -106,14 +116,14 @@ def set_favorite(reviews: dict, pattern_id: str, favorite: bool) -> dict:
     return {**reviews, pattern_id: entry}
 
 
-def favorites(reviews: dict) -> list[dict]:
-    """已收藏的句型,按清单顺序(也就是难度顺序)。"""
+def favorites(reviews: dict, track: str = DEFAULT_TRACK) -> list[dict]:
+    """已收藏的条目,按清单顺序(也就是难度顺序)。"""
     return [
         {
             "id": p.id, "frame": p.frame, "meaning": p.meaning,
             "group_label": p.group_label, "level_label": p.level_label,
         }
-        for p in PATTERNS
+        for p in _track_patterns(track)
         if (reviews.get(p.id) or {}).get("favorite")
     ]
 
@@ -165,21 +175,22 @@ def apply_review(reviews: dict, pattern_id: str, grade: str, today: str) -> dict
     }
 
 
-def _quiz_pool(reviews: dict) -> list:
-    """可以拿来考的句型:学习页见过的,或已经考过的。
+def _quiz_pool(reviews: dict, track: str) -> list:
+    """可以拿来考的条目:学习页见过的,或已经考过的。
 
-    都没有时退回整份清单(按难度顺序),这样第一次打开测验也能玩起来——
+    都没有时退回整条线(按难度顺序),这样第一次打开测验也能玩起来——
     边考边学,总好过一个空页面。
     """
-    known = [p for p in PATTERNS if p.id in reviews]
-    return known if len(known) >= QUIZ_OPTIONS else list(PATTERNS)
+    patterns = _track_patterns(track)
+    known = [p for p in patterns if p.id in reviews]
+    return known if len(known) >= QUIZ_OPTIONS else list(patterns)
 
 
-def pick_quiz(reviews: dict, today: str, *, count: int = 20,
+def pick_quiz(reviews: dict, today: str, *, track: str = DEFAULT_TRACK, count: int = 20,
               rng: random.Random | None = None) -> list[dict]:
-    """抽一批题。到期的优先,其余随机——重复的题面会让人开始背位置而不是背句型。"""
+    """抽一批题。到期的优先,其余随机——重复的题面会让人开始背位置而不是背内容。"""
     rng = rng or random.Random()
-    pool = _quiz_pool(reviews)
+    pool = _quiz_pool(reviews, track)
     if len(pool) < QUIZ_OPTIONS:
         return []
 
@@ -197,11 +208,23 @@ def pick_quiz(reviews: dict, today: str, *, count: int = 20,
 
     questions = []
     for answer in asked:
-        # 干扰项取同一个功能分组——不同组的两张卡一眼就能排除,考不出分辨力。
-        same_group = [p for p in pool if p.group == answer.group and p.id != answer.id]
-        others = same_group or [p for p in pool if p.id != answer.id]
-        distractor = rng.choice(others)
-        options = [answer.to_dict(), distractor.to_dict()]
+        if answer.wrong:
+            # 搭配:干扰项用中式英语的直译版。打的正是"逐词翻译"这个习惯本身,
+            # 错一次的印象远比读十遍正确答案深。
+            options = [
+                {"id": answer.id, "frame": answer.frame, "meaning": answer.meaning},
+                {"id": f"{answer.id}#wrong", "frame": rng.choice(answer.wrong),
+                 "meaning": "直译,英语里不这么说"},
+            ]
+        else:
+            # 干扰项取同一个功能分组——不同组的两张卡一眼就能排除,考不出分辨力。
+            same_group = [p for p in pool if p.group == answer.group and p.id != answer.id]
+            others = same_group or [p for p in pool if p.id != answer.id]
+            distractor = rng.choice(others)
+            options = [
+                {"id": o["id"], "frame": o["frame"], "meaning": o["meaning"]}
+                for o in (answer.to_dict(), distractor.to_dict())
+            ]
         rng.shuffle(options)
         questions.append({
             "answer_id": answer.id,
@@ -212,13 +235,13 @@ def pick_quiz(reviews: dict, today: str, *, count: int = 20,
             "cue": answer.cue,
             "group_label": answer.group_label,
             "level_label": answer.level_label,
-            "options": [{"id": o["id"], "frame": o["frame"], "meaning": o["meaning"]}
-                        for o in options],
+            "options": options,
         })
     return questions
 
 
-def build_session(reviews: dict, today: str, *, limit: int | None = None) -> list[dict]:
+def build_session(reviews: dict, today: str, *, track: str = DEFAULT_TRACK,
+                  limit: int | None = None) -> list[dict]:
     """学习页的队列:**还没看过的**句型,按清单顺序(也就是难度顺序)。
 
     于是进度天然是续着的——看过一条就记一条 ``studied``,下次打开从第一条
@@ -228,7 +251,8 @@ def build_session(reviews: dict, today: str, *, limit: int | None = None) -> lis
     得到空字符串,而空字符串比任何日期都小,于是被判成到期、永远排在最前面:
     每次打开都从第一条重新学。复习归测试页管,这一页只负责往下推。
     """
-    fresh = [p for p in PATTERNS if not (reviews.get(p.id) or {}).get("studied")]
+    fresh = [p for p in _track_patterns(track)
+             if not (reviews.get(p.id) or {}).get("studied")]
     if limit is not None:
         fresh = fresh[:limit]
     return [
@@ -238,14 +262,17 @@ def build_session(reviews: dict, today: str, *, limit: int | None = None) -> lis
     ]
 
 
-def stats(reviews: dict, today: str) -> dict:
-    """进度总览。``automatic`` 是真正要追的那个数字。"""
+def stats(reviews: dict, today: str, track: str = DEFAULT_TRACK) -> dict:
+    """某条线的进度总览。"""
+    mine = {p.id for p in _track_patterns(track)}
+    reviews = {k: v for k, v in reviews.items() if k in mine}
     tested = [e for e in reviews.values() if int(e.get("seen", 0)) > 0]
     boxes = [int(e.get("box", 0)) for e in tested]
     right = sum(int(e.get("right", 0)) for e in tested)
     wrong = sum(int(e.get("wrong", 0)) for e in tested)
     return {
-        "total": TOTAL,
+        "track": track,
+        "total": TRACK_TOTALS[track],
         "started": len(reviews),
         "favorites": sum(1 for e in reviews.values() if e.get("favorite")),
         "tested": len(tested),

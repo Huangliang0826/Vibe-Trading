@@ -41,7 +41,7 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
   );
 }
 
-export function EnglishQuiz() {
+export function EnglishQuiz({ track }: { track: string }) {
   const [questions, setQuestions] = useState<EnglishQuizQuestion[] | null>(null);
   const [stats, setStats] = useState<EnglishStats | null>(null);
   const [today, setToday] = useState<GrowthEnglishProgress | null>(null);
@@ -55,7 +55,7 @@ export function EnglishQuiz() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api.getEnglishQuiz(BATCH);
+      const data = await api.getEnglishQuiz(track, BATCH);
       setQuestions(data.questions);
       setStats(data.stats);
       setToday(data.today_progress);

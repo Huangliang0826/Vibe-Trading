@@ -21,7 +21,16 @@ from dataclasses import dataclass
 #: 难度级别。新句型按这个顺序引入:先把基础的练顺,再往上加。
 LEVELS = {"core": "基础", "mid": "中级", "high": "高级"}
 
-GROUPS = {
+#: 三条并列的训练线,失败方式各不相同,所以进度分开统计:
+#:
+#: * **句型**要接自己的内容,用错只是话接不顺;
+#: * **整句**拿来即用,不会就是接不上话;
+#: * **搭配**嵌在句子里,用错语法完全正确,但一听就不是母语者。
+TRACKS = {"frame": "句型", "oneliner": "整句", "collocation": "搭配"}
+
+#: 分组按交际功能,但**每条线的功能不一样**:句型/整句是按"我现在想干什么"
+#: 分的,搭配是按"我在说哪件事"分的。共用一张表会让搭配顶着句型的标签。
+_TALK_GROUPS = {
     "A": "缓和与委婉",
     "B": "观点与立场",
     "C": "解释与澄清",
@@ -30,6 +39,23 @@ GROUPS = {
     "F": "条件与推测",
     "G": "互动与回应",
     "H": "话语组织",
+}
+
+_SCENE_GROUPS = {
+    "A": "日常起居",
+    "B": "时间与安排",
+    "C": "工作与协作",
+    "D": "沟通与社交",
+    "E": "想法与决定",
+    "F": "问题与麻烦",
+    "G": "学习与进步",
+    "H": "身体与状态",
+}
+
+GROUPS = {
+    "frame": _TALK_GROUPS,
+    "oneliner": _TALK_GROUPS,
+    "collocation": _SCENE_GROUPS,
 }
 
 
@@ -43,14 +69,21 @@ class Pattern:
     #: 中文情境提示。练习时只显示这个,英文要自己产出。
     cue: str
     examples: tuple[str, ...]
+    track: str = "frame"
+    #: 中式英语的直译版,用作测验干扰项。只有搭配才有。
+    wrong: tuple[str, ...] = ()
 
     @property
     def group_label(self) -> str:
-        return GROUPS[self.group]
+        return GROUPS[self.track][self.group]
 
     @property
     def level_label(self) -> str:
         return LEVELS[self.level]
+
+    @property
+    def track_label(self) -> str:
+        return TRACKS[self.track]
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +91,7 @@ class Pattern:
             "group_label": self.group_label, "level": self.level,
             "level_label": self.level_label, "meaning": self.meaning,
             "cue": self.cue, "examples": list(self.examples),
+            "track": self.track, "track_label": self.track_label,
         }
 
 
@@ -479,21 +513,69 @@ _RAW: tuple[tuple, ...] = (
 )
 
 
+from src.growth.english_collocations import _RAW_COLLOCATIONS  # noqa: E402
+from src.growth.english_oneliners import _RAW_ONELINERS  # noqa: E402
 from src.growth.english_patterns_more import _RAW_HIGH, _RAW_MID  # noqa: E402
+
+
+def _track_of(frame: str) -> str:
+    """省略号就是分界:有空位要填的是句型,没有的本身就是一句完整的话。
+
+    原来那 200 条里有 48 条属于后者(``That makes sense.``、``No worries.``),
+    一直混在句型里。按这条规则自动归位,id 不变,练习进度照旧。
+    """
+    return "frame" if "…" in frame else "oneliner"
 
 
 def _build(raw: tuple[tuple, ...], level: str) -> list[Pattern]:
     return [
-        Pattern(id=i, frame=f, group=g, level=level, meaning=m, cue=c, examples=tuple(e))
+        Pattern(id=i, frame=f, group=g, level=level, meaning=m, cue=c,
+                examples=tuple(e), track=_track_of(f))
         for i, f, g, m, c, e in raw
     ]
 
 
-#: 顺序即引入顺序:基础 → 中级 → 高级。新句型按这个顺序发,所以难度自然递进。
-PATTERNS: tuple[Pattern, ...] = tuple(
+def _build_oneliners(raw: tuple[tuple, ...]) -> list[Pattern]:
+    return [
+        Pattern(id=i, frame=f, group=g, level=lv, meaning=m, cue=c,
+                examples=tuple(e), track="oneliner")
+        for i, f, g, lv, m, c, e in raw
+    ]
+
+
+def _build_collocations(raw: tuple[tuple, ...]) -> list[Pattern]:
+    """搭配自带难度,也自带中式英语的错误版。
+
+    """
+    return [
+        Pattern(id=i, frame=f, group=g, level=lv, meaning=m, cue=c,
+                examples=tuple(e), track="collocation", wrong=tuple(w))
+        for i, f, g, lv, m, c, e, w in raw
+    ]
+
+
+_ALL = (
     _build(_RAW, "core") + _build(_RAW_MID, "mid") + _build(_RAW_HIGH, "high")
+    + _build_oneliners(_RAW_ONELINERS)
+    + _build_collocations(_RAW_COLLOCATIONS)
 )
 
+#: 每条线内部按难度排序。清单顺序就是引入顺序,不排的话第一天就会撞上高级内容;
+#: 整句那条线尤其需要——它由两批来源拼成(迁移过来的 + 新写的),天然是乱的。
+_LEVEL_ORDER = list(LEVELS)
+PATTERNS_BY_TRACK: dict[str, tuple[Pattern, ...]] = {
+    track: tuple(sorted((p for p in _ALL if p.track == track),
+                        key=lambda p: _LEVEL_ORDER.index(p.level)))
+    for track in TRACKS
+}
+
+PATTERNS: tuple[Pattern, ...] = tuple(
+    p for track in TRACKS for p in PATTERNS_BY_TRACK[track]
+)
 PATTERN_BY_ID = {p.id: p for p in PATTERNS}
 TOTAL = len(PATTERNS)
-LEVEL_TOTALS = {key: sum(1 for p in PATTERNS if p.level == key) for key in LEVELS}
+TRACK_TOTALS = {track: len(items) for track, items in PATTERNS_BY_TRACK.items()}
+LEVEL_TOTALS = {
+    track: {key: sum(1 for p in items if p.level == key) for key in LEVELS}
+    for track, items in PATTERNS_BY_TRACK.items()
+}

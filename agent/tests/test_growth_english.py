@@ -8,26 +8,46 @@ from src.growth.english import (
     new_reviews, pick_quiz, record_answer, set_favorite, stats,
 )
 from src.growth.english_patterns import (
-    GROUPS, LEVEL_TOTALS, LEVELS, PATTERN_BY_ID, PATTERNS, TOTAL,
+    GROUPS, LEVELS, PATTERN_BY_ID, PATTERNS, PATTERNS_BY_TRACK, TOTAL,
+    TRACK_TOTALS, TRACKS,
 )
+
+FRAMES = PATTERNS_BY_TRACK["frame"]
 
 TODAY = "2026-10-05"
 
 
 # ── 内容清单 ──────────────────────────────────────────────────────────────────
 
-def test_the_catalog_has_all_three_levels_with_unique_ids():
-    # ID 是复习进度的主键,重复会让两条句型共用一份记录。
-    assert LEVEL_TOTALS == {"core": 100, "mid": 50, "high": 50}
-    assert TOTAL == 200
-    assert len(PATTERN_BY_ID) == 200
+def test_the_catalog_has_three_tracks_with_unique_ids():
+    # ID 是复习进度的主键,重复会让两条内容共用一份记录。
+    assert set(TRACKS) == {"frame", "oneliner", "collocation"}
+    assert sum(TRACK_TOTALS.values()) == TOTAL
+    assert len(PATTERN_BY_ID) == TOTAL
 
 
-def test_new_patterns_are_introduced_easiest_first():
-    # 新句型按清单顺序发,所以顺序本身就是难度梯度。
-    levels = [p.level for p in PATTERNS]
+def test_each_track_is_introduced_easiest_first():
+    # 新内容按清单顺序发,所以每条线内部的顺序就是难度梯度。
+    for track, items in PATTERNS_BY_TRACK.items():
+        levels = [p.level for p in items]
+        assert levels == sorted(levels, key=["core", "mid", "high"].index), track
 
-    assert levels == sorted(levels, key=["core", "mid", "high"].index)
+
+def test_a_frame_has_a_slot_and_a_one_liner_does_not():
+    # 省略号就是两条线的分界:有空位要填的是句型,没有的本身就是一句完整的话。
+    assert all("…" in p.frame for p in PATTERNS_BY_TRACK["frame"])
+    assert all("…" not in p.frame for p in PATTERNS_BY_TRACK["oneliner"])
+
+
+def test_every_collocation_carries_a_chinglish_distractor():
+    for p in PATTERNS_BY_TRACK["collocation"]:
+        assert p.wrong, p.id
+        assert p.frame not in p.wrong, p.id
+
+
+def test_only_collocations_carry_wrong_versions():
+    for track in ("frame", "oneliner"):
+        assert all(not p.wrong for p in PATTERNS_BY_TRACK[track]), track
 
 
 def test_every_pattern_carries_what_the_drill_needs():
@@ -37,7 +57,7 @@ def test_every_pattern_carries_what_the_drill_needs():
         # 没有中文情境提示就只能看着英文念,那是识别不是产出。
         assert p.cue.strip(), p.id
         assert len(p.examples) >= 2, p.id
-        assert p.group in GROUPS, p.id
+        assert p.group in GROUPS[p.track], p.id
         assert p.level in LEVELS, p.id
 
 
@@ -125,12 +145,14 @@ def test_review_rejects_an_unknown_pattern_or_grade():
 
 # ── 进度 ──────────────────────────────────────────────────────────────────────
 
-def test_stats_report_progress_towards_the_whole_catalog():
+def test_stats_report_progress_within_one_track():
     reviews = apply_review(new_reviews(), "the-thing-is", "instant", TODAY)
 
     s = stats(reviews, TODAY)
 
-    assert s["total"] == TOTAL and s["started"] == 1 and s["automatic"] == 0
+    assert s["total"] == TRACK_TOTALS["frame"] and s["started"] == 1
+    # 另一条线的进度不该被算进来。
+    assert stats(reviews, TODAY, "collocation")["started"] == 0
     assert s["reviewed_today"] == 1
 
 
@@ -379,35 +401,59 @@ def test_an_answer_advances_the_box_and_the_daily_tally_together():
 
 # ── 学习页的队列:进度要续得上 ────────────────────────────────────────────────
 
-def test_the_first_session_offers_the_whole_catalog():
+def test_the_first_session_offers_the_whole_track():
     session = build_session(new_reviews(), TODAY)
 
-    assert len(session) == TOTAL
-    assert session[0]["id"] == PATTERNS[0].id
+    assert len(session) == TRACK_TOTALS["frame"]
+    assert session[0]["id"] == FRAMES[0].id
+
+
+def test_each_track_has_its_own_queue():
+    reviews = mark_studied(new_reviews(), FRAMES[0].id, TODAY)
+
+    assert len(build_session(reviews, TODAY, track="frame")) == TRACK_TOTALS["frame"] - 1
+    # 在句型里看过一条,不该让搭配那条线少一条。
+    assert len(build_session(reviews, TODAY, track="collocation")) == TRACK_TOTALS["collocation"]
+
+
+def test_a_collocation_question_is_answered_against_its_chinglish_version():
+    q = pick_quiz(new_reviews(), TODAY, track="collocation", count=1, rng=_rng())[0]
+    answer = PATTERN_BY_ID[q["answer_id"]]
+
+    wrong = next(o for o in q["options"] if o["id"] != q["answer_id"])
+    assert wrong["frame"] in answer.wrong
+    assert wrong["meaning"] == "直译,英语里不这么说"
+
+
+def test_an_unknown_track_is_rejected():
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="未知的分类"):
+        build_session(new_reviews(), TODAY, track="nope")
 
 
 def test_studied_patterns_drop_out_so_the_next_visit_resumes():
     # 这是"每次打开都从第一条重新学"的那个 bug:看过的条目没有 due 字段,
     # 默认空串比任何日期都小,于是被判成到期、永远排在最前面。
     reviews = new_reviews()
-    for pattern in PATTERNS[:3]:
+    for pattern in FRAMES[:3]:
         reviews = mark_studied(reviews, pattern.id, TODAY)
 
     session = build_session(reviews, TODAY)
 
-    assert len(session) == TOTAL - 3
-    assert session[0]["id"] == PATTERNS[3].id
+    assert len(session) == TRACK_TOTALS["frame"] - 3
+    assert session[0]["id"] == FRAMES[3].id
 
 
 def test_a_quizzed_pattern_still_shows_up_until_it_has_been_read():
     # 考过不等于在学习页看过;只有 studied 才让它退出队列。
-    reviews = apply_review(new_reviews(), PATTERNS[0].id, "instant", TODAY)
+    reviews = apply_review(new_reviews(), FRAMES[0].id, "instant", TODAY)
 
-    assert build_session(reviews, TODAY)[0]["id"] == PATTERNS[0].id
+    assert build_session(reviews, TODAY)[0]["id"] == FRAMES[0].id
 
 
 def test_the_session_keeps_the_catalog_order_so_difficulty_still_ramps():
-    reviews = mark_studied(new_reviews(), PATTERNS[5].id, TODAY)
+    reviews = mark_studied(new_reviews(), FRAMES[5].id, TODAY)
 
     levels = [item["level"] for item in build_session(reviews, TODAY)]
 
@@ -416,7 +462,7 @@ def test_the_session_keeps_the_catalog_order_so_difficulty_still_ramps():
 
 def test_the_session_is_empty_once_everything_has_been_read():
     reviews = new_reviews()
-    for pattern in PATTERNS:
+    for pattern in FRAMES:
         reviews = mark_studied(reviews, pattern.id, TODAY)
 
     assert build_session(reviews, TODAY) == []
@@ -425,10 +471,20 @@ def test_the_session_is_empty_once_everything_has_been_read():
 def test_a_pattern_that_is_merely_studied_is_not_treated_as_due_by_the_quiz():
     # 同一个默认值陷阱也在测验里:它会让看过但没考过的条目永远霸占队首。
     reviews = new_reviews()
-    for pattern in PATTERNS[:30]:
+    for pattern in FRAMES[:30]:
         reviews = mark_studied(reviews, pattern.id, TODAY)
-    reviews = apply_review(reviews, PATTERNS[50].id, "again", TODAY)  # 真正到期的
+    reviews = apply_review(reviews, FRAMES[50].id, "again", TODAY)  # 真正到期的
 
     asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, count=1, rng=_rng())]
 
-    assert asked == [PATTERNS[50].id]
+    assert asked == [FRAMES[50].id]
+
+
+def test_each_track_labels_its_groups_in_its_own_terms():
+    # 句型按"我现在想干什么"分组,搭配按"我在说哪件事"分组。共用一张表会让
+    # turn on the light 顶着「缓和与委婉」的标签。
+    frame = next(p for p in PATTERNS_BY_TRACK["frame"] if p.group == "A")
+    collocation = next(p for p in PATTERNS_BY_TRACK["collocation"] if p.group == "A")
+
+    assert frame.group_label == "缓和与委婉"
+    assert collocation.group_label == "日常起居"

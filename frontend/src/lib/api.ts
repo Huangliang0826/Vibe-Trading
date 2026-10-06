@@ -230,6 +230,9 @@ export interface EnglishPattern {
   /** core 基础 / mid 中级 / high 高级 */
   level: string;
   level_label: string;
+  /** frame 句型 / oneliner 整句 / collocation 搭配 */
+  track: string;
+  track_label: string;
   meaning: string;
   /** 中文情境提示——练习时只给这个,英文要自己产出 */
   cue: string;
@@ -258,8 +261,16 @@ export interface EnglishStats {
   box_counts: Record<string, number>;
 }
 
+export interface EnglishTrack {
+  key: string;
+  label: string;
+  total: number;
+}
+
 export interface EnglishState {
   today: string;
+  track: string;
+  tracks: EnglishTrack[];
   today_progress: GrowthEnglishProgress;
   daily_goal: number;
   session: EnglishPattern[];
@@ -634,7 +645,8 @@ export const api = {
       body: JSON.stringify({ domain, which, value }),
     }),
   resetGrowth: () => request<{ configured: boolean }>("/growth/reset", { method: "POST" }),
-  getEnglish: () => request<EnglishState>("/growth/english"),
+  getEnglish: (track = "frame") =>
+    request<EnglishState>(`/growth/english?track=${track}`),
   // 学习页只记接触,不打分;打分一律走测验。
   markEnglishStudied: (pattern_id: string) =>
     request<EnglishState>("/growth/english/studied", {
@@ -646,26 +658,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ pattern_id, favorite }),
     }),
-  getEnglishQuiz: (count = 20) =>
+  getEnglishQuiz: (track = "frame", count = 20) =>
     request<{
       questions: EnglishQuizQuestion[];
       options_per_question: number;
       fast_ms: number;
       stats: EnglishStats;
       today_progress: GrowthEnglishProgress;
-    }>(`/growth/english/quiz?count=${count}`),
+    }>(`/growth/english/quiz?track=${track}&count=${count}`),
   answerEnglishQuiz: (pattern_id: string, chosen_id: string, elapsed_ms: number) =>
     request<EnglishAnswerResult>("/growth/english/answer", {
       method: "POST",
       body: JSON.stringify({ pattern_id, chosen_id, elapsed_ms }),
     }),
-  getEnglishPatterns: () =>
+  getEnglishPatterns: (track = "frame") =>
     request<{
       groups: { key: string; label: string }[];
       levels: { key: string; label: string; total: number }[];
       patterns: EnglishPattern[];
-    }>("/growth/english/patterns"),
-  resetEnglish: () => request<EnglishState>("/growth/english/reset", { method: "POST" }),
+    }>(`/growth/english/patterns?track=${track}`),
+  resetEnglish: (track = "frame") =>
+    request<EnglishState>(`/growth/english/reset?track=${track}`, { method: "POST" }),
 
   getNewsCenterDates: () => request<string[]>("/news-center/dates"),
   getNewsCenterArticles: (filters: NewsCenterFilters = {}) => {

@@ -23,12 +23,15 @@ from src.growth.plan import (
     DomainIntake, Intake, fallback_plan, generate_domain_plan,
 )
 from src.growth.english import (
-    DAILY_GOAL, FAST_MS, QUIZ_OPTIONS, build_session, english_days, english_today,
-    favorites, mark_studied, pick_quiz, record_answer, set_favorite, stats,
+    DAILY_GOAL, DEFAULT_TRACK, FAST_MS, QUIZ_OPTIONS, build_session, english_days,
+    english_today, favorites, mark_studied, pick_quiz, record_answer, set_favorite,
+    stats,
 )
 # 别名:``LEVELS`` 在 plan 里是每个领域的起点选项,同名导入会把它整个盖掉。
 from src.growth.english_patterns import LEVELS as ENGLISH_LEVELS
-from src.growth.english_patterns import GROUPS, LEVEL_TOTALS, PATTERNS
+from src.growth.english_patterns import (
+    GROUPS, LEVEL_TOTALS, PATTERN_BY_ID, PATTERNS_BY_TRACK, TRACK_TOTALS, TRACKS,
+)
 from src.growth.progress import build_overview
 from src.growth.store import (
     apply_checkin, clear_english, clear_state, empty_english, new_state,
@@ -261,40 +264,57 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         clear_state()
         return {"configured": False}
 
-    # ── 英语句型 ──────────────────────────────────────────────────────────────
+    # ── 英语:句型 / 整句 / 搭配 三条线 ───────────────────────────────────────
 
-    def _english_payload(doc: dict) -> dict:
+    def _tracks() -> list[dict]:
+        return [{"key": k, "label": v, "total": TRACK_TOTALS[k]} for k, v in TRACKS.items()]
+
+    def _levels(track: str) -> list[dict]:
+        return [{"key": k, "label": v, "total": LEVEL_TOTALS[track][k]}
+                for k, v in ENGLISH_LEVELS.items()]
+
+    def _require_track(track: str) -> str:
+        if track not in TRACKS:
+            raise HTTPException(status_code=400, detail=f"未知的分类:{track}")
+        return track
+
+    def _track_of(pattern_id: str) -> str:
+        """按 id 操作的端点不带分类参数,从条目本身取——返回体要是当前这条线的进度。"""
+        pattern = PATTERN_BY_ID.get(pattern_id)
+        return pattern.track if pattern else DEFAULT_TRACK
+
+    def _english_payload(doc: dict, track: str = DEFAULT_TRACK) -> dict:
         today = _today()
         reviews = doc.get("reviews") or {}
         return {
             "today": today,
-            "session": build_session(reviews, today),
-            "stats": stats(reviews, today),
+            "track": track,
+            "tracks": _tracks(),
+            "session": build_session(reviews, today, track=track),
+            "stats": stats(reviews, today, track),
             "today_progress": english_today(doc, today),
             "daily_goal": DAILY_GOAL,
-            "favorites": favorites(reviews),
+            "favorites": favorites(reviews, track),
             "fast_ms": FAST_MS,
-            "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
-            "levels": _levels(),
+            "groups": [{"key": k, "label": v} for k, v in GROUPS[track].items()],
+            "levels": _levels(track),
         }
 
-    def _levels() -> list[dict]:
-        return [{"key": k, "label": v, "total": LEVEL_TOTALS[k]} for k, v in ENGLISH_LEVELS.items()]
-
     @router.get("/english")
-    async def english():
-        """今天要练的条目 + 进度。整份 100 条清单由 /english/patterns 单独给。"""
-        return _english_payload(read_english())
+    async def english(track: str = Query(DEFAULT_TRACK, max_length=16)):
+        """今天要练的条目 + 进度。整份清单由 /english/patterns 单独给。"""
+        return _english_payload(read_english(), _require_track(track))
 
     @router.get("/english/patterns")
-    async def english_patterns():
+    async def english_patterns(track: str = Query(DEFAULT_TRACK, max_length=16)):
+        _require_track(track)
         reviews = read_english().get("reviews") or {}
         return {
-            "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
-            "levels": _levels(),
+            "groups": [{"key": k, "label": v} for k, v in GROUPS[track].items()],
+            "levels": _levels(track),
             "patterns": [
                 {**p.to_dict(), "box": int((reviews.get(p.id) or {}).get("box", -1))}
-                for p in PATTERNS
+                for p in PATTERNS_BY_TRACK[track]
             ],
         }
 
@@ -306,7 +326,8 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             reviews = mark_studied(doc.get("reviews") or {}, payload.pattern_id, _today())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _english_payload(write_english({**doc, "reviews": reviews}))
+        return _english_payload(write_english({**doc, "reviews": reviews}),
+                                _track_of(payload.pattern_id))
 
     @router.post("/english/favorite")
     async def english_favorite(payload: FavoriteRequest):
@@ -315,18 +336,22 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             reviews = set_favorite(doc.get("reviews") or {}, payload.pattern_id, payload.favorite)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _english_payload(write_english({**doc, "reviews": reviews}))
+        return _english_payload(write_english({**doc, "reviews": reviews}),
+                                _track_of(payload.pattern_id))
 
     @router.get("/english/quiz")
-    async def english_quiz(count: int = Query(20, ge=1, le=100)):
+    async def english_quiz(count: int = Query(20, ge=1, le=100),
+                           track: str = Query(DEFAULT_TRACK, max_length=16)):
         """抽一批两选一的题。"""
+        _require_track(track)
         doc = read_english()
         reviews = doc.get("reviews") or {}
         return {
-            "questions": pick_quiz(reviews, _today(), count=count),
+            "questions": pick_quiz(reviews, _today(), track=track, count=count),
             "options_per_question": QUIZ_OPTIONS,
             "fast_ms": FAST_MS,
-            "stats": stats(reviews, _today()),
+            "track": track,
+            "stats": stats(reviews, _today(), track),
             "today_progress": english_today(doc, _today()),
         }
 
@@ -344,13 +369,13 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         return {
             "correct": correct,
             "grade": (doc["reviews"][payload.pattern_id] or {}).get("last_grade", ""),
-            "stats": stats(doc["reviews"], today),
+            "stats": stats(doc["reviews"], today, _track_of(payload.pattern_id)),
             "today_progress": english_today(doc, today),
         }
 
     @router.post("/english/reset")
-    async def english_reset():
+    async def english_reset(track: str = Query(DEFAULT_TRACK, max_length=16)):
         clear_english()
-        return _english_payload(empty_english())
+        return _english_payload(empty_english(), _require_track(track))
 
     app.include_router(router)

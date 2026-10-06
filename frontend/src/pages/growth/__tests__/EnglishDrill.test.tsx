@@ -25,6 +25,8 @@ const pattern = (id: string, status: "new" | "review") => ({
   group_label: "缓和与委婉",
   level: "core",
   level_label: "基础",
+  track: "frame",
+  track_label: "句型",
   meaning: `释义 ${id}`,
   cue: `情境 ${id}`,
   examples: [`example one ${id}`, `example two ${id}`],
@@ -36,6 +38,8 @@ const pattern = (id: string, status: "new" | "review") => ({
 
 const state = (overrides = {}) => ({
   today: "2026-10-06",
+  track: "frame",
+  tracks: [{ key: "frame", label: "句型", total: 152 }],
   session: [pattern("a", "new"), pattern("b", "new")],
   stats: {
     total: 200, started: 0, tested: 0, accuracy: null, favorites: 0,
@@ -71,13 +75,13 @@ describe("学习页记录接触", () => {
   it("新句型一显示就记为学过", async () => {
     // 回归:之前只在点「看答案」时上报,而新句型一上来就是展开的,那个按钮
     // 根本不渲染——没练过的句型状态全是 new,等于一条都记不上。
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
 
     await waitFor(() => expect(markEnglishStudied).toHaveBeenCalledWith("a"));
   });
 
   it("翻到下一条时记录下一条", async () => {
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.click(screen.getByRole("button", { name: /下一句/ }));
@@ -86,7 +90,7 @@ describe("学习页记录接触", () => {
   });
 
   it("同一张卡不会重复上报", async () => {
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
     await waitFor(() => expect(markEnglishStudied).toHaveBeenCalledWith("a"));
 
     const calls = markEnglishStudied.mock.calls.filter(([id]) => id === "a").length;
@@ -94,7 +98,7 @@ describe("学习页记录接触", () => {
   });
 
   it("用返回的统计刷新计数,不必重新加载页面", async () => {
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
 
     // "学过" 的数字来自每次上报的响应。
     await waitFor(() => expect(screen.getByText("1")).toBeInTheDocument());
@@ -103,7 +107,7 @@ describe("学习页记录接触", () => {
 
 describe("收藏与键盘", () => {
   it("收藏按钮把当前句式标记为已收藏", async () => {
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.click(screen.getByRole("button", { name: /收藏/ }));
@@ -112,7 +116,7 @@ describe("收藏与键盘", () => {
   });
 
   it("收藏状态立刻反映在按钮上,不等往返", async () => {
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.click(screen.getByRole("button", { name: /收藏/ }));
@@ -123,7 +127,7 @@ describe("收藏与键盘", () => {
   });
 
   it("按向右键翻到下一句", async () => {
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.keyboard("{ArrowRight}");
@@ -136,7 +140,7 @@ describe("收藏与键盘", () => {
     render(
       <>
         <input aria-label="测试输入" />
-        <EnglishDrill />
+        <EnglishDrill track="frame" />
       </>,
     );
     await screen.findByText("frame a");
@@ -152,7 +156,7 @@ describe("向右键的健壮性", () => {
   it("事件目标不是元素时也不会把快捷键打死", async () => {
     // window / document 上派发的 keydown 其 target 没有 closest;
     // 当成元素直接调用会抛错,整个快捷键就静默失效了。
-    render(<EnglishDrill />);
+    render(<EnglishDrill track="frame" />);
     await screen.findByText("frame a");
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
