@@ -3,6 +3,8 @@
  *  内容一次摊开,没有"先猜再翻"这一步。检索练习归「测试」页——那里是客观
  *  作答、会计时、会推进复习盒子。在这一页藏答案只是多一次点击:反正点开就看,
  *  也没人判你猜得对不对。
+ *
+ *  队列是"还没看过的,按清单顺序",所以下次打开自然接着上次往下走。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -289,15 +291,10 @@ export function EnglishDrill() {
       ) : (
         <div className="space-y-2 rounded-2xl border bg-card p-6 text-center">
           <Sparkles className="mx-auto h-5 w-5 text-primary" />
-          <p className="text-[15px] font-medium">这一轮都看完了</p>
+          <p className="text-[15px] font-medium">
+            {stats.started >= stats.total ? "全部看完了" : "这一批看完了"}
+          </p>
           <p className="text-sm text-muted-foreground">去「测试」考一遍,记住没记住那里说了算。</p>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="mt-1 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15"
-          >
-            再看一轮
-          </button>
         </div>
       )}
 

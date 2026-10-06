@@ -4,8 +4,8 @@ import pytest
 
 from src.growth.english import (
     DAILY_GOAL, FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session,
-    english_days, english_today, favorites, grade_for_answer, introduced_today,
-    mark_studied, new_reviews, pick_quiz, record_answer, set_favorite, stats,
+    english_days, english_today, favorites, grade_for_answer, mark_studied,
+    new_reviews, pick_quiz, record_answer, set_favorite, stats,
 )
 from src.growth.english_patterns import (
     GROUPS, LEVEL_TOTALS, LEVELS, PATTERN_BY_ID, PATTERNS, TOTAL,
@@ -121,74 +121,6 @@ def test_review_rejects_an_unknown_pattern_or_grade():
         apply_review(new_reviews(), "nope", "instant", TODAY)
     with pytest.raises(ValueError, match="评分"):
         apply_review(new_reviews(), "the-thing-is", "perfect", TODAY)
-
-
-# ── 每日练习的组成 ────────────────────────────────────────────────────────────
-
-def test_the_first_session_offers_the_whole_catalog_when_unlimited():
-    # 每天学多少由自己定,所以默认不设上限。
-    session = build_session(new_reviews(), TODAY)
-
-    assert len(session) == TOTAL
-    assert {item["status"] for item in session} == {"new"}
-
-
-def test_caps_still_apply_when_asked_for_explicitly():
-    session = build_session(new_reviews(), TODAY, new_per_day=8, limit=20)
-
-    assert len(session) == 8
-
-
-def test_an_unlimited_session_still_puts_due_reviews_first():
-    reviews = new_reviews()
-    for pid in list(PATTERN_BY_ID)[:5]:
-        reviews = apply_review(reviews, pid, "again", TODAY)
-
-    session = build_session(reviews, TODAY)
-
-    assert [item["status"] for item in session[:5]] == ["review"] * 5
-    assert len(session) == TOTAL
-
-
-def test_due_reviews_come_before_new_material():
-    # 积压的复习才是记忆真正流失的地方,新鲜感不该排在它前面。
-    reviews = new_reviews()
-    for pid in list(PATTERN_BY_ID)[:5]:
-        reviews = apply_review(reviews, pid, "again", TODAY)
-
-    session = build_session(reviews, TODAY, new_per_day=8, limit=6)
-
-    assert [item["status"] for item in session[:5]] == ["review"] * 5
-    assert len(session) == 6
-
-
-def test_new_material_stops_once_the_daily_budget_is_used_up():
-    reviews = new_reviews()
-    for pid in list(PATTERN_BY_ID)[:8]:
-        reviews = apply_review(reviews, pid, "instant", TODAY)
-
-    assert introduced_today(reviews, TODAY) == 8
-    # 显式设了额度就按额度来,用完当天只剩到期的复习。
-    session = build_session(reviews, TODAY, new_per_day=8, limit=20)
-    assert all(item["status"] == "review" for item in session)
-
-
-def test_the_budget_refreshes_the_next_day():
-    reviews = new_reviews()
-    for pid in list(PATTERN_BY_ID)[:8]:
-        reviews = apply_review(reviews, pid, "instant", TODAY)
-
-    session = build_session(reviews, "2026-10-06", new_per_day=8, limit=20)
-
-    assert any(item["status"] == "new" for item in session)
-
-
-def test_a_pattern_scheduled_for_later_stays_out_of_todays_session():
-    reviews = apply_review(new_reviews(), "the-thing-is", "instant", TODAY)
-
-    session = build_session(reviews, TODAY, new_per_day=0, limit=20)
-
-    assert session == []
 
 
 # ── 进度 ──────────────────────────────────────────────────────────────────────
@@ -443,3 +375,60 @@ def test_an_answer_advances_the_box_and_the_daily_tally_together():
 
     assert doc["reviews"]["the-thing-is"]["box"] == 1
     assert doc["daily"][TODAY]["correct"] == 1
+
+
+# ── 学习页的队列:进度要续得上 ────────────────────────────────────────────────
+
+def test_the_first_session_offers_the_whole_catalog():
+    session = build_session(new_reviews(), TODAY)
+
+    assert len(session) == TOTAL
+    assert session[0]["id"] == PATTERNS[0].id
+
+
+def test_studied_patterns_drop_out_so_the_next_visit_resumes():
+    # 这是"每次打开都从第一条重新学"的那个 bug:看过的条目没有 due 字段,
+    # 默认空串比任何日期都小,于是被判成到期、永远排在最前面。
+    reviews = new_reviews()
+    for pattern in PATTERNS[:3]:
+        reviews = mark_studied(reviews, pattern.id, TODAY)
+
+    session = build_session(reviews, TODAY)
+
+    assert len(session) == TOTAL - 3
+    assert session[0]["id"] == PATTERNS[3].id
+
+
+def test_a_quizzed_pattern_still_shows_up_until_it_has_been_read():
+    # 考过不等于在学习页看过;只有 studied 才让它退出队列。
+    reviews = apply_review(new_reviews(), PATTERNS[0].id, "instant", TODAY)
+
+    assert build_session(reviews, TODAY)[0]["id"] == PATTERNS[0].id
+
+
+def test_the_session_keeps_the_catalog_order_so_difficulty_still_ramps():
+    reviews = mark_studied(new_reviews(), PATTERNS[5].id, TODAY)
+
+    levels = [item["level"] for item in build_session(reviews, TODAY)]
+
+    assert levels == sorted(levels, key=["core", "mid", "high"].index)
+
+
+def test_the_session_is_empty_once_everything_has_been_read():
+    reviews = new_reviews()
+    for pattern in PATTERNS:
+        reviews = mark_studied(reviews, pattern.id, TODAY)
+
+    assert build_session(reviews, TODAY) == []
+
+
+def test_a_pattern_that_is_merely_studied_is_not_treated_as_due_by_the_quiz():
+    # 同一个默认值陷阱也在测验里:它会让看过但没考过的条目永远霸占队首。
+    reviews = new_reviews()
+    for pattern in PATTERNS[:30]:
+        reviews = mark_studied(reviews, pattern.id, TODAY)
+    reviews = apply_review(reviews, PATTERNS[50].id, "again", TODAY)  # 真正到期的
+
+    asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, count=1, rng=_rng())]
+
+    assert asked == [PATTERNS[50].id]

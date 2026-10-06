@@ -270,9 +270,6 @@ export interface EnglishState {
   }[];
   /** 答得多快才算"脱口而出"(毫秒) */
   fast_ms: number;
-  /** null 表示不限量 */
-  new_per_day: number | null;
-  session_limit: number | null;
   groups: { key: string; label: string }[];
   levels: { key: string; label: string; total: number }[];
 }

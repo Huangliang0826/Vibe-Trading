@@ -38,10 +38,6 @@ MAX_BOX = len(INTERVALS) - 1
 #: 一个能看见进度、也能真的在几分钟内达成的数,比"练一会儿"这种说法可执行。
 DAILY_GOAL = 10
 
-#: 每天引入多少新句型、单轮练多少条,都不设上限(``None``)——想练多少练多少。
-#: 两个参数保留下来是因为顺序仍然有意义:到期的复习永远排在新内容前面。
-NEW_PER_DAY: int | None = None
-SESSION_LIMIT: int | None = None
 
 
 def _add_days(day: str, n: int) -> str:
@@ -188,8 +184,10 @@ def pick_quiz(reviews: dict, today: str, *, count: int = 20,
         return []
 
     def is_due(p) -> bool:
-        entry = reviews.get(p.id)
-        return bool(entry) and str(entry.get("due", "")) <= today
+        # 必须真的有 due 才算到期。缺字段时取默认空串会比任何日期都小,
+        # 把"只是看过、还没考过"的条目误判成到期。
+        due = (reviews.get(p.id) or {}).get("due")
+        return bool(due) and str(due) <= today
 
     due_now = [p for p in pool if is_due(p)]
     rest = [p for p in pool if not is_due(p)]
@@ -220,40 +218,20 @@ def pick_quiz(reviews: dict, today: str, *, count: int = 20,
     return questions
 
 
-def introduced_today(reviews: dict, today: str) -> int:
-    return sum(1 for e in reviews.values() if e.get("first") == today)
+def build_session(reviews: dict, today: str, *, limit: int | None = None) -> list[dict]:
+    """学习页的队列:**还没看过的**句型,按清单顺序(也就是难度顺序)。
 
+    于是进度天然是续着的——看过一条就记一条 ``studied``,下次打开从第一条
+    没看过的开始。
 
-def build_session(reviews: dict, today: str, *, new_per_day: int | None = NEW_PER_DAY,
-                  limit: int | None = SESSION_LIMIT) -> list[dict]:
-    """今天要练的条目:先清到期的,再补新的。
-
-    到期的永远优先于新的——积压的复习才是记忆真正流失的地方,新鲜感不该
-    排在它前面。``new_per_day`` 与 ``limit`` 为 ``None`` 表示不限量。
+    这里曾经混进"到期复习",但只标了 studied 的条目没有 ``due`` 字段,取默认值
+    得到空字符串,而空字符串比任何日期都小,于是被判成到期、永远排在最前面:
+    每次打开都从第一条重新学。复习归测试页管,这一页只负责往下推。
     """
-    due = [
-        (entry, PATTERN_BY_ID[pid])
-        for pid, entry in reviews.items()
-        if pid in PATTERN_BY_ID and str(entry.get("due", "")) <= today
-    ]
-    due.sort(key=lambda pair: (str(pair[0].get("due", "")), int(pair[0].get("box", 0))))
-
-    items = [
-        {**pattern.to_dict(), "status": "review", "box": int(entry.get("box", 0)),
-         "seen": int(entry.get("seen", 0)), "favorite": bool(entry.get("favorite"))}
-        for entry, pattern in (due if limit is None else due[:limit])
-    ]
-
-    room = None if limit is None else max(0, limit - len(items))
-    budget = None if new_per_day is None else max(0, new_per_day - introduced_today(reviews, today))
-    if room == 0 or budget == 0:
-        return items
-
-    fresh = [p for p in PATTERNS if p.id not in reviews]
-    caps = [c for c in (room, budget) if c is not None]
-    if caps:
-        fresh = fresh[: min(caps)]
-    return items + [
+    fresh = [p for p in PATTERNS if not (reviews.get(p.id) or {}).get("studied")]
+    if limit is not None:
+        fresh = fresh[:limit]
+    return [
         {**p.to_dict(), "status": "new", "box": 0, "seen": 0,
          "favorite": bool((reviews.get(p.id) or {}).get("favorite"))}
         for p in fresh

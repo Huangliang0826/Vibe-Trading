@@ -221,14 +221,22 @@ def english_client(tmp_path: Path, monkeypatch) -> TestClient:
     return TestClient(api_server.app, client=("127.0.0.1", 50000))
 
 
-def test_english_opens_with_the_whole_catalog_and_no_daily_cap(english_client):
+def test_english_opens_with_the_whole_catalog(english_client):
     data = english_client.get("/growth/english").json()
 
     assert data["stats"] == {**data["stats"], "total": 200, "started": 0, "favorites": 0}
-    assert data["new_per_day"] is None and data["session_limit"] is None
     assert data["fast_ms"] == 6000
     assert len(data["session"]) == 200
-    assert all(item["status"] == "new" for item in data["session"])
+
+
+def test_the_learning_queue_resumes_where_it_was_left(english_client):
+    first = english_client.get("/growth/english").json()["session"][0]["id"]
+    english_client.post("/growth/english/studied", json={"pattern_id": first})
+
+    session = english_client.get("/growth/english").json()["session"]
+
+    assert len(session) == 199
+    assert session[0]["id"] != first
 
 
 def test_the_session_starts_at_the_easiest_level(english_client):

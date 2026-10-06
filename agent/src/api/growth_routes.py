@@ -23,9 +23,8 @@ from src.growth.plan import (
     DomainIntake, Intake, fallback_plan, generate_domain_plan,
 )
 from src.growth.english import (
-    DAILY_GOAL, FAST_MS, NEW_PER_DAY, QUIZ_OPTIONS, SESSION_LIMIT, build_session,
-    english_days, english_today, favorites, mark_studied, pick_quiz, record_answer,
-    set_favorite, stats,
+    DAILY_GOAL, FAST_MS, QUIZ_OPTIONS, build_session, english_days, english_today,
+    favorites, mark_studied, pick_quiz, record_answer, set_favorite, stats,
 )
 # 别名:``LEVELS`` 在 plan 里是每个领域的起点选项,同名导入会把它整个盖掉。
 from src.growth.english_patterns import LEVELS as ENGLISH_LEVELS
@@ -274,8 +273,6 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             "today_progress": english_today(doc, today),
             "daily_goal": DAILY_GOAL,
             "favorites": favorites(reviews),
-            "new_per_day": NEW_PER_DAY,
-            "session_limit": SESSION_LIMIT,
             "fast_ms": FAST_MS,
             "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
             "levels": _levels(),
