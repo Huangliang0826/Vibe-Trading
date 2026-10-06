@@ -178,6 +178,22 @@ export interface GrowthIntakeBody {
 // 英语句型:100 个高频框架的间隔重复练习。评分是"取回花了多久",不是对错。
 export type EnglishGrade = "again" | "slow" | "instant";
 
+export interface EnglishQuizQuestion {
+  answer_id: string;
+  /** 主问句:答案的中文释义,在整份清单里唯一,所以每题恰好一个正确答案 */
+  meaning: string;
+  cue: string;
+  group_label: string;
+  level_label: string;
+  options: { id: string; frame: string; meaning: string }[];
+}
+
+export interface EnglishAnswerResult {
+  correct: boolean;
+  grade: EnglishGrade;
+  stats: EnglishStats;
+}
+
 export interface EnglishPattern {
   id: string;
   frame: string;
@@ -198,7 +214,12 @@ export interface EnglishPattern {
 
 export interface EnglishStats {
   total: number;
+  /** 学习页见过的条数 */
   started: number;
+  /** 被测验考过的条数 */
+  tested: number;
+  /** 测验正确率 %,还没答过为 null */
+  accuracy: number | null;
   /** 走到最后一盒的条数——真正要追的数字 */
   automatic: number;
   due_today: number;
@@ -211,7 +232,8 @@ export interface EnglishState {
   session: EnglishPattern[];
   stats: EnglishStats;
   shaky: { id: string; frame: string; meaning: string; seen: number }[];
-  grades: EnglishGrade[];
+  /** 答得多快才算"脱口而出"(毫秒) */
+  fast_ms: number;
   /** null 表示不限量 */
   new_per_day: number | null;
   session_limit: number | null;
@@ -580,10 +602,23 @@ export const api = {
     }),
   resetGrowth: () => request<{ configured: boolean }>("/growth/reset", { method: "POST" }),
   getEnglish: () => request<EnglishState>("/growth/english"),
-  reviewEnglish: (pattern_id: string, grade: EnglishGrade) =>
-    request<EnglishState>("/growth/english/review", {
+  // 学习页只记接触,不打分;打分一律走测验。
+  markEnglishStudied: (pattern_id: string) =>
+    request<EnglishState>("/growth/english/studied", {
       method: "POST",
-      body: JSON.stringify({ pattern_id, grade }),
+      body: JSON.stringify({ pattern_id }),
+    }),
+  getEnglishQuiz: (count = 20) =>
+    request<{
+      questions: EnglishQuizQuestion[];
+      options_per_question: number;
+      fast_ms: number;
+      stats: EnglishStats;
+    }>(`/growth/english/quiz?count=${count}`),
+  answerEnglishQuiz: (pattern_id: string, chosen_id: string, elapsed_ms: number) =>
+    request<EnglishAnswerResult>("/growth/english/answer", {
+      method: "POST",
+      body: JSON.stringify({ pattern_id, chosen_id, elapsed_ms }),
     }),
   getEnglishPatterns: () =>
     request<{

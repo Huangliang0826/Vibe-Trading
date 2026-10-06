@@ -1,24 +1,14 @@
-/** 英语句型练习:100 个高频框架,练到能脱口而出。
+/** 英语句型 · 学习页:把句型过一遍,不打分。
  *
- *  练法是**检索练习**:先只给中文情境,自己把英文说出来,再看答案。只看英文
- *  觉得"认识"是识别,而真实对话里卡住的是产出那一层——所以答案默认是藏起来的。
- *
- *  评分不是对错,是"取回这句话花了多久"。只有连续"脱口而出"才能走到最后一盒,
- *  这正是自动化的定义:不是答得对,是答得不用想。
+ *  仍然是**检索练习**的形式——先只给中文情境,自己把英文说出来,再看答案。
+ *  但这里不再自评。自评是主观的,而且刚看完答案的人总会高估自己;真正的
+ *  判定交给「测试」页的客观作答。这一页只记"我见过这条"。
  */
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, Eye, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronDown, Eye, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import {
-  api, type EnglishGrade, type EnglishPattern, type EnglishState,
-} from "@/lib/api";
-
-const GRADE_META: { grade: EnglishGrade; label: string; hint: string }[] = [
-  { grade: "again", label: "想不起来", hint: "退回第一盒,今天再来一次" },
-  { grade: "slow", label: "卡了一下", hint: "留在原处,过几天再见" },
-  { grade: "instant", label: "脱口而出", hint: "进下一盒" },
-];
+import { api, type EnglishPattern, type EnglishState } from "@/lib/api";
 
 function Stat({ label, value, suffix }: { label: string; value: number; suffix?: string }) {
   return (
@@ -36,28 +26,24 @@ function Card({
   item,
   index,
   total,
-  onGrade,
+  onNext,
 }: {
   item: EnglishPattern;
   index: number;
   total: number;
-  onGrade: (grade: EnglishGrade) => Promise<void>;
+  onNext: () => void;
 }) {
-  // 新句型没见过,无从检索,所以直接摊开让人先读熟;复习的则必须先自己产出。
+  // 新句型没见过,无从检索,所以直接摊开让人先读熟;见过的则先自己产出。
   const [revealed, setRevealed] = useState(item.status === "new");
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setRevealed(item.status === "new");
   }, [item.id, item.status]);
 
-  const grade = async (g: EnglishGrade) => {
-    setBusy(true);
-    try {
-      await onGrade(g);
-    } finally {
-      setBusy(false);
-    }
+  const reveal = () => {
+    setRevealed(true);
+    // 只记接触,不打分——失败了也不该挡住学习。
+    void api.markEnglishStudied(item.id).catch(() => undefined);
   };
 
   return (
@@ -97,37 +83,18 @@ function Card({
             ))}
           </ul>
 
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">刚才取回它花了多久?</p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {GRADE_META.map((g) => (
-                <button
-                  key={g.grade}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => grade(g.grade)}
-                  className={cn(
-                    "rounded-xl border px-3 py-2 text-sm transition-colors disabled:opacity-50",
-                    g.grade === "instant"
-                      ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
-                      : "hover:border-primary/40 hover:text-foreground",
-                  )}
-                >
-                  <span className="block font-medium">{g.label}</span>
-                  {/* 提示写成可见副标题而不是 title:手机上没有 hover,而且 title
-                      会把按钮的无障碍名字整个盖掉。 */}
-                  <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                    {g.hint}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={onNext}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
+          >
+            下一条<ArrowRight className="h-4 w-4" />
+          </button>
         </div>
       ) : (
         <button
           type="button"
-          onClick={() => setRevealed(true)}
+          onClick={reveal}
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
         >
           <Eye className="h-4 w-4" />看答案
@@ -247,20 +214,6 @@ export function EnglishDrill() {
   const { stats } = state;
   const item = queue[cursor];
 
-  const onGrade = async (grade: EnglishGrade) => {
-    try {
-      // 只从响应里取进度;队列由本地推进。
-      setState(await api.reviewEnglish(item.id, grade));
-      // 想不起来的排到本轮队尾,过几条再考一次,而不是立刻重看答案。
-      if (grade === "again") {
-        setQueue((q) => [...q, { ...item, status: "review" }]);
-      }
-      setCursor((c) => c + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "记录失败");
-    }
-  };
-
   const reset = async () => {
     if (!window.confirm("清空 100 条句型的全部练习进度,确定吗?")) return;
     try {
@@ -277,32 +230,24 @@ export function EnglishDrill() {
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-3">
         <Stat label="已自动化" value={stats.automatic} suffix={`/ ${stats.total}`} />
-        <Stat label="练过" value={stats.started} suffix={`/ ${stats.total}`} />
-        <Stat label="今天练了" value={stats.reviewed_today} suffix="条" />
+        <Stat label="学过" value={stats.started} suffix={`/ ${stats.total}`} />
+        <Stat label="考过" value={stats.tested} suffix={`/ ${stats.total}`} />
       </div>
 
       {item ? (
-        <Card item={item} index={cursor} total={queue.length} onGrade={onGrade} />
+        <Card item={item} index={cursor} total={queue.length} onNext={() => setCursor((c) => c + 1)} />
       ) : (
         <div className="space-y-2 rounded-2xl border bg-card p-6 text-center">
           <Sparkles className="mx-auto h-5 w-5 text-primary" />
-          <p className="text-[15px] font-medium">今天的练习做完了</p>
-          <p className="text-sm text-muted-foreground">
-            {stats.due_today > 0
-              ? `还有 ${stats.due_today} 条到期的,可以再练一轮。`
-              : stats.started < stats.total
-                ? `还有 ${stats.total - stats.started} 条没见过,明天继续。`
-                : "100 条都练过了,接下来就是把它们一盒一盒推到自动化。"}
-          </p>
-          {stats.due_today > 0 && (
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-1 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15"
-            >
-              再练一轮
-            </button>
-          )}
+          <p className="text-[15px] font-medium">这一轮都看完了</p>
+          <p className="text-sm text-muted-foreground">去「测试」页考一遍,记住没记住那里说了算。</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-1 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15"
+          >
+            再看一轮
+          </button>
         </div>
       )}
 
@@ -310,7 +255,7 @@ export function EnglishDrill() {
         <div className="space-y-3 rounded-2xl border bg-card p-5">
           <div>
             <h2 className="text-[15px] font-medium">还在卡壳的</h2>
-            <p className="mt-1 text-sm text-muted-foreground">练了多次仍然想不起来——这几条值得单独多说几遍。</p>
+            <p className="mt-1 text-sm text-muted-foreground">测验里反复答错——这几条值得单独多说几遍。</p>
           </div>
           <ul className="space-y-1.5">
             {state.shaky.map((row) => (

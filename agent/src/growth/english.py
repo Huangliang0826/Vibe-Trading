@@ -16,11 +16,19 @@
 
 from __future__ import annotations
 
+import random
 from datetime import date, timedelta
 
 from src.growth.english_patterns import PATTERN_BY_ID, PATTERNS, TOTAL
 
 GRADES = ("again", "slow", "instant")
+
+#: 测验里每题给几张卡片。两张:够快到可以一指一题,又真的要分辨。
+QUIZ_OPTIONS = 2
+
+#: 答对多快才算"脱口而出"。读一句中文情境加扫两个英文框架,大约三四秒;
+#: 超过六秒说明是推理出来的,不是调用出来的——那还不叫自动化,所以不升盒。
+FAST_MS = 6000
 
 #: 第 0~4 盒的复习间隔(天)。最后一盒 21 天仍能脱口而出,才算真的固化。
 INTERVALS = (1, 2, 4, 9, 21)
@@ -38,6 +46,25 @@ def _add_days(day: str, n: int) -> str:
 
 def new_reviews() -> dict:
     return {}
+
+
+def mark_studied(reviews: dict, pattern_id: str, today: str) -> dict:
+    """在学习页看过一条。只记接触,不记分——打分是测验的事。"""
+    if pattern_id not in PATTERN_BY_ID:
+        raise ValueError(f"没有这个句型:{pattern_id}")
+    entry = dict(reviews.get(pattern_id) or {})
+    return {**reviews, pattern_id: {**entry, "studied": entry.get("studied") or today}}
+
+
+def grade_for_answer(correct: bool, elapsed_ms: int) -> str:
+    """把一次客观作答翻译成盒子评分。
+
+    答错就是答错;答对还要看快慢——慢慢推出来的正确答案,在真实对话里仍然
+    是卡壳,所以只留在原盒,不往上走。
+    """
+    if not correct:
+        return "again"
+    return "instant" if elapsed_ms <= FAST_MS else "slow"
 
 
 def apply_review(reviews: dict, pattern_id: str, grade: str, today: str) -> dict:
@@ -62,6 +89,7 @@ def apply_review(reviews: dict, pattern_id: str, grade: str, today: str) -> dict
     return {
         **reviews,
         pattern_id: {
+            **entry,
             "box": box,
             "due": due,
             "seen": int(entry.get("seen", 0)) + 1,
@@ -69,8 +97,61 @@ def apply_review(reviews: dict, pattern_id: str, grade: str, today: str) -> dict
             "last": today,
             # 记录最后一次的手感,用于"还卡壳的句型"清单。
             "last_grade": grade,
+            "right": int(entry.get("right", 0)) + (1 if grade != "again" else 0),
+            "wrong": int(entry.get("wrong", 0)) + (1 if grade == "again" else 0),
         },
     }
+
+
+def _quiz_pool(reviews: dict) -> list:
+    """可以拿来考的句型:学习页见过的,或已经考过的。
+
+    都没有时退回整份清单(按难度顺序),这样第一次打开测验也能玩起来——
+    边考边学,总好过一个空页面。
+    """
+    known = [p for p in PATTERNS if p.id in reviews]
+    return known if len(known) >= QUIZ_OPTIONS else list(PATTERNS)
+
+
+def pick_quiz(reviews: dict, today: str, *, count: int = 20,
+              rng: random.Random | None = None) -> list[dict]:
+    """抽一批题。到期的优先,其余随机——重复的题面会让人开始背位置而不是背句型。"""
+    rng = rng or random.Random()
+    pool = _quiz_pool(reviews)
+    if len(pool) < QUIZ_OPTIONS:
+        return []
+
+    def is_due(p) -> bool:
+        entry = reviews.get(p.id)
+        return bool(entry) and str(entry.get("due", "")) <= today
+
+    due_now = [p for p in pool if is_due(p)]
+    rest = [p for p in pool if not is_due(p)]
+    rng.shuffle(due_now)
+    rng.shuffle(rest)
+    asked = (due_now + rest)[:count]
+
+    questions = []
+    for answer in asked:
+        # 干扰项取同一个功能分组——不同组的两张卡一眼就能排除,考不出分辨力。
+        same_group = [p for p in pool if p.group == answer.group and p.id != answer.id]
+        others = same_group or [p for p in pool if p.id != answer.id]
+        distractor = rng.choice(others)
+        options = [answer.to_dict(), distractor.to_dict()]
+        rng.shuffle(options)
+        questions.append({
+            "answer_id": answer.id,
+            # 问句以释义为主:同组的句型常是近义的,只给情境会出歧义题——
+            # "不确定但要给个数"既可以是 I'd say,也可以是 I'm not sure, but。
+            # 释义在 200 条里唯一,所以每题恰好一个正确答案。
+            "meaning": answer.meaning,
+            "cue": answer.cue,
+            "group_label": answer.group_label,
+            "level_label": answer.level_label,
+            "options": [{"id": o["id"], "frame": o["frame"], "meaning": o["meaning"]}
+                        for o in options],
+        })
+    return questions
 
 
 def introduced_today(reviews: dict, today: str) -> int:
@@ -113,12 +194,17 @@ def build_session(reviews: dict, today: str, *, new_per_day: int | None = NEW_PE
 
 def stats(reviews: dict, today: str) -> dict:
     """进度总览。``automatic`` 是真正要追的那个数字。"""
-    boxes = [int(e.get("box", 0)) for e in reviews.values()]
+    tested = [e for e in reviews.values() if int(e.get("seen", 0)) > 0]
+    boxes = [int(e.get("box", 0)) for e in tested]
+    right = sum(int(e.get("right", 0)) for e in tested)
+    wrong = sum(int(e.get("wrong", 0)) for e in tested)
     return {
         "total": TOTAL,
         "started": len(reviews),
+        "tested": len(tested),
+        "accuracy": round(right / (right + wrong) * 100) if right + wrong else None,
         "automatic": sum(1 for b in boxes if b >= MAX_BOX),
-        "due_today": sum(1 for e in reviews.values() if str(e.get("due", "")) <= today),
+        "due_today": sum(1 for e in tested if str(e.get("due", "")) <= today),
         "reviewed_today": sum(1 for e in reviews.values() if e.get("last") == today),
         "box_counts": {str(b): boxes.count(b) for b in range(len(INTERVALS))},
     }

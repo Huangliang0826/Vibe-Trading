@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Any, Awaitable, Callable, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.growth.plan import (
@@ -23,7 +23,8 @@ from src.growth.plan import (
     DomainIntake, Intake, fallback_plan, generate_domain_plan,
 )
 from src.growth.english import (
-    GRADES, NEW_PER_DAY, SESSION_LIMIT, apply_review, build_session, shaky, stats,
+    FAST_MS, NEW_PER_DAY, QUIZ_OPTIONS, SESSION_LIMIT, apply_review, build_session,
+    grade_for_answer, mark_studied, pick_quiz, shaky, stats,
 )
 # 别名:``LEVELS`` 在 plan 里是每个领域的起点选项,同名导入会把它整个盖掉。
 from src.growth.english_patterns import LEVELS as ENGLISH_LEVELS
@@ -115,10 +116,15 @@ class DomainRequest(BaseModel):
     domain: str = Field(..., max_length=16)
 
 
-class ReviewRequest(BaseModel):
+class StudiedRequest(BaseModel):
     pattern_id: str = Field(..., max_length=64)
-    #: again(想不起来)/ slow(卡壳)/ instant(脱口而出)
-    grade: str = Field(..., max_length=8)
+
+
+class AnswerRequest(BaseModel):
+    """一次测验作答。对错由服务端判,客户端只报选了哪张卡和用了多久。"""
+    pattern_id: str = Field(..., max_length=64)
+    chosen_id: str = Field(..., max_length=64)
+    elapsed_ms: int = Field(0, ge=0, le=600_000)
 
 
 class CheckpointRequest(BaseModel):
@@ -259,9 +265,9 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             "session": build_session(reviews, today),
             "stats": stats(reviews, today),
             "shaky": shaky(reviews),
-            "grades": list(GRADES),
             "new_per_day": NEW_PER_DAY,
             "session_limit": SESSION_LIMIT,
+            "fast_ms": FAST_MS,
             "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
             "levels": _levels(),
         }
@@ -286,13 +292,37 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             ],
         }
 
-    @router.post("/english/review")
-    async def english_review(payload: ReviewRequest):
+    @router.post("/english/studied")
+    async def english_studied(payload: StudiedRequest):
+        """学习页看过一条。只记接触,不打分——打分是测验的事。"""
         try:
-            updated = apply_review(read_english(), payload.pattern_id, payload.grade, _today())
+            updated = mark_studied(read_english(), payload.pattern_id, _today())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _english_payload(write_english(updated))
+
+    @router.get("/english/quiz")
+    async def english_quiz(count: int = Query(20, ge=1, le=100)):
+        """抽一批两选一的题。"""
+        reviews = read_english()
+        return {
+            "questions": pick_quiz(reviews, _today(), count=count),
+            "options_per_question": QUIZ_OPTIONS,
+            "fast_ms": FAST_MS,
+            "stats": stats(reviews, _today()),
+        }
+
+    @router.post("/english/answer")
+    async def english_answer(payload: AnswerRequest):
+        """判一次作答并推进盒子。对错在服务端判,客户端报不了"我对了"。"""
+        correct = payload.chosen_id == payload.pattern_id
+        grade = grade_for_answer(correct, payload.elapsed_ms)
+        try:
+            updated = apply_review(read_english(), payload.pattern_id, grade, _today())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        write_english(updated)
+        return {"correct": correct, "grade": grade, "stats": stats(updated, _today())}
 
     @router.post("/english/reset")
     async def english_reset():

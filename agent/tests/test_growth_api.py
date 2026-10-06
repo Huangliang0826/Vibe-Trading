@@ -233,6 +233,7 @@ def test_english_opens_with_the_whole_catalog_and_no_daily_cap(english_client):
 
     assert data["stats"] == {**data["stats"], "total": 200, "started": 0, "automatic": 0}
     assert data["new_per_day"] is None and data["session_limit"] is None
+    assert data["fast_ms"] == 6000
     assert len(data["session"]) == 200
     assert all(item["status"] == "new" for item in data["session"])
 
@@ -250,39 +251,65 @@ def test_english_session_items_carry_the_cue_but_the_drill_still_needs_the_answe
     assert item["cue"] and item["frame"] and len(item["examples"]) >= 2
 
 
-def test_a_review_persists_and_moves_the_pattern_forward(english_client):
+def test_a_correct_fast_answer_moves_the_pattern_forward(english_client):
     first = english_client.get("/growth/english").json()["session"][0]["id"]
 
-    english_client.post("/growth/english/review", json={"pattern_id": first, "grade": "instant"})
-    data = english_client.get("/growth/english").json()
+    result = english_client.post("/growth/english/answer", json={
+        "pattern_id": first, "chosen_id": first, "elapsed_ms": 1200,
+    }).json()
+
+    assert result["correct"] is True and result["grade"] == "instant"
+    assert result["stats"]["tested"] == 1
+
+
+def test_the_server_decides_right_and_wrong_not_the_client(english_client):
+    # 客户端只报选了哪张卡,报不了"我对了"。
+    result = english_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "it-depends-on", "elapsed_ms": 500,
+    }).json()
+
+    assert result["correct"] is False and result["grade"] == "again"
+
+
+def test_a_slow_correct_answer_is_not_treated_as_automatic(english_client):
+    result = english_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "the-thing-is", "elapsed_ms": 20_000,
+    }).json()
+
+    assert result["correct"] is True and result["grade"] == "slow"
+
+
+def test_the_quiz_endpoint_returns_two_option_questions(english_client):
+    data = english_client.get("/growth/english/quiz?count=6").json()
+
+    assert len(data["questions"]) == 6
+    assert data["options_per_question"] == 2
+    for q in data["questions"]:
+        assert len(q["options"]) == 2
+        assert q["answer_id"] in [o["id"] for o in q["options"]]
+
+
+def test_marking_a_pattern_studied_does_not_score_it(english_client):
+    data = english_client.post("/growth/english/studied",
+                               json={"pattern_id": "the-thing-is"}).json()
 
     assert data["stats"]["started"] == 1
-    assert data["stats"]["reviewed_today"] == 1
-    # 答对的那条今天不该再出现。
-    assert first not in [item["id"] for item in data["session"]]
+    assert data["stats"]["tested"] == 0
+    assert data["stats"]["accuracy"] is None
 
 
-def test_a_blank_keeps_the_pattern_in_todays_session(english_client):
-    first = english_client.get("/growth/english").json()["session"][0]["id"]
-
-    data = english_client.post(
-        "/growth/english/review", json={"pattern_id": first, "grade": "again"},
-    ).json()
-
-    assert first in [item["id"] for item in data["session"]]
-
-
-def test_english_rejects_an_invalid_grade(english_client):
+def test_english_rejects_an_unknown_pattern(english_client):
     response = english_client.post(
-        "/growth/english/review", json={"pattern_id": "the-thing-is", "grade": "perfect"},
+        "/growth/english/answer",
+        json={"pattern_id": "nope", "chosen_id": "nope", "elapsed_ms": 100},
     )
 
     assert response.status_code == 400
 
 
 def test_the_full_catalog_is_available_with_each_patterns_box(english_client):
-    english_client.post("/growth/english/review",
-                        json={"pattern_id": "the-thing-is", "grade": "instant"})
+    english_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "the-thing-is", "elapsed_ms": 900})
 
     data = english_client.get("/growth/english/patterns").json()
 
@@ -298,8 +325,8 @@ def test_the_full_catalog_is_available_with_each_patterns_box(english_client):
 
 
 def test_english_reset_clears_progress(english_client):
-    english_client.post("/growth/english/review",
-                        json={"pattern_id": "the-thing-is", "grade": "instant"})
+    english_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "the-thing-is", "elapsed_ms": 900})
 
     data = english_client.post("/growth/english/reset").json()
 
@@ -307,8 +334,8 @@ def test_english_reset_clears_progress(english_client):
 
 
 def test_english_progress_file_is_not_world_readable(english_client, tmp_path):
-    english_client.post("/growth/english/review",
-                        json={"pattern_id": "the-thing-is", "grade": "instant"})
+    english_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "the-thing-is", "elapsed_ms": 900})
 
     mode = (tmp_path / "growth" / "english.json").stat().st_mode & 0o777
     assert mode == 0o600

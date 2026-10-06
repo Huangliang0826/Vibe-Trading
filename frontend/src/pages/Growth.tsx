@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   BookOpen, Check, Dumbbell, Flame, Languages, Loader2, Moon, RotateCcw,
-  MessagesSquare, Sparkles, Sprout, Undo2,
+  MessagesSquare, Sparkles, Sprout, Target, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ import {
   api, type GrowthDomainProgress, type GrowthOptions, type GrowthState,
 } from "@/lib/api";
 import { EnglishDrill } from "@/pages/growth/EnglishDrill";
+import { EnglishQuiz } from "@/pages/growth/EnglishQuiz";
 
 const DOMAIN_ICONS: Record<string, typeof Moon> = {
   sleep: Moon,
@@ -566,13 +567,15 @@ function TodayBoard({
 const TABS = [
   { key: "today", label: "每天", icon: Sprout },
   { key: "english", label: "英语句型", icon: MessagesSquare },
+  { key: "quiz", label: "测试", icon: Target },
 ] as const;
 
 type Tab = (typeof TABS)[number]["key"];
 
 export function Growth() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: Tab = searchParams.get("tab") === "english" ? "english" : "today";
+  const raw = searchParams.get("tab");
+  const tab: Tab = raw === "english" || raw === "quiz" ? raw : "today";
   const [state, setState] = useState<GrowthState | null>(null);
   const [options, setOptions] = useState<GrowthOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -636,8 +639,17 @@ export function Growth() {
   if (tab === "english") {
     return shell(
       <>
-        <PageHeader subtitle="基础到高级的高频句型,练到交流时不用想就能调出来。" />
+        <PageHeader subtitle="基础到高级的高频句型,先过一遍,记不记得住由「测试」说了算。" />
         <EnglishDrill />
+      </>,
+    );
+  }
+
+  if (tab === "quiz") {
+    return shell(
+      <>
+        <PageHeader subtitle="两张卡二选一,随机抽。答对还要够快,才算真的能调出来。" />
+        <EnglishQuiz />
       </>,
     );
   }

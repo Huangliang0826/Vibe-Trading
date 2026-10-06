@@ -3,8 +3,8 @@
 import pytest
 
 from src.growth.english import (
-    MAX_BOX, apply_review, build_session, introduced_today,
-    new_reviews, shaky, stats,
+    FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session, grade_for_answer,
+    introduced_today, mark_studied, new_reviews, pick_quiz, shaky, stats,
 )
 from src.growth.english_patterns import (
     GROUPS, LEVEL_TOTALS, LEVELS, PATTERN_BY_ID, PATTERNS, TOTAL,
@@ -40,10 +40,12 @@ def test_every_pattern_carries_what_the_drill_needs():
         assert p.level in LEVELS, p.id
 
 
-def test_the_cue_never_gives_the_answer_away():
-    # 提示里若混入英文,检索练习就退化成朗读。
+def test_no_prompt_text_contains_english():
+    # 情境和释义都是出题用的问句。混入英文,检索练习就退化成朗读;在测验里
+    # 还可能直接指向某个选项。
     for p in PATTERNS:
-        assert not any(ch.isascii() and ch.isalpha() for ch in p.cue), (p.id, p.cue)
+        for field, text in (("cue", p.cue), ("meaning", p.meaning)):
+            assert not any(ch.isascii() and ch.isalpha() for ch in text), (p.id, field, text)
 
 
 def test_the_patterns_the_user_asked_for_are_all_present():
@@ -209,3 +211,136 @@ def test_shaky_lists_patterns_that_are_practised_a_lot_but_still_stuck():
 
     assert [r["id"] for r in rows] == ["the-thing-is"]
     assert rows[0]["seen"] == 4
+
+
+# ── 测验:两选一,对错由客观作答决定 ──────────────────────────────────────────
+
+def _rng(seed=7):
+    import random
+    return random.Random(seed)
+
+
+def test_each_question_offers_exactly_two_cards_one_of_them_right():
+    questions = pick_quiz(new_reviews(), TODAY, count=5, rng=_rng())
+
+    assert len(questions) == 5
+    for q in questions:
+        assert len(q["options"]) == QUIZ_OPTIONS
+        ids = [o["id"] for o in q["options"]]
+        assert q["answer_id"] in ids
+        assert len(set(ids)) == QUIZ_OPTIONS
+
+
+def test_the_distractor_comes_from_the_same_functional_group():
+    # 不同组的两张卡一眼就能排除,考不出分辨力。
+    questions = pick_quiz(new_reviews(), TODAY, count=20, rng=_rng())
+
+    for q in questions:
+        groups = {PATTERN_BY_ID[o["id"]].group for o in q["options"]}
+        assert len(groups) == 1, q
+
+
+def test_the_question_carries_the_answers_unique_gloss():
+    q = pick_quiz(new_reviews(), TODAY, count=1, rng=_rng())[0]
+    answer = PATTERN_BY_ID[q["answer_id"]]
+
+    assert q["meaning"] == answer.meaning and q["cue"] == answer.cue
+    assert q["group_label"] and q["level_label"]
+
+
+def test_every_pattern_has_a_distinct_gloss_so_each_question_has_one_answer():
+    # 同组的句型常是近义的。只给情境会出歧义题("不确定但要给个数"既可以是
+    # I'd say 也可以是 I'm not sure, but),所以问句以释义为主——它必须唯一。
+    meanings = [p.meaning for p in PATTERNS]
+
+    assert len(set(meanings)) == len(meanings)
+
+
+def test_a_questions_two_options_never_share_a_gloss():
+    for q in pick_quiz(new_reviews(), TODAY, count=30, rng=_rng()):
+        glosses = {PATTERN_BY_ID[o["id"]].meaning for o in q["options"]}
+        assert len(glosses) == 2, q
+
+
+def test_due_patterns_are_asked_before_the_rest():
+    reviews = new_reviews()
+    for pid in list(PATTERN_BY_ID)[:3]:
+        reviews = apply_review(reviews, pid, "again", TODAY)  # due 今天
+    for pid in list(PATTERN_BY_ID)[3:9]:
+        reviews = apply_review(reviews, pid, "instant", TODAY)  # 排到以后
+
+    asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, count=3, rng=_rng())]
+
+    assert set(asked) == set(list(PATTERN_BY_ID)[:3])
+
+
+def test_the_quiz_falls_back_to_the_whole_catalog_before_anything_is_studied():
+    # 第一次打开就该能玩起来,边考边学好过一个空页面。
+    assert len(pick_quiz(new_reviews(), TODAY, count=10, rng=_rng())) == 10
+
+
+def test_the_quiz_draws_only_from_what_has_been_seen_once_enough_is_studied():
+    reviews = new_reviews()
+    studied = list(PATTERN_BY_ID)[:6]
+    for pid in studied:
+        reviews = mark_studied(reviews, pid, TODAY)
+
+    asked = {q["answer_id"] for q in pick_quiz(reviews, TODAY, count=20, rng=_rng())}
+
+    assert asked <= set(studied)
+
+
+# ── 客观评分 ──────────────────────────────────────────────────────────────────
+
+def test_a_wrong_answer_is_graded_as_a_blank_however_fast_it_was():
+    assert grade_for_answer(False, 200) == "again"
+
+
+def test_a_fast_correct_answer_counts_as_automatic():
+    assert grade_for_answer(True, FAST_MS - 1) == "instant"
+
+
+def test_a_slow_correct_answer_does_not_move_the_box_up():
+    # 慢慢推出来的正确答案,在真实对话里仍然是卡壳。
+    assert grade_for_answer(True, FAST_MS + 1) == "slow"
+
+
+def test_marking_a_pattern_studied_records_exposure_without_scoring_it():
+    reviews = mark_studied(new_reviews(), "the-thing-is", TODAY)
+
+    entry = reviews["the-thing-is"]
+    assert entry["studied"] == TODAY
+    assert "box" not in entry and "seen" not in entry
+    assert stats(reviews, TODAY)["tested"] == 0
+
+
+def test_studying_twice_keeps_the_first_date(
+):
+    reviews = mark_studied(new_reviews(), "the-thing-is", TODAY)
+    reviews = mark_studied(reviews, "the-thing-is", "2026-10-09")
+
+    assert reviews["the-thing-is"]["studied"] == TODAY
+
+
+def test_a_quiz_answer_keeps_the_studied_mark():
+    reviews = mark_studied(new_reviews(), "the-thing-is", TODAY)
+
+    reviews = apply_review(reviews, "the-thing-is", "instant", TODAY)
+
+    assert reviews["the-thing-is"]["studied"] == TODAY
+    assert reviews["the-thing-is"]["box"] == 1
+
+
+def test_stats_track_quiz_accuracy():
+    reviews = apply_review(new_reviews(), "the-thing-is", "instant", TODAY)
+    reviews = apply_review(reviews, "it-depends-on", "again", TODAY)
+    reviews = apply_review(reviews, "the-point-is", "slow", TODAY)
+
+    s = stats(reviews, TODAY)
+
+    assert s["tested"] == 3
+    assert s["accuracy"] == 67  # 3 次作答里 2 次选对
+
+
+def test_accuracy_is_absent_before_any_answer():
+    assert stats(mark_studied(new_reviews(), "the-thing-is", TODAY), TODAY)["accuracy"] is None
