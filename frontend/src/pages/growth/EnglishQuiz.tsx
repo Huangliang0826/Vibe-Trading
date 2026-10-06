@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils";
 import {
   api, type EnglishAnswerResult, type EnglishQuizQuestion, type EnglishStats,
 } from "@/lib/api";
+import { SpeakButton } from "@/components/SpeakButton";
+import { cancelSpeech } from "@/lib/speech";
 
 const BATCH = 20;
 
@@ -115,11 +117,17 @@ export function EnglishQuiz() {
     }
   };
 
-  const next = () => {
+  /** 取消待执行的自动翻页。想听发音的时候页面不该从脚底下溜走。 */
+  const holdPage = () => {
     if (advanceTimer.current) {
       window.clearTimeout(advanceTimer.current);
       advanceTimer.current = null;
     }
+  };
+
+  const next = () => {
+    cancelSpeech();  // 翻页时掐掉上一题的朗读,别压在下一题上
+    holdPage();
     setVerdict(null);
     setCursor((c) => c + 1);
   };
@@ -200,10 +208,18 @@ export function EnglishQuiz() {
                         <span className="mt-1 block text-sm text-muted-foreground">{option.meaning}</span>
                       )}
                     </span>
-                    {verdict && isAnswer && <Check className="h-4 w-4 shrink-0 text-primary" />}
-                    {verdict && isChosen && !isAnswer && (
-                      <X className="h-4 w-4 shrink-0 text-destructive" />
-                    )}
+                    <span className="flex shrink-0 items-center gap-1">
+                      {/* 答完才给朗读:答题当下出声会打乱节奏,也会把计时拖长。 */}
+                      {verdict && (
+                        <SpeakButton
+                          text={option.frame}
+                          label={`朗读 ${option.frame}`}
+                          onSpeak={holdPage}
+                        />
+                      )}
+                      {verdict && isAnswer && <Check className="h-4 w-4 text-primary" />}
+                      {verdict && isChosen && !isAnswer && <X className="h-4 w-4 text-destructive" />}
+                    </span>
                   </span>
                 </button>
               );

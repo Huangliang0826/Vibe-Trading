@@ -9,6 +9,7 @@ import { ArrowRight, ChevronDown, Eye, Loader2, RotateCcw, Sparkles } from "luci
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api, type EnglishPattern, type EnglishState } from "@/lib/api";
+import { SpeakButton } from "@/components/SpeakButton";
 
 function Stat({ label, value, suffix }: { label: string; value: number; suffix?: string }) {
   return (
@@ -72,13 +73,17 @@ function Card({
       {revealed ? (
         <div className="space-y-4 border-t pt-5">
           <div>
-            <p className="text-[19px] font-semibold tracking-tight">{item.frame}</p>
+            <div className="flex items-start gap-2">
+              <p className="text-[19px] font-semibold tracking-tight">{item.frame}</p>
+              <SpeakButton text={item.frame} label={`朗读句型 ${item.frame}`} className="mt-0.5" />
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">{item.meaning}</p>
           </div>
           <ul className="space-y-1.5">
             {item.examples.map((example) => (
-              <li key={example} className="text-[15px] leading-relaxed text-foreground/85">
-                {example}
+              <li key={example} className="flex items-start gap-2">
+                <SpeakButton text={example} label={`朗读例句 ${example}`} className="-ml-1" />
+                <span className="text-[15px] leading-relaxed text-foreground/85">{example}</span>
               </li>
             ))}
           </ul>
