@@ -5,11 +5,14 @@
  *  判定交给「测试」页的客观作答。这一页只记"我见过这条"。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, ChevronDown, Eye, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import {
+  ArrowRight, Bookmark, ChevronDown, Eye, Loader2, RotateCcw, Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api, type EnglishPattern, type EnglishState } from "@/lib/api";
 import { SpeakButton } from "@/components/SpeakButton";
+import { cancelSpeech } from "@/lib/speech";
 
 function Stat({ label, value, suffix }: { label: string; value: number; suffix?: string }) {
   return (
@@ -29,12 +32,14 @@ function Card({
   total,
   onNext,
   onStudied,
+  onFavorite,
 }: {
   item: EnglishPattern;
   index: number;
   total: number;
   onNext: () => void;
   onStudied: (id: string) => void;
+  onFavorite: (id: string, favorite: boolean) => void;
 }) {
   // 新句型没见过,无从检索,所以直接摊开让人先读熟;见过的则先自己产出。
   const [revealed, setRevealed] = useState(item.status === "new");
@@ -90,13 +95,29 @@ function Card({
             ))}
           </ul>
 
-          <button
-            type="button"
-            onClick={onNext}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
-          >
-            下一条<ArrowRight className="h-4 w-4" />
-          </button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => onFavorite(item.id, !item.favorite)}
+              aria-pressed={Boolean(item.favorite)}
+              className={cn(
+                "inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition",
+                item.favorite
+                  ? "border-primary/50 bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:border-primary/40 hover:text-foreground",
+              )}
+            >
+              <Bookmark className={cn("h-4 w-4", item.favorite && "fill-current")} />
+              {item.favorite ? "已收藏" : "收藏"}
+            </button>
+            <button
+              type="button"
+              onClick={onNext}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
+            >
+              下一句<ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       ) : (
         <button
@@ -210,6 +231,34 @@ export function EnglishDrill() {
     void load();
   }, [load]);
 
+  const toggleFavorite = useCallback((id: string, favorite: boolean) => {
+    void api.setEnglishFavorite(id, favorite).then(setState).catch(() => undefined);
+    // 本地立即反映,别等往返——收藏是个高频的小动作。
+    setQueue((q) => q.map((p) => (p.id === id ? { ...p, favorite } : p)));
+  }, []);
+
+  const next = useCallback(() => {
+    cancelSpeech();
+    setCursor((c) => c + 1);
+  }, []);
+
+  // 向右键翻到下一句:连着看几十条时,手不用离开键盘。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowRight" || event.metaKey || event.ctrlKey || event.altKey) return;
+      // 在输入框里按方向键是移动光标,不该顺手翻页。target 不一定是元素
+      // (window、document 都可能),所以不能直接当成 Element 用。
+      const target = event.target;
+      if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
+        return;
+      }
+      event.preventDefault();
+      next();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [next]);
+
   const markStudied = useCallback((id: string) => {
     if (studied.current.has(id)) return;
     studied.current.add(id);
@@ -247,7 +296,7 @@ export function EnglishDrill() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="已自动化" value={stats.automatic} suffix={`/ ${stats.total}`} />
+        <Stat label="已收藏" value={stats.favorites} suffix="句" />
         <Stat label="学过" value={stats.started} suffix={`/ ${stats.total}`} />
         <Stat label="考过" value={stats.tested} suffix={`/ ${stats.total}`} />
       </div>
@@ -257,8 +306,9 @@ export function EnglishDrill() {
           item={item}
           index={cursor}
           total={queue.length}
-          onNext={() => setCursor((c) => c + 1)}
+          onNext={next}
           onStudied={markStudied}
+          onFavorite={toggleFavorite}
         />
       ) : (
         <div className="space-y-2 rounded-2xl border bg-card p-6 text-center">
@@ -275,20 +325,26 @@ export function EnglishDrill() {
         </div>
       )}
 
-      {state.shaky.length > 0 && (
+      {state.favorites.length > 0 && (
         <div className="space-y-3 rounded-2xl border bg-card p-5">
-          <div>
-            <h2 className="text-[15px] font-medium">还在卡壳的</h2>
-            <p className="mt-1 text-sm text-muted-foreground">测验里反复答错——这几条值得单独多说几遍。</p>
-          </div>
-          <ul className="space-y-1.5">
-            {state.shaky.map((row) => (
-              <li key={row.id} className="flex items-baseline justify-between gap-3 text-sm">
-                <span>
+          <h2 className="text-[15px] font-medium">已收藏的句式</h2>
+          <ul className="space-y-2">
+            {state.favorites.map((row) => (
+              <li key={row.id} className="flex items-start justify-between gap-3 text-sm">
+                <span className="min-w-0">
                   <span className="font-medium">{row.frame}</span>
                   <span className="ml-2 text-muted-foreground">{row.meaning}</span>
                 </span>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">练过 {row.seen} 次</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <SpeakButton text={row.frame} label={`朗读 ${row.frame}`} />
+                  <button
+                    type="button"
+                    onClick={() => toggleFavorite(row.id, false)}
+                    className="text-xs text-muted-foreground transition hover:text-foreground"
+                  >
+                    取消
+                  </button>
+                </span>
               </li>
             ))}
           </ul>

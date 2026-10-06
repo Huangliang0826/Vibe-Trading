@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const markEnglishStudied = vi.fn();
 const getEnglish = vi.fn();
+const setEnglishFavorite = vi.fn();
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   api: {
     getEnglish: (...args: unknown[]) => getEnglish(...args),
     markEnglishStudied: (...args: unknown[]) => markEnglishStudied(...args),
+    setEnglishFavorite: (...args: unknown[]) => setEnglishFavorite(...args),
     getEnglishPatterns: vi.fn().mockResolvedValue({ groups: [], levels: [], patterns: [] }),
   },
 }));
@@ -29,16 +31,17 @@ const pattern = (id: string, status: "new" | "review") => ({
   status,
   box: 0,
   seen: 0,
+  favorite: false,
 });
 
 const state = (overrides = {}) => ({
   today: "2026-10-06",
   session: [pattern("a", "new"), pattern("b", "new")],
   stats: {
-    total: 200, started: 0, tested: 0, accuracy: null,
+    total: 200, started: 0, tested: 0, accuracy: null, favorites: 0,
     automatic: 0, due_today: 0, reviewed_today: 0, box_counts: {},
   },
-  shaky: [],
+  favorites: [],
   fast_ms: 6000,
   new_per_day: null,
   session_limit: null,
@@ -54,6 +57,14 @@ beforeEach(() => {
   })));
   getEnglish.mockReset();
   getEnglish.mockResolvedValue(state());
+  setEnglishFavorite.mockReset();
+  setEnglishFavorite.mockImplementation(() => Promise.resolve(state({
+    stats: { ...state().stats, favorites: 1 },
+    favorites: [{
+      id: "a", frame: "frame a", meaning: "释义 a",
+      group_label: "缓和与委婉", level_label: "基础",
+    }],
+  })));
 });
 
 describe("学习页记录接触", () => {
@@ -69,7 +80,7 @@ describe("学习页记录接触", () => {
     render(<EnglishDrill />);
     await screen.findByText("frame a");
 
-    await userEvent.click(screen.getByRole("button", { name: /下一条/ }));
+    await userEvent.click(screen.getByRole("button", { name: /下一句/ }));
 
     await waitFor(() => expect(markEnglishStudied).toHaveBeenCalledWith("b"));
   });
@@ -87,5 +98,65 @@ describe("学习页记录接触", () => {
 
     // "学过" 的数字来自每次上报的响应。
     await waitFor(() => expect(screen.getByText("1")).toBeInTheDocument());
+  });
+});
+
+describe("收藏与键盘", () => {
+  it("收藏按钮把当前句式标记为已收藏", async () => {
+    render(<EnglishDrill />);
+    await screen.findByText("frame a");
+
+    await userEvent.click(screen.getByRole("button", { name: /收藏/ }));
+
+    await waitFor(() => expect(setEnglishFavorite).toHaveBeenCalledWith("a", true));
+  });
+
+  it("收藏状态立刻反映在按钮上,不等往返", async () => {
+    render(<EnglishDrill />);
+    await screen.findByText("frame a");
+
+    await userEvent.click(screen.getByRole("button", { name: /收藏/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /已收藏/ })).toHaveAttribute("aria-pressed", "true"),
+    );
+  });
+
+  it("按向右键翻到下一句", async () => {
+    render(<EnglishDrill />);
+    await screen.findByText("frame a");
+
+    await userEvent.keyboard("{ArrowRight}");
+
+    expect(await screen.findByText("frame b")).toBeInTheDocument();
+  });
+
+  it("在输入框里按向右键只移动光标,不翻页", async () => {
+    // 否则下方"全部句型"等处一旦有输入框,打字就会把卡片翻走。
+    render(
+      <>
+        <input aria-label="测试输入" />
+        <EnglishDrill />
+      </>,
+    );
+    await screen.findByText("frame a");
+
+    await userEvent.click(screen.getByLabelText("测试输入"));
+    await userEvent.keyboard("{ArrowRight}");
+
+    expect(screen.getByText("frame a")).toBeInTheDocument();
+  });
+});
+
+describe("向右键的健壮性", () => {
+  it("事件目标不是元素时也不会把快捷键打死", async () => {
+    // window / document 上派发的 keydown 其 target 没有 closest;
+    // 当成元素直接调用会抛错,整个快捷键就静默失效了。
+    render(<EnglishDrill />);
+    await screen.findByText("frame a");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+
+    expect(await screen.findByText("frame b")).toBeInTheDocument();
   });
 });

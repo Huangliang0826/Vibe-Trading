@@ -210,6 +210,7 @@ export interface EnglishPattern {
   /** 0~4;-1 表示还没练过(仅出现在整份清单里) */
   box?: number;
   seen?: number;
+  favorite?: boolean;
 }
 
 export interface EnglishStats {
@@ -220,8 +221,10 @@ export interface EnglishStats {
   tested: number;
   /** 测验正确率 %,还没答过为 null */
   accuracy: number | null;
-  /** 走到最后一盒的条数——真正要追的数字 */
+  /** 走到最后一盒的条数。内部用于安排复习,界面上不展示 */
   automatic: number;
+  /** 自己标记收藏的条数 */
+  favorites: number;
   due_today: number;
   reviewed_today: number;
   box_counts: Record<string, number>;
@@ -231,7 +234,10 @@ export interface EnglishState {
   today: string;
   session: EnglishPattern[];
   stats: EnglishStats;
-  shaky: { id: string; frame: string; meaning: string; seen: number }[];
+  favorites: {
+    id: string; frame: string; meaning: string;
+    group_label: string; level_label: string;
+  }[];
   /** 答得多快才算"脱口而出"(毫秒) */
   fast_ms: number;
   /** null 表示不限量 */
@@ -607,6 +613,11 @@ export const api = {
     request<EnglishState>("/growth/english/studied", {
       method: "POST",
       body: JSON.stringify({ pattern_id }),
+    }),
+  setEnglishFavorite: (pattern_id: string, favorite: boolean) =>
+    request<EnglishState>("/growth/english/favorite", {
+      method: "POST",
+      body: JSON.stringify({ pattern_id, favorite }),
     }),
   getEnglishQuiz: (count = 20) =>
     request<{

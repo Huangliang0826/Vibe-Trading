@@ -24,7 +24,7 @@ from src.growth.plan import (
 )
 from src.growth.english import (
     FAST_MS, NEW_PER_DAY, QUIZ_OPTIONS, SESSION_LIMIT, apply_review, build_session,
-    grade_for_answer, mark_studied, pick_quiz, shaky, stats,
+    favorites, grade_for_answer, mark_studied, pick_quiz, set_favorite, stats,
 )
 # 别名:``LEVELS`` 在 plan 里是每个领域的起点选项,同名导入会把它整个盖掉。
 from src.growth.english_patterns import LEVELS as ENGLISH_LEVELS
@@ -118,6 +118,11 @@ class DomainRequest(BaseModel):
 
 class StudiedRequest(BaseModel):
     pattern_id: str = Field(..., max_length=64)
+
+
+class FavoriteRequest(BaseModel):
+    pattern_id: str = Field(..., max_length=64)
+    favorite: bool = True
 
 
 class AnswerRequest(BaseModel):
@@ -264,7 +269,7 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             "today": today,
             "session": build_session(reviews, today),
             "stats": stats(reviews, today),
-            "shaky": shaky(reviews),
+            "favorites": favorites(reviews),
             "new_per_day": NEW_PER_DAY,
             "session_limit": SESSION_LIMIT,
             "fast_ms": FAST_MS,
@@ -297,6 +302,14 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         """学习页看过一条。只记接触,不打分——打分是测验的事。"""
         try:
             updated = mark_studied(read_english(), payload.pattern_id, _today())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _english_payload(write_english(updated))
+
+    @router.post("/english/favorite")
+    async def english_favorite(payload: FavoriteRequest):
+        try:
+            updated = set_favorite(read_english(), payload.pattern_id, payload.favorite)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _english_payload(write_english(updated))

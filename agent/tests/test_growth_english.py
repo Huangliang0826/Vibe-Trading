@@ -3,8 +3,9 @@
 import pytest
 
 from src.growth.english import (
-    FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session, grade_for_answer,
-    introduced_today, mark_studied, new_reviews, pick_quiz, shaky, stats,
+    FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session, favorites,
+    grade_for_answer, introduced_today, mark_studied, new_reviews, pick_quiz,
+    set_favorite, stats,
 )
 from src.growth.english_patterns import (
     GROUPS, LEVEL_TOTALS, LEVELS, PATTERN_BY_ID, PATTERNS, TOTAL,
@@ -201,17 +202,6 @@ def test_stats_report_progress_towards_the_whole_catalog():
     assert s["reviewed_today"] == 1
 
 
-def test_shaky_lists_patterns_that_are_practised_a_lot_but_still_stuck():
-    reviews = new_reviews()
-    for _ in range(4):
-        reviews = apply_review(reviews, "the-thing-is", "again", TODAY)
-    reviews = apply_review(reviews, "it-depends-on", "instant", TODAY)
-
-    rows = shaky(reviews)
-
-    assert [r["id"] for r in rows] == ["the-thing-is"]
-    assert rows[0]["seen"] == 4
-
 
 # ── 测验:两选一,对错由客观作答决定 ──────────────────────────────────────────
 
@@ -344,3 +334,60 @@ def test_stats_track_quiz_accuracy():
 
 def test_accuracy_is_absent_before_any_answer():
     assert stats(mark_studied(new_reviews(), "the-thing-is", TODAY), TODAY)["accuracy"] is None
+
+
+# ── 收藏 ──────────────────────────────────────────────────────────────────────
+
+def test_favoriting_a_pattern_lists_it_and_counts_it():
+    reviews = set_favorite(new_reviews(), "the-thing-is", True)
+
+    assert [f["id"] for f in favorites(reviews)] == ["the-thing-is"]
+    assert stats(reviews, TODAY)["favorites"] == 1
+
+
+def test_unfavoriting_removes_it():
+    reviews = set_favorite(new_reviews(), "the-thing-is", True)
+
+    reviews = set_favorite(reviews, "the-thing-is", False)
+
+    assert favorites(reviews) == [] and stats(reviews, TODAY)["favorites"] == 0
+
+
+def test_favoriting_does_not_disturb_the_review_schedule():
+    # 盒子是算法按答题表现推的,收藏是自己标的。两件事不该互相干涉。
+    reviews = apply_review(new_reviews(), "the-thing-is", "instant", TODAY)
+    before = dict(reviews["the-thing-is"])
+
+    reviews = set_favorite(reviews, "the-thing-is", True)
+
+    entry = reviews["the-thing-is"]
+    assert {k: v for k, v in entry.items() if k != "favorite"} == before
+    assert entry["favorite"] is True
+
+
+def test_favoriting_an_unseen_pattern_does_not_count_it_as_tested():
+    reviews = set_favorite(new_reviews(), "the-thing-is", True)
+
+    s = stats(reviews, TODAY)
+    assert s["favorites"] == 1 and s["tested"] == 0
+
+
+def test_favorites_are_listed_easiest_first():
+    reviews = set_favorite(new_reviews(), "high-be-that-as-it-may", True)
+    reviews = set_favorite(reviews, "the-thing-is", True)
+
+    assert [f["level_label"] for f in favorites(reviews)] == ["基础", "高级"]
+
+
+def test_session_items_carry_their_favorite_state():
+    reviews = set_favorite(new_reviews(), "the-thing-is", True)
+
+    by_id = {item["id"]: item for item in build_session(reviews, TODAY)}
+
+    assert by_id["the-thing-is"]["favorite"] is True
+    assert by_id["it-depends-on"]["favorite"] is False
+
+
+def test_favoriting_rejects_an_unknown_pattern():
+    with pytest.raises(ValueError, match="没有这个句型"):
+        set_favorite(new_reviews(), "nope", True)

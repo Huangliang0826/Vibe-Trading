@@ -56,6 +56,34 @@ def mark_studied(reviews: dict, pattern_id: str, today: str) -> dict:
     return {**reviews, pattern_id: {**entry, "studied": entry.get("studied") or today}}
 
 
+def set_favorite(reviews: dict, pattern_id: str, favorite: bool) -> dict:
+    """收藏 / 取消收藏一条句型。
+
+    与盒子无关:盒子是算法按答题表现推的,收藏是自己标的"这句我要留着"。
+    两件事互不干涉,所以收藏不会打乱复习节奏。
+    """
+    if pattern_id not in PATTERN_BY_ID:
+        raise ValueError(f"没有这个句型:{pattern_id}")
+    entry = dict(reviews.get(pattern_id) or {})
+    if favorite:
+        entry["favorite"] = True
+    else:
+        entry.pop("favorite", None)
+    return {**reviews, pattern_id: entry}
+
+
+def favorites(reviews: dict) -> list[dict]:
+    """已收藏的句型,按清单顺序(也就是难度顺序)。"""
+    return [
+        {
+            "id": p.id, "frame": p.frame, "meaning": p.meaning,
+            "group_label": p.group_label, "level_label": p.level_label,
+        }
+        for p in PATTERNS
+        if (reviews.get(p.id) or {}).get("favorite")
+    ]
+
+
 def grade_for_answer(correct: bool, elapsed_ms: int) -> str:
     """把一次客观作答翻译成盒子评分。
 
@@ -174,7 +202,7 @@ def build_session(reviews: dict, today: str, *, new_per_day: int | None = NEW_PE
 
     items = [
         {**pattern.to_dict(), "status": "review", "box": int(entry.get("box", 0)),
-         "seen": int(entry.get("seen", 0))}
+         "seen": int(entry.get("seen", 0)), "favorite": bool(entry.get("favorite"))}
         for entry, pattern in (due if limit is None else due[:limit])
     ]
 
@@ -188,7 +216,9 @@ def build_session(reviews: dict, today: str, *, new_per_day: int | None = NEW_PE
     if caps:
         fresh = fresh[: min(caps)]
     return items + [
-        {**p.to_dict(), "status": "new", "box": 0, "seen": 0} for p in fresh
+        {**p.to_dict(), "status": "new", "box": 0, "seen": 0,
+         "favorite": bool((reviews.get(p.id) or {}).get("favorite"))}
+        for p in fresh
     ]
 
 
@@ -201,6 +231,7 @@ def stats(reviews: dict, today: str) -> dict:
     return {
         "total": TOTAL,
         "started": len(reviews),
+        "favorites": sum(1 for e in reviews.values() if e.get("favorite")),
         "tested": len(tested),
         "accuracy": round(right / (right + wrong) * 100) if right + wrong else None,
         "automatic": sum(1 for b in boxes if b >= MAX_BOX),
@@ -208,18 +239,3 @@ def stats(reviews: dict, today: str) -> dict:
         "reviewed_today": sum(1 for e in reviews.values() if e.get("last") == today),
         "box_counts": {str(b): boxes.count(b) for b in range(len(INTERVALS))},
     }
-
-
-def shaky(reviews: dict, limit: int = 8) -> list[dict]:
-    """练过但还卡壳的句型——复习得最多却仍在低盒的那些。"""
-    rows = [
-        (PATTERN_BY_ID[pid], entry)
-        for pid, entry in reviews.items()
-        if pid in PATTERN_BY_ID and int(entry.get("seen", 0)) >= 3
-        and int(entry.get("box", 0)) <= 1
-    ]
-    rows.sort(key=lambda pair: -int(pair[1].get("seen", 0)))
-    return [
-        {"id": p.id, "frame": p.frame, "meaning": p.meaning, "seen": int(e.get("seen", 0))}
-        for p, e in rows[:limit]
-    ]

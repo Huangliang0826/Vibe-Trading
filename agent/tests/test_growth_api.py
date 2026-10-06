@@ -231,7 +231,7 @@ def english_client(tmp_path: Path, monkeypatch) -> TestClient:
 def test_english_opens_with_the_whole_catalog_and_no_daily_cap(english_client):
     data = english_client.get("/growth/english").json()
 
-    assert data["stats"] == {**data["stats"], "total": 200, "started": 0, "automatic": 0}
+    assert data["stats"] == {**data["stats"], "total": 200, "started": 0, "favorites": 0}
     assert data["new_per_day"] is None and data["session_limit"] is None
     assert data["fast_ms"] == 6000
     assert len(data["session"]) == 200
@@ -349,3 +349,38 @@ def test_domain_levels_and_english_levels_do_not_collide(client):
     assert [lv["key"] for lv in by_key["sleep"]["levels"]] == [
         "hard_to_sleep", "too_short", "irregular",
     ]
+
+
+def test_favoriting_a_pattern_shows_up_in_the_list_and_the_count(english_client):
+    data = english_client.post("/growth/english/favorite",
+                               json={"pattern_id": "the-thing-is", "favorite": True}).json()
+
+    assert data["stats"]["favorites"] == 1
+    assert [f["id"] for f in data["favorites"]] == ["the-thing-is"]
+
+
+def test_unfavoriting_takes_it_back_off_the_list(english_client):
+    english_client.post("/growth/english/favorite",
+                        json={"pattern_id": "the-thing-is", "favorite": True})
+
+    data = english_client.post("/growth/english/favorite",
+                               json={"pattern_id": "the-thing-is", "favorite": False}).json()
+
+    assert data["favorites"] == [] and data["stats"]["favorites"] == 0
+
+
+def test_a_favorite_survives_being_quizzed(english_client):
+    english_client.post("/growth/english/favorite",
+                        json={"pattern_id": "the-thing-is", "favorite": True})
+
+    english_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "the-thing-is", "elapsed_ms": 900})
+
+    assert english_client.get("/growth/english").json()["stats"]["favorites"] == 1
+
+
+def test_favoriting_rejects_an_unknown_pattern(english_client):
+    response = english_client.post("/growth/english/favorite",
+                                   json={"pattern_id": "nope", "favorite": True})
+
+    assert response.status_code == 400

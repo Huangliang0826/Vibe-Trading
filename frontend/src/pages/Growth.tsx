@@ -42,21 +42,9 @@ const chip =
 const chipOn = "border-primary bg-primary/10 font-medium text-primary";
 const chipOff = "border-border text-muted-foreground";
 
-function PageHeader({ subtitle }: { subtitle: string }) {
-  return (
-    <div className="flex items-start gap-4">
-      <div className="mt-1 grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10">
-        <Sprout className="h-5 w-5" strokeWidth={1.8} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="page-kicker">Personal growth</p>
-        <h1 className="mt-1.5 text-[30px] font-semibold leading-tight tracking-[-0.035em] sm:text-[32px]">
-          个人成长
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">{subtitle}</p>
-      </div>
-    </div>
-  );
+/** 一行说明。页面标题交给侧栏——每个 tab 都顶一个大标题只是在挤走内容。 */
+function Lede({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm leading-relaxed text-muted-foreground">{children}</p>;
 }
 
 // ── 建计划:全部点选 ─────────────────────────────────────────────────────────
@@ -96,7 +84,7 @@ function Setup({ options, onCreated }: { options: GrowthOptions; onCreated: (s: 
 
   return (
     <div className="space-y-6">
-      <PageHeader subtitle={`选几下就好,剩下的交给 AI 排。两周后有一次检查点,能看出变化。`} />
+      <Lede>选几下就好,剩下的交给 AI 排。两周后有一次检查点,能看出变化。</Lede>
 
       <div className="space-y-4">
         {options.domains.map((domain) => {
@@ -199,7 +187,7 @@ function Setup({ options, onCreated }: { options: GrowthOptions; onCreated: (s: 
 function Generating({ ready, total }: { ready: number; total: number }) {
   return (
     <div className="space-y-6">
-      <PageHeader subtitle="正在为每个领域排 14 天的具体动作。" />
+      <Lede>正在为每个领域排 14 天的具体动作。</Lede>
       <div className="space-y-4 rounded-2xl border bg-card p-6">
         <div className="flex items-center gap-2.5 text-sm font-medium">
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -496,13 +484,11 @@ function TodayBoard({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        subtitle={
-          allDone
-            ? "今天四项都做完了。明天见。"
-            : `今天还剩 ${overview.domain_count - overview.done_today} 项,每项几分钟。`
-        }
-      />
+      <Lede>
+        {allDone
+          ? "今天四项都做完了。明天见。"
+          : `今天还剩 ${overview.domain_count - overview.done_today} 项,每项几分钟。`}
+      </Lede>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border bg-card p-4">
@@ -567,15 +553,29 @@ function TodayBoard({
 const TABS = [
   { key: "today", label: "每天", icon: Sprout },
   { key: "english", label: "英语句型", icon: MessagesSquare },
-  { key: "quiz", label: "测试", icon: Target },
 ] as const;
 
 type Tab = (typeof TABS)[number]["key"];
 
+//  英语句型下的两件事:先学,再考。测验是学习的一部分,所以收在它里面。
+const ENGLISH_VIEWS = [
+  { key: "learn", label: "学习", icon: MessagesSquare },
+  { key: "quiz", label: "测试", icon: Target },
+] as const;
+
+type EnglishView = (typeof ENGLISH_VIEWS)[number]["key"];
+
+const tabClass = (active: boolean) =>
+  cn(
+    "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
+    active ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+  );
+
 export function Growth() {
   const [searchParams, setSearchParams] = useSearchParams();
   const raw = searchParams.get("tab");
-  const tab: Tab = raw === "english" || raw === "quiz" ? raw : "today";
+  const tab: Tab = raw === "english" ? "english" : "today";
+  const view: EnglishView = searchParams.get("view") === "quiz" ? "quiz" : "learn";
   const [state, setState] = useState<GrowthState | null>(null);
   const [options, setOptions] = useState<GrowthOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -603,10 +603,19 @@ export function Growth() {
     return () => window.clearInterval(timer);
   }, [state?.generating]);
 
-  const selectTab = (next: Tab) => {
+  const selectTab = (nextTab: Tab) => {
     const params = new URLSearchParams(searchParams);
-    if (next === "today") params.delete("tab");
-    else params.set("tab", next);
+    if (nextTab === "today") params.delete("tab");
+    else params.set("tab", nextTab);
+    params.delete("view");
+    setSearchParams(params, { replace: true });
+  };
+
+  const selectView = (nextView: EnglishView) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", "english");
+    if (nextView === "learn") params.delete("view");
+    else params.set("view", nextView);
     setSearchParams(params, { replace: true });
   };
 
@@ -620,12 +629,7 @@ export function Growth() {
             role="tab"
             aria-selected={tab === key}
             onClick={() => selectTab(key)}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm transition-colors",
-              tab === key
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            className={tabClass(tab === key)}
           >
             <Icon className="h-4 w-4" />
             {label}
@@ -639,17 +643,22 @@ export function Growth() {
   if (tab === "english") {
     return shell(
       <>
-        <PageHeader subtitle="基础到高级的高频句型,先过一遍,记不记得住由「测试」说了算。" />
-        <EnglishDrill />
-      </>,
-    );
-  }
-
-  if (tab === "quiz") {
-    return shell(
-      <>
-        <PageHeader subtitle="两张卡二选一,随机抽。答对还要够快,才算真的能调出来。" />
-        <EnglishQuiz />
+        <div role="tablist" aria-label="英语句型" className="inline-flex rounded-lg border bg-muted/30 p-1">
+          {ENGLISH_VIEWS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={view === key}
+              onClick={() => selectView(key)}
+              className={tabClass(view === key)}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+        {view === "quiz" ? <EnglishQuiz /> : <EnglishDrill />}
       </>,
     );
   }
@@ -657,7 +666,6 @@ export function Growth() {
   if (error) {
     return shell(
       <>
-        <PageHeader subtitle="数据来自后端,手机和电脑看到的是同一份。" />
         <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
           {error}
         </p>

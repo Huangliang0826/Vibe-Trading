@@ -138,7 +138,7 @@ export function EnglishQuiz() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="已自动化" value={stats.automatic} suffix={`/ ${stats.total}`} />
+        <Stat label="已收藏" value={stats.favorites} suffix="句" />
         <Stat label="总正确率" value={stats.accuracy === null ? "—" : `${stats.accuracy}%`} />
         <Stat label="本轮连对" value={round.streak} suffix={round.best ? `最高 ${round.best}` : undefined} />
       </div>
