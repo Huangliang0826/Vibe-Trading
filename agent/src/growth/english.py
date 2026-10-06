@@ -34,6 +34,10 @@ FAST_MS = 6000
 INTERVALS = (1, 2, 4, 9, 21)
 MAX_BOX = len(INTERVALS) - 1
 
+#: 每天的目标:在测试里答对多少条句型就算今天过了。
+#: 一个能看见进度、也能真的在几分钟内达成的数,比"练一会儿"这种说法可执行。
+DAILY_GOAL = 10
+
 #: 每天引入多少新句型、单轮练多少条,都不设上限(``None``)——想练多少练多少。
 #: 两个参数保留下来是因为顺序仍然有意义:到期的复习永远排在新内容前面。
 NEW_PER_DAY: int | None = None
@@ -54,6 +58,40 @@ def mark_studied(reviews: dict, pattern_id: str, today: str) -> dict:
         raise ValueError(f"没有这个句型:{pattern_id}")
     entry = dict(reviews.get(pattern_id) or {})
     return {**reviews, pattern_id: {**entry, "studied": entry.get("studied") or today}}
+
+
+def record_answer(doc: dict, pattern_id: str, correct: bool, elapsed_ms: int, today: str) -> dict:
+    """记一次测试作答:推进复习盒子,同时累加当天的战绩。
+
+    两件事一起返回一份新文档,由调用方一次写盘——分开写就会出现盒子已经动了
+    但当天计数还没加上的中间状态,日历也就跟着错一天。
+    """
+    reviews = apply_review(doc.get("reviews") or {}, pattern_id,
+                           grade_for_answer(correct, elapsed_ms), today)
+    day = dict((doc.get("daily") or {}).get(today) or {})
+    day["answered"] = int(day.get("answered", 0)) + 1
+    day["correct"] = int(day.get("correct", 0)) + (1 if correct else 0)
+    return {**doc, "reviews": reviews, "daily": {**(doc.get("daily") or {}), today: day}}
+
+
+def english_today(doc: dict, today: str, goal: int = DAILY_GOAL) -> dict:
+    """今天的英语进度——每天那张卡片要显示的东西。"""
+    day = (doc.get("daily") or {}).get(today) or {}
+    correct = int(day.get("correct", 0))
+    return {
+        "goal": goal,
+        "correct": correct,
+        "answered": int(day.get("answered", 0)),
+        "done": correct >= goal,
+    }
+
+
+def english_days(doc: dict, goal: int = DAILY_GOAL) -> set[str]:
+    """达成过当天目标的日期。"""
+    return {
+        day for day, row in (doc.get("daily") or {}).items()
+        if int((row or {}).get("correct", 0)) >= goal
+    }
 
 
 def set_favorite(reviews: dict, pattern_id: str, favorite: bool) -> dict:

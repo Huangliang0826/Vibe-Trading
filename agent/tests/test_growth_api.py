@@ -49,13 +49,7 @@ def offline_model(monkeypatch):
     )
 
 
-INTAKE = {
-    "chronotype": "early",
-    "domains": {
-        "dutch": {"level": "zero", "minutes": 10},
-        "english": {"level": "read_only", "minutes": 20},
-    },
-}
+INTAKE = {"chronotype": "early", "domains": {"dutch": {"level": "zero", "minutes": 10}}}
 
 
 def _plan(client: TestClient) -> dict:
@@ -78,10 +72,10 @@ def test_state_reports_not_configured_before_any_plan_exists(client):
     assert client.get("/growth/state").json() == {"configured": False}
 
 
-def test_options_lists_the_two_language_domains_with_tap_choices(client):
+def test_options_lists_the_planned_domain_with_tap_choices(client):
     data = client.get("/growth/options").json()
 
-    assert [d["key"] for d in data["domains"]] == ["dutch", "english"]
+    assert [d["key"] for d in data["domains"]] == ["dutch"]
     assert data["days"] == PLAN_DAYS
     # 每个领域三档起点,全部可点选
     assert all(len(d["levels"]) == 3 for d in data["domains"])
@@ -96,7 +90,7 @@ def test_checkin_before_a_plan_exists_is_a_404_not_a_crash(client):
 def test_plan_covers_every_requested_domain_for_two_weeks(client):
     data = _plan(client)
 
-    assert set(data["plan"]) == {"dutch", "english"}
+    assert set(data["plan"]) == {"dutch"}
     assert all(len(p["steps"]) == PLAN_DAYS for p in data["plan"].values())
     assert all(p["checkpoint"] for p in data["plan"].values())
 
@@ -119,7 +113,7 @@ def test_state_reports_generation_progress_while_the_plan_is_being_built(client)
     # 四个领域实测要两分多钟,所以接口立即返回,进度靠轮询。
     started = client.post("/growth/plan", json=INTAKE).json()
 
-    assert started == {"configured": False, "generating": True, "ready": 0, "total": 2}
+    assert started == {"configured": False, "generating": True, "ready": 0, "total": 1}
 
 
 def test_a_second_submit_while_generating_does_not_start_a_second_job(client):
@@ -127,11 +121,11 @@ def test_a_second_submit_while_generating_does_not_start_a_second_job(client):
 
     again = client.post("/growth/plan", json=INTAKE).json()
 
-    assert again["generating"] is True and again["total"] == 2
+    assert again["generating"] is True and again["total"] == 1
 
 
 def test_plan_rejects_a_domain_that_is_no_longer_offered(client):
-    bad = {"chronotype": "early", "domains": {"sleep": {"level": "zero", "minutes": 10}}}
+    bad = {"chronotype": "early", "domains": {"english": {"level": "zero", "minutes": 10}}}
 
     assert client.post("/growth/plan", json=bad).status_code == 400
 
@@ -153,7 +147,6 @@ def test_checkin_advances_only_its_own_domain(client):
 
     by_domain = {d["domain"]: d for d in data["overview"]["domains"]}
     assert by_domain["dutch"]["done"] == 1 and by_domain["dutch"]["done_today"] is True
-    assert by_domain["english"]["done"] == 0
 
 
 def test_tapping_twice_in_one_day_does_not_consume_two_days_of_plan(client):
@@ -384,3 +377,88 @@ def test_favoriting_rejects_an_unknown_pattern(english_client):
                                    json={"pattern_id": "nope", "favorite": True})
 
     assert response.status_code == 400
+
+
+# ── 每天 ←→ 英语句型 的联通 ───────────────────────────────────────────────────
+
+@pytest.fixture
+def both_client(tmp_path: Path, monkeypatch) -> TestClient:
+    """同时隔离计划与英语进度——这条链路要跨两个文件。"""
+    monkeypatch.setattr(store, "state_path", lambda: tmp_path / "growth" / "state.json")
+    monkeypatch.setattr(store, "english_path", lambda: tmp_path / "growth" / "english.json")
+    return TestClient(api_server.app, client=("127.0.0.1", 50000))
+
+
+def _answer_correctly(client: TestClient, times: int) -> None:
+    ids = [q["answer_id"] for q in client.get(f"/growth/english/quiz?count={times}").json()["questions"]]
+    for pattern_id in ids[:times]:
+        client.post("/growth/english/answer", json={
+            "pattern_id": pattern_id, "chosen_id": pattern_id, "elapsed_ms": 800,
+        })
+
+
+def test_todays_english_goal_starts_empty(both_client):
+    english = both_client.get("/growth/state").json()
+    # 还没建计划时也该给出英语进度:英语不依赖计划。
+    assert english["configured"] is False
+
+
+def test_quiz_answers_drive_the_english_item_on_the_daily_page(both_client):
+    _plan(both_client)
+
+    _answer_correctly(both_client, 4)
+
+    english = both_client.get("/growth/state").json()["overview"]["english"]
+    assert english == {"goal": 10, "correct": 4, "answered": 4, "done": False}
+
+
+def test_reaching_the_goal_completes_the_english_item_without_a_manual_checkin(both_client):
+    # 英语的"完成"量的是结果,不是按下按钮的意愿。
+    _plan(both_client)
+
+    _answer_correctly(both_client, 10)
+
+    overview = both_client.get("/growth/state").json()["overview"]
+    assert overview["english"]["done"] is True
+    assert overview["summary"]["active_days"] == 1
+
+
+def test_a_wrong_answer_does_not_move_the_daily_goal(both_client):
+    _plan(both_client)
+
+    both_client.post("/growth/english/answer", json={
+        "pattern_id": "the-thing-is", "chosen_id": "it-depends-on", "elapsed_ms": 500,
+    })
+
+    english = both_client.get("/growth/state").json()["overview"]["english"]
+    assert english["answered"] == 1 and english["correct"] == 0
+
+
+def test_the_calendar_marks_a_day_where_only_english_was_done(both_client):
+    _plan(both_client)
+
+    _answer_correctly(both_client, 10)
+
+    calendar = both_client.get("/growth/state").json()["overview"]["calendar"]
+    assert calendar[-1]["state"] == "partial"
+    assert calendar[-1]["english"] is True and calendar[-1]["plan"] is False
+
+
+def test_the_calendar_marks_a_full_day_when_both_are_done(both_client):
+    _plan(both_client)
+    both_client.post("/growth/checkin", json={"domain": "dutch"})
+
+    _answer_correctly(both_client, 10)
+
+    overview = both_client.get("/growth/state").json()["overview"]
+    assert overview["calendar"][-1]["state"] == "full"
+    assert overview["summary"]["full_days"] == 1
+
+
+def test_the_calendar_covers_four_weeks(both_client):
+    _plan(both_client)
+
+    calendar = both_client.get("/growth/state").json()["overview"]["calendar"]
+
+    assert len(calendar) == 28
+    assert calendar[0]["date"] < calendar[-1]["date"]  # 从早到晚

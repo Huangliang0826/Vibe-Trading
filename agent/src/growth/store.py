@@ -31,25 +31,41 @@ def english_path() -> Path:
     return get_runtime_root() / "growth" / "english.json"
 
 
+def empty_english() -> dict:
+    """``reviews`` 是每条句型的复习状态,``daily`` 是每天的作答战绩。
+
+    日历和"累计学了多少天"需要按天的数字,而复习状态里只留得下最后一次作答的
+    日期——从它推不出前天答对了几条。所以两份数据都要存,而且**存在同一个
+    文件里一次写完**:分成两次写就会出现只写成功一半的时刻。
+    """
+    return {"reviews": {}, "daily": {}}
+
+
 def read_english() -> dict:
     try:
         data = json.loads(english_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
-    reviews = data.get("reviews") if isinstance(data, dict) else None
-    return reviews if isinstance(reviews, dict) else {}
+        return empty_english()
+    if not isinstance(data, dict):
+        return empty_english()
+    reviews = data.get("reviews")
+    daily = data.get("daily")
+    return {
+        "reviews": reviews if isinstance(reviews, dict) else {},
+        "daily": daily if isinstance(daily, dict) else {},
+    }
 
 
-def write_english(reviews: dict) -> dict:
+def write_english(doc: dict) -> dict:
     path = english_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": STATE_VERSION, "reviews": reviews}
+    payload = {"version": STATE_VERSION, **doc}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     try:
         os.chmod(path, 0o600)
     except OSError:
         pass
-    return reviews
+    return doc
 
 
 def clear_english() -> None:

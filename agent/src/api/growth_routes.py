@@ -23,16 +23,18 @@ from src.growth.plan import (
     DomainIntake, Intake, fallback_plan, generate_domain_plan,
 )
 from src.growth.english import (
-    FAST_MS, NEW_PER_DAY, QUIZ_OPTIONS, SESSION_LIMIT, apply_review, build_session,
-    favorites, grade_for_answer, mark_studied, pick_quiz, set_favorite, stats,
+    DAILY_GOAL, FAST_MS, NEW_PER_DAY, QUIZ_OPTIONS, SESSION_LIMIT, build_session,
+    english_days, english_today, favorites, mark_studied, pick_quiz, record_answer,
+    set_favorite, stats,
 )
 # 别名:``LEVELS`` 在 plan 里是每个领域的起点选项,同名导入会把它整个盖掉。
 from src.growth.english_patterns import LEVELS as ENGLISH_LEVELS
 from src.growth.english_patterns import GROUPS, LEVEL_TOTALS, PATTERNS
 from src.growth.progress import build_overview
 from src.growth.store import (
-    apply_checkin, clear_english, clear_state, new_state, read_english,
-    read_state, set_checkpoint, undo_checkin, write_english, write_state,
+    apply_checkin, clear_english, clear_state, empty_english, new_state,
+    read_english, read_state, set_checkpoint, undo_checkin, write_english,
+    write_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +85,7 @@ def _require_state() -> dict:
 
 def _payload(state: dict) -> dict:
     today = _today()
+    doc = read_english()
     return {
         "configured": True,
         "start_date": state.get("start_date"),
@@ -90,7 +93,11 @@ def _payload(state: dict) -> dict:
         "intake": state.get("intake"),
         "plan": state.get("plan"),
         "checkpoints": state.get("checkpoints") or {},
-        "overview": build_overview(state, today),
+        "overview": {
+            **build_overview(state, today, english_days(doc)),
+            # 英语不走计划,目标直接来自测试的当日战绩。
+            "english": english_today(doc, today),
+        },
     }
 
 
@@ -257,12 +264,15 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
 
     # ── 英语句型 ──────────────────────────────────────────────────────────────
 
-    def _english_payload(reviews: dict) -> dict:
+    def _english_payload(doc: dict) -> dict:
         today = _today()
+        reviews = doc.get("reviews") or {}
         return {
             "today": today,
             "session": build_session(reviews, today),
             "stats": stats(reviews, today),
+            "today_progress": english_today(doc, today),
+            "daily_goal": DAILY_GOAL,
             "favorites": favorites(reviews),
             "new_per_day": NEW_PER_DAY,
             "session_limit": SESSION_LIMIT,
@@ -281,7 +291,7 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
 
     @router.get("/english/patterns")
     async def english_patterns():
-        reviews = read_english()
+        reviews = read_english().get("reviews") or {}
         return {
             "groups": [{"key": k, "label": v} for k, v in GROUPS.items()],
             "levels": _levels(),
@@ -294,46 +304,56 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
     @router.post("/english/studied")
     async def english_studied(payload: StudiedRequest):
         """学习页看过一条。只记接触,不打分——打分是测验的事。"""
+        doc = read_english()
         try:
-            updated = mark_studied(read_english(), payload.pattern_id, _today())
+            reviews = mark_studied(doc.get("reviews") or {}, payload.pattern_id, _today())
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _english_payload(write_english(updated))
+        return _english_payload(write_english({**doc, "reviews": reviews}))
 
     @router.post("/english/favorite")
     async def english_favorite(payload: FavoriteRequest):
+        doc = read_english()
         try:
-            updated = set_favorite(read_english(), payload.pattern_id, payload.favorite)
+            reviews = set_favorite(doc.get("reviews") or {}, payload.pattern_id, payload.favorite)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _english_payload(write_english(updated))
+        return _english_payload(write_english({**doc, "reviews": reviews}))
 
     @router.get("/english/quiz")
     async def english_quiz(count: int = Query(20, ge=1, le=100)):
         """抽一批两选一的题。"""
-        reviews = read_english()
+        doc = read_english()
+        reviews = doc.get("reviews") or {}
         return {
             "questions": pick_quiz(reviews, _today(), count=count),
             "options_per_question": QUIZ_OPTIONS,
             "fast_ms": FAST_MS,
             "stats": stats(reviews, _today()),
+            "today_progress": english_today(doc, _today()),
         }
 
     @router.post("/english/answer")
     async def english_answer(payload: AnswerRequest):
         """判一次作答并推进盒子。对错在服务端判,客户端报不了"我对了"。"""
         correct = payload.chosen_id == payload.pattern_id
-        grade = grade_for_answer(correct, payload.elapsed_ms)
+        today = _today()
         try:
-            updated = apply_review(read_english(), payload.pattern_id, grade, _today())
+            doc = record_answer(read_english(), payload.pattern_id, correct,
+                                payload.elapsed_ms, today)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        write_english(updated)
-        return {"correct": correct, "grade": grade, "stats": stats(updated, _today())}
+        write_english(doc)
+        return {
+            "correct": correct,
+            "grade": (doc["reviews"][payload.pattern_id] or {}).get("last_grade", ""),
+            "stats": stats(doc["reviews"], today),
+            "today_progress": english_today(doc, today),
+        }
 
     @router.post("/english/reset")
     async def english_reset():
         clear_english()
-        return _english_payload({})
+        return _english_payload(empty_english())
 
     app.include_router(router)

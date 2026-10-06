@@ -135,6 +135,29 @@ export interface GrowthCheckpointStatus {
   due: boolean;
 }
 
+export interface GrowthEnglishProgress {
+  goal: number;
+  correct: number;
+  answered: number;
+  done: boolean;
+}
+
+export interface GrowthCalendarDay {
+  date: string;
+  plan: boolean;
+  english: boolean;
+  state: "full" | "partial" | "none";
+}
+
+export interface GrowthSummary {
+  /** 至少完成一项的天数 */
+  active_days: number;
+  /** 两项都完成的天数 */
+  full_days: number;
+  streak: number;
+  best_streak: number;
+}
+
 export interface GrowthOverview {
   today: string;
   streak: number;
@@ -147,6 +170,10 @@ export interface GrowthOverview {
   total_steps: number;
   percent: number;
   checkpoint: GrowthCheckpointStatus;
+  /** 英语不走计划:目标由「英语句型」的测试直接给出 */
+  english: GrowthEnglishProgress;
+  calendar: GrowthCalendarDay[];
+  summary: GrowthSummary;
 }
 
 export interface GrowthState {
@@ -192,6 +219,7 @@ export interface EnglishAnswerResult {
   correct: boolean;
   grade: EnglishGrade;
   stats: EnglishStats;
+  today_progress: GrowthEnglishProgress;
 }
 
 export interface EnglishPattern {
@@ -232,6 +260,8 @@ export interface EnglishStats {
 
 export interface EnglishState {
   today: string;
+  today_progress: GrowthEnglishProgress;
+  daily_goal: number;
   session: EnglishPattern[];
   stats: EnglishStats;
   favorites: {
@@ -625,6 +655,7 @@ export const api = {
       options_per_question: number;
       fast_ms: number;
       stats: EnglishStats;
+      today_progress: GrowthEnglishProgress;
     }>(`/growth/english/quiz?count=${count}`),
   answerEnglishQuiz: (pattern_id: string, chosen_id: string, elapsed_ms: number) =>
     request<EnglishAnswerResult>("/growth/english/answer", {

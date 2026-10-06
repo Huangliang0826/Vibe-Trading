@@ -142,10 +142,69 @@ def checkpoint_status(state: dict, today: str) -> dict:
     }
 
 
-def build_overview(state: dict, today: str) -> dict:
+#: 日历回看多少天。四周刚好铺满一屏,也够看出节奏。
+CALENDAR_DAYS = 28
+
+
+def checkin_days(checkins: list[dict]) -> set[str]:
+    return {c["date"] for c in checkins if c.get("date")}
+
+
+def build_calendar(plan_days: set[str], english_days: set[str], today: str,
+                   days: int = CALENDAR_DAYS) -> list[dict]:
+    """最近 ``days`` 天的打卡情况,从早到晚。
+
+    一天只要完成了其中一项就算打了卡;两项都完成的那天标成实心。把"做了一半"
+    也画出来,比只认全勤诚实,也更不容易让人因为断一次就放弃。
+    """
+    out = []
+    for offset in range(days - 1, -1, -1):
+        day = add_days(today, -offset)
+        plan_done = day in plan_days
+        english_done = day in english_days
+        out.append({
+            "date": day,
+            "plan": plan_done,
+            "english": english_done,
+            "state": "full" if plan_done and english_done
+            else "partial" if plan_done or english_done else "none",
+        })
+    return out
+
+
+def build_summary(plan_days: set[str], english_days: set[str], today: str) -> dict:
+    """累计成果。``streak`` 与每天那张卡片用的是同一套宽容规则。"""
+    active = plan_days | english_days
+    if not active:
+        return {"active_days": 0, "full_days": 0, "streak": 0, "best_streak": 0}
+
+    cursor = today if today in active else add_days(today, -1)
+    streak = 0
+    while cursor in active:
+        streak += 1
+        cursor = add_days(cursor, -1)
+
+    best = run = 0
+    previous = None
+    for day in sorted(active):
+        run = run + 1 if previous and add_days(previous, 1) == day else 1
+        best = max(best, run)
+        previous = day
+
+    return {
+        "active_days": len(active),
+        "full_days": len(plan_days & english_days),
+        "streak": streak,
+        "best_streak": best,
+    }
+
+
+def build_overview(state: dict, today: str, english_days: set[str] | None = None) -> dict:
     """界面需要的全部派生数据,一次算完。"""
     plan = state.get("plan") or {}
     checkins = state.get("checkins") or []
+    english_days = english_days or set()
+    plan_days = checkin_days(checkins)
     # 按 DOMAINS 过滤并排序:早先生成的计划可能还带着已经去掉的领域,
     # 不该因此逼人重新生成一份。
     domains = [domain_progress(d, plan[d], checkins, today) for d in DOMAINS if d in plan]
@@ -154,7 +213,7 @@ def build_overview(state: dict, today: str) -> dict:
 
     return {
         "today": today,
-        "streak": streak(checkins, today),
+        "streak": build_summary(plan_days, english_days, today)["streak"],
         "nudge": missed_two_days(checkins, today),
         "domains": [d.to_dict() for d in domains],
         "done_today": sum(1 for d in domains if d.done_today),
@@ -163,4 +222,6 @@ def build_overview(state: dict, today: str) -> dict:
         "total_steps": total_steps,
         "percent": round(total_done / total_steps * 100) if total_steps else 0,
         "checkpoint": checkpoint_status(state, today),
+        "calendar": build_calendar(plan_days, english_days, today),
+        "summary": build_summary(plan_days, english_days, today),
     }

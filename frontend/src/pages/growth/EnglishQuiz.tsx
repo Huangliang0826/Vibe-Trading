@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   api, type EnglishAnswerResult, type EnglishQuizQuestion, type EnglishStats,
+  type GrowthEnglishProgress,
 } from "@/lib/api";
 import { SpeakButton } from "@/components/SpeakButton";
 import { cancelSpeech } from "@/lib/speech";
@@ -43,6 +44,7 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
 export function EnglishQuiz() {
   const [questions, setQuestions] = useState<EnglishQuizQuestion[] | null>(null);
   const [stats, setStats] = useState<EnglishStats | null>(null);
+  const [today, setToday] = useState<GrowthEnglishProgress | null>(null);
   const [cursor, setCursor] = useState(0);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const advanceTimer = useRef<number | null>(null);
@@ -56,6 +58,7 @@ export function EnglishQuiz() {
       const data = await api.getEnglishQuiz(BATCH);
       setQuestions(data.questions);
       setStats(data.stats);
+      setToday(data.today_progress);
       setCursor(0);
       setVerdict(null);
       setRound({ right: 0, wrong: 0, streak: 0, best: 0 });
@@ -81,7 +84,7 @@ export function EnglishQuiz() {
   if (error) {
     return <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">{error}</p>;
   }
-  if (!questions || !stats) {
+  if (!questions || !stats || !today) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />载入中…
@@ -98,6 +101,7 @@ export function EnglishQuiz() {
       const result = await api.answerEnglishQuiz(question.answer_id, chosenId, elapsed);
       setVerdict({ ...result, chosen_id: chosenId });
       setStats(result.stats);
+      setToday(result.today_progress);
       // 答对就自动翻页,节奏才连得起来;答错停下来——两张卡的释义就摆在那里,
       // 那一眼才是真正学到区别的地方。
       if (result.correct) {
@@ -138,7 +142,11 @@ export function EnglishQuiz() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="已收藏" value={stats.favorites} suffix="句" />
+        <Stat
+          label="今天目标"
+          value={`${today.correct} / ${today.goal}`}
+          suffix={today.done ? "已完成" : undefined}
+        />
         <Stat label="总正确率" value={stats.accuracy === null ? "—" : `${stats.accuracy}%`} />
         <Stat label="本轮连对" value={round.streak} suffix={round.best ? `最高 ${round.best}` : undefined} />
       </div>

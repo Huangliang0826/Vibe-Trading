@@ -11,15 +11,16 @@
  *  状态全部存后端(见 agent/src/growth),手机打卡和电脑回顾是同一份数据。
  */
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
-  BookOpen, Check, Dumbbell, Flame, Languages, Loader2, Moon, RotateCcw,
+  ArrowRight, BookOpen, Check, Dumbbell, Flame, Languages, Loader2, Moon, RotateCcw,
   MessagesSquare, Sparkles, Sprout, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  api, type GrowthDomainProgress, type GrowthOptions, type GrowthState,
+  api, type GrowthCalendarDay, type GrowthDomainProgress, type GrowthEnglishProgress,
+  type GrowthOptions, type GrowthState, type GrowthSummary,
 } from "@/lib/api";
 import { EnglishDrill } from "@/pages/growth/EnglishDrill";
 import { EnglishQuiz } from "@/pages/growth/EnglishQuiz";
@@ -406,6 +407,98 @@ function CheckpointInput({
   );
 }
 
+/** 英语:目标就是去「测试」答对 N 条。进度直接来自测验,不用手动打卡——
+ *  手动打卡量的是意愿,这个量的是结果。 */
+function EnglishCard({ progress }: { progress: GrowthEnglishProgress }) {
+  const pct = Math.min(100, Math.round((progress.correct / Math.max(1, progress.goal)) * 100));
+
+  return (
+    <div
+      className={cn(
+        "space-y-4 rounded-2xl border bg-card p-5 transition-colors",
+        progress.done && "border-primary/35 bg-primary/[0.04]",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <BookOpen className="h-[18px] w-[18px] text-primary" strokeWidth={1.8} />
+          <span className="text-[15px] font-medium">英语</span>
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">{progress.correct}</span> / {progress.goal} 句
+        </span>
+      </div>
+
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      </div>
+
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        {progress.done
+          ? `今天答对了 ${progress.correct} 句,目标已经完成。`
+          : `在「英语句型 → 测试」里答对 ${progress.goal} 句就算今天过了。`}
+      </p>
+
+      {progress.done ? (
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+          <Check className="h-4 w-4" />今天完成
+        </span>
+      ) : (
+        <Link
+          to="/growth?tab=english&view=quiz"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
+        >
+          去测试<ArrowRight className="h-4 w-4" />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/** 打卡日历。两项都完成画实心,完成一项画浅色——把"做了一半"也显示出来,
+ *  比只认全勤诚实,也更不容易让人因为断一次就放弃。 */
+function Calendar({ days, summary }: { days: GrowthCalendarDay[]; summary: GrowthSummary }) {
+  return (
+    <div className="space-y-4 rounded-2xl border bg-card p-5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[15px] font-medium">打卡日历</h2>
+        <span className="text-xs text-muted-foreground">最近四周</span>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1.5">
+        {days.map((day) => (
+          <div
+            key={day.date}
+            title={`${day.date} · ${day.state === "full" ? "两项都完成" : day.state === "partial" ? "完成一项" : "未打卡"}`}
+            className={cn(
+              "aspect-square rounded-md",
+              day.state === "full" && "bg-primary",
+              day.state === "partial" && "bg-primary/30",
+              day.state === "none" && "bg-muted-foreground/10",
+            )}
+          />
+        ))}
+      </div>
+
+      <dl className="grid grid-cols-3 gap-3 border-t pt-4 text-center">
+        {[
+          { label: "累计打卡", value: summary.active_days, unit: "天" },
+          { label: "两项全勤", value: summary.full_days, unit: "天" },
+          { label: "最长连续", value: summary.best_streak, unit: "天" },
+        ].map((row) => (
+          <div key={row.label}>
+            <dt className="text-xs text-muted-foreground">{row.label}</dt>
+            <dd className="mt-1 text-xl font-semibold tabular-nums">
+              {row.value}
+              <span className="text-xs font-normal text-muted-foreground"> {row.unit}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function TodayBoard({
   state,
   setState,
@@ -414,7 +507,10 @@ function TodayBoard({
   setState: (s: GrowthState) => void;
 }) {
   const overview = state.overview!;
-  const allDone = overview.done_today === overview.domain_count;
+  // 英语不在计划里,但它同样是今天的一项。
+  const doneToday = overview.done_today + (overview.english.done ? 1 : 0);
+  const totalToday = overview.domain_count + 1;
+  const allDone = doneToday === totalToday;
 
   const call = async (fn: () => Promise<GrowthState>) => {
     try {
@@ -439,7 +535,7 @@ function TodayBoard({
       <Lede>
         {allDone
           ? "今天都做完了。明天见。"
-          : `今天还剩 ${overview.domain_count - overview.done_today} 项,每项几分钟。`}
+          : `今天还剩 ${totalToday - doneToday} 项,每项几分钟。`}
       </Lede>
 
       <div className="grid grid-cols-2 gap-3">
@@ -454,8 +550,8 @@ function TodayBoard({
         <div className="rounded-2xl border bg-card p-4">
           <p className="text-xs text-muted-foreground">今天</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums">
-            {overview.done_today}
-            <span className="text-xs font-normal text-muted-foreground"> / {overview.domain_count}</span>
+            {doneToday}
+            <span className="text-xs font-normal text-muted-foreground"> / {totalToday}</span>
           </p>
         </div>
       </div>
@@ -467,6 +563,7 @@ function TodayBoard({
       )}
 
       <div className="space-y-4">
+        <EnglishCard progress={overview.english} />
         {overview.domains.map((item) => (
           <DomainCard
             key={item.domain}
@@ -476,6 +573,8 @@ function TodayBoard({
           />
         ))}
       </div>
+
+      <Calendar days={overview.calendar} summary={overview.summary} />
 
       <Checkpoint
         state={state}

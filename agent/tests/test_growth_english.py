@@ -3,9 +3,9 @@
 import pytest
 
 from src.growth.english import (
-    FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session, favorites,
-    grade_for_answer, introduced_today, mark_studied, new_reviews, pick_quiz,
-    set_favorite, stats,
+    DAILY_GOAL, FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session,
+    english_days, english_today, favorites, grade_for_answer, introduced_today,
+    mark_studied, new_reviews, pick_quiz, record_answer, set_favorite, stats,
 )
 from src.growth.english_patterns import (
     GROUPS, LEVEL_TOTALS, LEVELS, PATTERN_BY_ID, PATTERNS, TOTAL,
@@ -391,3 +391,55 @@ def test_session_items_carry_their_favorite_state():
 def test_favoriting_rejects_an_unknown_pattern():
     with pytest.raises(ValueError, match="没有这个句型"):
         set_favorite(new_reviews(), "nope", True)
+
+
+# ── 每天的英语目标 ────────────────────────────────────────────────────────────
+
+def test_a_quiz_answer_counts_towards_todays_goal():
+    doc = {"reviews": {}, "daily": {}}
+
+    doc = record_answer(doc, "the-thing-is", True, 900, TODAY)
+
+    assert english_today(doc, TODAY) == {"goal": DAILY_GOAL, "correct": 1, "answered": 1, "done": False}
+
+
+def test_a_wrong_answer_counts_as_answered_but_not_as_progress():
+    doc = record_answer({"reviews": {}, "daily": {}}, "the-thing-is", False, 900, TODAY)
+
+    progress = english_today(doc, TODAY)
+    assert progress["answered"] == 1 and progress["correct"] == 0
+
+
+def test_the_day_is_done_once_the_goal_is_reached():
+    doc = {"reviews": {}, "daily": {}}
+    for _ in range(DAILY_GOAL):
+        doc = record_answer(doc, "the-thing-is", True, 900, TODAY)
+
+    assert english_today(doc, TODAY)["done"] is True
+    assert english_days(doc) == {TODAY}
+
+
+def test_a_day_short_of_the_goal_is_not_marked_on_the_calendar():
+    doc = {"reviews": {}, "daily": {}}
+    for _ in range(DAILY_GOAL - 1):
+        doc = record_answer(doc, "the-thing-is", True, 900, TODAY)
+
+    assert english_days(doc) == set()
+
+
+def test_each_day_is_counted_separately():
+    doc = {"reviews": {}, "daily": {}}
+    for _ in range(DAILY_GOAL):
+        doc = record_answer(doc, "the-thing-is", True, 900, "2026-10-05")
+    doc = record_answer(doc, "the-thing-is", True, 900, "2026-10-06")
+
+    assert english_days(doc) == {"2026-10-05"}
+    assert english_today(doc, "2026-10-06")["correct"] == 1
+
+
+def test_an_answer_advances_the_box_and_the_daily_tally_together():
+    # 分成两次写盘会出现盒子动了但当天计数没加的中间状态,日历就跟着错一天。
+    doc = record_answer({"reviews": {}, "daily": {}}, "the-thing-is", True, 900, TODAY)
+
+    assert doc["reviews"]["the-thing-is"]["box"] == 1
+    assert doc["daily"][TODAY]["correct"] == 1

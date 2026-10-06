@@ -8,9 +8,9 @@ from src.growth.progress import (
 from src.growth.store import apply_checkin, new_state, set_checkpoint, undo_checkin
 
 
-def _state(today="2026-10-05", domains=("dutch", "english")):
+def _state(today="2026-10-05", domains=("dutch",)):
     plan = {d: fallback_plan(d, 10) for d in domains}
-    intake = {d: {"level": "zero" if d == "dutch" else "read_only", "minutes": 10} for d in domains}
+    intake = {d: {"level": "zero", "minutes": 10} for d in domains}
     return new_state(plan=plan, intake=intake, chronotype="early", today=today)
 
 
@@ -43,7 +43,7 @@ def test_progress_reports_completion_when_every_step_is_done():
 
 
 def test_progress_only_counts_its_own_domain():
-    checkins = [{"date": "2026-10-05", "domain": "english", "day": 1}]
+    checkins = [{"date": "2026-10-05", "domain": "somethingelse", "day": 1}]
 
     p = domain_progress("dutch", fallback_plan("dutch", 10), checkins, "2026-10-05")
 
@@ -105,20 +105,18 @@ def test_checkin_stops_at_the_end_of_the_plan():
 
 
 def test_checkin_rejects_a_domain_the_plan_does_not_cover():
-    with pytest.raises(ValueError, match="计划里没有"):
-        apply_checkin(_state(domains=("dutch",)), domain="english", today="2026-10-05")
+    with pytest.raises(ValueError, match="未知领域"):
+        apply_checkin(_state(), domain="english", today="2026-10-05")
 
 
-def test_undo_removes_only_todays_entry_for_that_domain():
+def test_undo_removes_only_todays_entry():
     state = _state()
     state = apply_checkin(state, domain="dutch", today="2026-10-04")
     state = apply_checkin(state, domain="dutch", today="2026-10-05")
-    state = apply_checkin(state, domain="english", today="2026-10-05")
 
     state = undo_checkin(state, domain="dutch", today="2026-10-05")
 
-    remaining = [(c["domain"], c["date"]) for c in state["checkins"]]
-    assert remaining == [("dutch", "2026-10-04"), ("english", "2026-10-05")]
+    assert [c["date"] for c in state["checkins"]] == ["2026-10-04"]
 
 
 def test_checkpoint_keeps_the_baseline_when_the_result_is_recorded():
@@ -154,8 +152,8 @@ def test_overview_counts_how_many_domains_are_already_done_today():
 
     overview = build_overview(state, "2026-10-05")
 
-    assert overview["done_today"] == 1 and overview["domain_count"] == 2
-    assert overview["total_steps"] == PLAN_DAYS * 2 and overview["total_done"] == 1
+    assert overview["done_today"] == 1 and overview["domain_count"] == 1
+    assert overview["total_steps"] == PLAN_DAYS and overview["total_done"] == 1
 
 
 def test_a_brand_new_plan_is_not_scolded_for_breaking_a_streak():
@@ -189,16 +187,18 @@ def test_there_is_no_today_step_before_the_first_checkin():
 
 
 def test_an_older_plan_with_retired_domains_still_opens():
-    # 睡眠和健身去掉之前生成的计划不该变成一堵墙,只显示还支持的领域就好。
-    state = _state(domains=("dutch",))
-    state["plan"]["sleep"] = fallback_plan("dutch", 10)  # 冒充一个已退役的领域
+    # 退役领域(睡眠、健身、后来的英语)生成的旧计划不该变成一堵墙。
+    state = _state()
+    state["plan"]["english"] = fallback_plan("dutch", 10)  # 冒充一个已退役的领域
 
     overview = build_overview(state, "2026-10-06")
 
     assert [d["domain"] for d in overview["domains"]] == ["dutch"]
 
 
-def test_domains_are_shown_in_a_fixed_order():
-    overview = build_overview(_state(domains=("english", "dutch")), "2026-10-06")
+def test_an_english_day_counts_towards_the_streak_without_a_plan_checkin():
+    # 英语不走计划:今天在测试里达标,就该和荷兰语打卡一样算一天。
+    overview = build_overview(_state(), "2026-10-06", english_days={"2026-10-06"})
 
-    assert [d["domain"] for d in overview["domains"]] == ["dutch", "english"]
+    assert overview["streak"] == 1
+    assert overview["summary"]["active_days"] == 1
