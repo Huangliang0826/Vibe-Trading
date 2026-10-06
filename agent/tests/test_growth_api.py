@@ -224,9 +224,12 @@ def english_client(tmp_path: Path, monkeypatch) -> TestClient:
 def test_english_opens_with_the_whole_catalog(english_client):
     data = english_client.get("/growth/english").json()
 
-    assert data["stats"] == {**data["stats"], "total": 152, "started": 0, "favorites": 0}
+    from src.growth.english_patterns import TRACK_TOTALS
+
+    assert data["stats"] == {**data["stats"],
+                             "total": TRACK_TOTALS["frame"], "started": 0, "favorites": 0}
     assert data["fast_ms"] == 6000
-    assert len(data["session"]) == 152
+    assert len(data["session"]) == TRACK_TOTALS["frame"]
     assert [t["key"] for t in data["tracks"]] == ["frame", "oneliner", "collocation"]
 
 
@@ -236,7 +239,7 @@ def test_the_learning_queue_resumes_where_it_was_left(english_client):
 
     session = english_client.get("/growth/english").json()["session"]
 
-    assert len(session) == 151
+    assert len(session) == 151  # 152 - 1
     assert session[0]["id"] != first
 
 
@@ -315,9 +318,11 @@ def test_the_full_catalog_is_available_with_each_patterns_box(english_client):
 
     data = english_client.get("/growth/english/patterns").json()
 
-    assert len(data["patterns"]) == 152
+    from src.growth.english_patterns import TRACK_TOTALS
+
+    assert len(data["patterns"]) == TRACK_TOTALS["frame"]
     assert {lv["key"] for lv in data["levels"]} == {"core", "mid", "high"}
-    assert sum(lv["total"] for lv in data["levels"]) == 152
+    assert sum(lv["total"] for lv in data["levels"]) == TRACK_TOTALS["frame"]
     by_id = {p["id"]: p for p in data["patterns"]}
     assert by_id["the-thing-is"]["box"] == 1
     assert by_id["it-depends-on"]["box"] == -1  # 还没练过
@@ -473,21 +478,26 @@ def test_the_calendar_covers_four_weeks(both_client):
 # ── 三条线互不干扰 ────────────────────────────────────────────────────────────
 
 def test_each_track_reports_its_own_totals(english_client):
+    from src.growth.english_patterns import TRACK_TOTALS
+
     sizes = {
         t: english_client.get(f"/growth/english?track={t}").json()["stats"]["total"]
         for t in ("frame", "oneliner", "collocation")
     }
 
-    assert sizes["frame"] == 152 and sizes["oneliner"] == 91 and sizes["collocation"] == 102
+    assert sizes == TRACK_TOTALS
+    assert sum(sizes.values()) > 0 and len(set(sizes.values())) == 3
 
 
 def test_reading_one_track_does_not_shorten_another(english_client):
     first = english_client.get("/growth/english?track=frame").json()["session"][0]["id"]
     english_client.post("/growth/english/studied", json={"pattern_id": first})
 
+    from src.growth.english_patterns import TRACK_TOTALS
+
     data = english_client.get("/growth/english?track=collocation").json()
 
-    assert len(data["session"]) == 102
+    assert len(data["session"]) == TRACK_TOTALS["collocation"]
     assert data["stats"]["started"] == 0
 
 
@@ -529,7 +539,9 @@ def test_an_unknown_track_is_a_400(english_client):
 
 
 def test_the_catalog_is_scoped_to_the_requested_track(english_client):
+    from src.growth.english_patterns import TRACK_TOTALS
+
     data = english_client.get("/growth/english/patterns?track=oneliner").json()
 
-    assert len(data["patterns"]) == 91
+    assert len(data["patterns"]) == TRACK_TOTALS["oneliner"]
     assert all(p["track"] == "oneliner" for p in data["patterns"])

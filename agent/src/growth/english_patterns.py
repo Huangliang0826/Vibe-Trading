@@ -50,6 +50,10 @@ _SCENE_GROUPS = {
     "F": "问题与麻烦",
     "G": "学习与进步",
     "H": "身体与状态",
+    # 动作词是"不地道"最明显的地方:中文一个"拿"对应 take / grab / pick up /
+    # carry,一个"撞"对应 bump into / knock over / crash into。
+    "I": "手上的动作",
+    "J": "碰撞与身体",
 }
 
 GROUPS = {
@@ -513,7 +517,7 @@ _RAW: tuple[tuple, ...] = (
 )
 
 
-from src.growth.english_collocations import _RAW_COLLOCATIONS  # noqa: E402
+from src.growth.english_collocations import _RAW_ACTIONS, _RAW_COLLOCATIONS  # noqa: E402
 from src.growth.english_oneliners import _RAW_ONELINERS  # noqa: E402
 from src.growth.english_patterns_more import _RAW_HIGH, _RAW_MID  # noqa: E402
 
@@ -557,7 +561,7 @@ def _build_collocations(raw: tuple[tuple, ...]) -> list[Pattern]:
 _ALL = (
     _build(_RAW, "core") + _build(_RAW_MID, "mid") + _build(_RAW_HIGH, "high")
     + _build_oneliners(_RAW_ONELINERS)
-    + _build_collocations(_RAW_COLLOCATIONS)
+    + _build_collocations(_RAW_COLLOCATIONS + _RAW_ACTIONS)
 )
 
 #: 每条线内部按难度排序。清单顺序就是引入顺序,不排的话第一天就会撞上高级内容;
