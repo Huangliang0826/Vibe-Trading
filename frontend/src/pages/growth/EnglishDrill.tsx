@@ -4,7 +4,7 @@
  *  但这里不再自评。自评是主观的,而且刚看完答案的人总会高估自己;真正的
  *  判定交给「测试」页的客观作答。这一页只记"我见过这条"。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, ChevronDown, Eye, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -28,11 +28,13 @@ function Card({
   index,
   total,
   onNext,
+  onStudied,
 }: {
   item: EnglishPattern;
   index: number;
   total: number;
   onNext: () => void;
+  onStudied: (id: string) => void;
 }) {
   // 新句型没见过,无从检索,所以直接摊开让人先读熟;见过的则先自己产出。
   const [revealed, setRevealed] = useState(item.status === "new");
@@ -41,11 +43,11 @@ function Card({
     setRevealed(item.status === "new");
   }, [item.id, item.status]);
 
-  const reveal = () => {
-    setRevealed(true);
-    // 只记接触,不打分——失败了也不该挡住学习。
-    void api.markEnglishStudied(item.id).catch(() => undefined);
-  };
+  // 翻到这张卡就算接触过。不能挂在「看答案」上:新句型一上来就是展开的,
+  // 那个按钮压根不渲染,而没练过的句型状态全是 new——等于一条都记不上。
+  useEffect(() => {
+    onStudied(item.id);
+  }, [item.id, onStudied]);
 
   return (
     <div className="space-y-5 rounded-2xl border bg-card p-5 sm:p-6">
@@ -99,7 +101,7 @@ function Card({
       ) : (
         <button
           type="button"
-          onClick={reveal}
+          onClick={() => setRevealed(true)}
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/15"
         >
           <Eye className="h-4 w-4" />看答案
@@ -189,6 +191,8 @@ export function EnglishDrill() {
   const [queue, setQueue] = useState<EnglishPattern[]>([]);
   const [cursor, setCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // 本轮已上报过的,避免来回翻卡片时重复请求。
+  const studied = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -196,6 +200,7 @@ export function EnglishDrill() {
       setState(next);
       setQueue(next.session);
       setCursor(0);
+      studied.current.clear();
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     }
@@ -204,6 +209,13 @@ export function EnglishDrill() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const markStudied = useCallback((id: string) => {
+    if (studied.current.has(id)) return;
+    studied.current.add(id);
+    // 用返回的新统计刷新计数,否则"学过"要等到重新加载才会动。
+    void api.markEnglishStudied(id).then(setState).catch(() => studied.current.delete(id));
+  }, []);
 
   if (error) {
     return <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">{error}</p>;
@@ -226,6 +238,7 @@ export function EnglishDrill() {
       setState(next);
       setQueue(next.session);
       setCursor(0);
+      studied.current.clear();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "重置失败");
     }
@@ -240,7 +253,13 @@ export function EnglishDrill() {
       </div>
 
       {item ? (
-        <Card item={item} index={cursor} total={queue.length} onNext={() => setCursor((c) => c + 1)} />
+        <Card
+          item={item}
+          index={cursor}
+          total={queue.length}
+          onNext={() => setCursor((c) => c + 1)}
+          onStudied={markStudied}
+        />
       ) : (
         <div className="space-y-2 rounded-2xl border bg-card p-6 text-center">
           <Sparkles className="mx-auto h-5 w-5 text-primary" />
