@@ -109,7 +109,8 @@ export interface PracticeItem {
   meaning: string;
   /** 中文情境提示——练习时只给这个,外语要自己产出 */
   cue: string;
-  examples: string[];
+  /** 例句及其中文翻译。零基础的语言必须给翻译,会的语言 meaning 为空串。 */
+  examples: { text: string; meaning: string }[];
   status?: "new" | "review";
   box?: number;
   favorite?: boolean;

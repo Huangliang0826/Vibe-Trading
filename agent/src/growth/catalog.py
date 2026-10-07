@@ -34,6 +34,9 @@ class Pattern:
     #: 中文情境提示。练习时只显示这个,外语要自己产出,所以里面不能出现外语。
     cue: str
     examples: tuple[str, ...]
+    #: 例句的中文翻译,与 ``examples`` 一一对应。零基础的语言必须给——
+    #: 看不懂的例句等于没有例句。会的语言可以留空。
+    example_meanings: tuple[str, ...] = ()
     lang: str = "en"
     track: str = "frame"
     #: 直译版,用作测验干扰项。只有搭配才有。
@@ -53,7 +56,14 @@ class Pattern:
             "id": self.id, "frame": self.frame, "group": self.group,
             "group_label": self.group_label, "level": self.level,
             "level_label": self.level_label, "meaning": self.meaning,
-            "cue": self.cue, "examples": list(self.examples),
+            "cue": self.cue,
+            "examples": [
+                {"text": text, "meaning": meaning}
+                for text, meaning in zip(
+                    self.examples,
+                    [*self.example_meanings, *([""] * len(self.examples))],
+                )
+            ],
             "lang": self.lang, "track": self.track, "track_label": self.track_label,
         }
 

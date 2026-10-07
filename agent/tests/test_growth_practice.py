@@ -3,6 +3,7 @@
 import pytest
 
 from src.growth.catalog import LEVELS
+from src.growth.dutch_patterns import DUTCH
 from src.growth.english_patterns import ENGLISH
 from src.growth.practice import (
     FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session, favorites, goal_days, grade_for_answer, mark_studied, new_reviews,
@@ -494,3 +495,83 @@ def test_each_track_labels_its_groups_in_its_own_terms():
 
     assert frame.group_label == "缓和与委婉"
     assert collocation.group_label == "日常起居"
+
+
+# ── 两门语言共同的内容约束 ────────────────────────────────────────────────────
+
+ALL_CATALOGS = (ENGLISH, DUTCH)
+
+
+def test_no_prompt_text_contains_foreign_letters_in_any_language():
+    # 情境和释义都是出题用的问句。混进外语就泄题了——产出练习会退化成朗读,
+    # 测验里还可能直接指向某个选项。
+    for cat in ALL_CATALOGS:
+        for p in cat.patterns:
+            for field, text in (("cue", p.cue), ("meaning", p.meaning)):
+                assert not any(ch.isascii() and ch.isalpha() for ch in text), (p.id, field, text)
+
+
+def test_meanings_are_unique_within_a_language():
+    # 测验以释义为主问句,必须保证每题恰好一个正确答案。
+    for cat in ALL_CATALOGS:
+        meanings = [p.meaning for p in cat.patterns]
+        assert len(set(meanings)) == len(meanings), cat.lang
+
+
+def test_ids_are_unique_across_languages():
+    # 按 id 操作的接口不带语言参数,靠 id 反查语言。
+    ids = [p.id for cat in ALL_CATALOGS for p in cat.patterns]
+    assert len(set(ids)) == len(ids)
+
+
+def test_every_collocation_in_every_language_has_a_literal_distractor():
+    for cat in ALL_CATALOGS:
+        for p in cat.by_track.get("collocation", ()):
+            assert p.wrong, p.id
+            assert p.frame not in p.wrong, p.id
+
+
+def test_every_track_in_every_language_ramps_by_level():
+    for cat in ALL_CATALOGS:
+        for track in cat.tracks:
+            levels = [p.level for p in cat.by_track[track]]
+            assert levels == sorted(levels, key=list(LEVELS).index), (cat.lang, track)
+
+
+def test_a_dutch_frame_has_a_slot_and_a_one_liner_does_not():
+    assert all("…" in p.frame for p in DUTCH.by_track["frame"])
+    assert all("…" not in p.frame for p in DUTCH.by_track["oneliner"])
+
+
+def test_dutch_is_substantial_enough_to_be_usable():
+    # 内容太少练两天就见底了。
+    assert sum(DUTCH.track_totals.values()) >= 200
+    assert all(n >= 25 for n in DUTCH.track_totals.values())
+
+
+def test_every_dutch_example_is_translated():
+    # 零基础阶段看不懂的例句等于没有例句。漏一条就会出现"有的有翻译、有的没有",
+    # 所以这里整份盯住。
+    missing = [
+        (p.id, text)
+        for p in DUTCH.patterns
+        for text, meaning in zip(p.examples, p.example_meanings)
+        if not meaning.strip()
+    ]
+
+    assert missing == []
+    assert all(len(p.example_meanings) == len(p.examples) for p in DUTCH.patterns)
+
+
+def test_examples_are_sent_with_their_translation_attached():
+    item = DUTCH.by_track["oneliner"][0].to_dict()
+
+    assert all(set(e) == {"text", "meaning"} for e in item["examples"])
+    assert all(e["meaning"] for e in item["examples"])
+
+
+def test_english_examples_need_no_translation():
+    # 英语是"读得懂但说不地道"的问题,例句不必再翻一遍。
+    item = ENGLISH.by_track["frame"][0].to_dict()
+
+    assert all(e["text"] and e["meaning"] == "" for e in item["examples"])

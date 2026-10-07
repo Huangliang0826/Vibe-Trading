@@ -72,11 +72,26 @@ function Card({
         <p className="mt-1 text-sm text-muted-foreground">{item.meaning}</p>
       </div>
 
-      <ul className="space-y-1.5">
+      <ul className="space-y-2.5">
         {item.examples.map((example) => (
-          <li key={example} className="flex items-start gap-2">
-            <SpeakButton lang={item.lang} text={example} label={`朗读例句 ${example}`} className="-ml-1" />
-            <span className="text-[15px] leading-relaxed text-foreground/85">{example}</span>
+          <li key={example.text} className="flex items-start gap-2">
+            <SpeakButton
+              lang={item.lang}
+              text={example.text}
+              label={`朗读例句 ${example.text}`}
+              className="-ml-1 mt-0.5"
+            />
+            <span className="min-w-0">
+              <span className="block text-[15px] leading-relaxed text-foreground/85">
+                {example.text}
+              </span>
+              {/* 看不懂的例句等于没有例句——零基础的语言必须给翻译。 */}
+              {example.meaning && (
+                <span className="mt-0.5 block text-sm leading-relaxed text-muted-foreground">
+                  {example.meaning}
+                </span>
+              )}
+            </span>
           </li>
         ))}
       </ul>

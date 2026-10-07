@@ -52,7 +52,7 @@ def test_each_language_carries_its_own_goal(client):
 
 
 def test_answering_dutch_moves_only_the_dutch_item(client):
-    _answer(client, "nl", "oneliner", 3)
+    _answer(client, "nl", "frame", 3)
 
     by_key = {lang["key"]: lang for lang in client.get("/growth/state").json()["languages"]}
     assert by_key["nl"]["correct"] == 3 and by_key["nl"]["done"] is False
@@ -60,7 +60,7 @@ def test_answering_dutch_moves_only_the_dutch_item(client):
 
 
 def test_reaching_a_goal_completes_that_language_without_a_manual_checkin(client):
-    _answer(client, "nl", "oneliner", 6)
+    _answer(client, "nl", "frame", 6)
 
     data = client.get("/growth/state").json()
     by_key = {lang["key"]: lang for lang in data["languages"]}
@@ -70,7 +70,7 @@ def test_reaching_a_goal_completes_that_language_without_a_manual_checkin(client
 
 
 def test_the_calendar_fills_in_when_both_languages_are_done(client):
-    _answer(client, "nl", "oneliner", 6)
+    _answer(client, "nl", "frame", 6)
     _answer(client, "en", "frame", 10)
 
     data = client.get("/growth/state").json()
@@ -79,7 +79,7 @@ def test_the_calendar_fills_in_when_both_languages_are_done(client):
 
 
 def test_a_wrong_answer_does_not_count_towards_the_goal(client):
-    _answer(client, "nl", "oneliner", 3, correct=False)
+    _answer(client, "nl", "frame", 3, correct=False)
 
     by_key = {lang["key"]: lang for lang in client.get("/growth/state").json()["languages"]}
     assert by_key["nl"]["answered"] == 3 and by_key["nl"]["correct"] == 0
@@ -87,18 +87,17 @@ def test_a_wrong_answer_does_not_count_towards_the_goal(client):
 
 # ── 练习 ──────────────────────────────────────────────────────────────────────
 
-def test_english_offers_three_tracks_and_dutch_two(client):
+def test_both_languages_offer_the_same_three_tracks(client):
     english = client.get("/growth/practice?lang=en").json()
     dutch = client.get("/growth/practice?lang=nl").json()
 
     assert [t["key"] for t in english["tracks"]] == ["frame", "oneliner", "collocation"]
-    # 零基础阶段用不上话语框架,所以荷兰语没有句型。
-    assert [t["key"] for t in dutch["tracks"]] == ["oneliner", "collocation"]
+    assert [t["key"] for t in dutch["tracks"]] == ["frame", "oneliner", "collocation"]
 
 
-def test_each_language_defaults_to_its_own_first_track(client):
+def test_a_language_defaults_to_its_first_track(client):
     assert client.get("/growth/practice?lang=en").json()["track"] == "frame"
-    assert client.get("/growth/practice?lang=nl").json()["track"] == "oneliner"
+    assert client.get("/growth/practice?lang=nl").json()["track"] == "frame"
 
 
 def test_track_totals_match_the_catalog(client):
@@ -115,7 +114,7 @@ def test_studying_one_language_does_not_touch_the_other(client):
 
     dutch = client.get("/growth/practice?lang=nl").json()
     assert dutch["stats"]["started"] == 0
-    assert len(dutch["session"]) == DUTCH.track_totals["oneliner"]
+    assert len(dutch["session"]) == DUTCH.track_totals["frame"]
 
 
 def test_the_learning_queue_resumes_where_it_was_left(client):
@@ -124,7 +123,7 @@ def test_the_learning_queue_resumes_where_it_was_left(client):
 
     session = client.get("/growth/practice?lang=nl").json()["session"]
 
-    assert len(session) == DUTCH.track_totals["oneliner"] - 1
+    assert len(session) == DUTCH.track_totals["frame"] - 1
     assert session[0]["id"] != first
 
 
@@ -179,7 +178,7 @@ def test_the_catalog_is_scoped_to_the_requested_track(client):
 
 
 def test_reset_clears_only_that_language(client):
-    _answer(client, "nl", "oneliner", 2)
+    _answer(client, "nl", "frame", 2)
     _answer(client, "en", "frame", 2)
 
     client.post("/growth/practice/reset?lang=nl")
@@ -190,10 +189,10 @@ def test_reset_clears_only_that_language(client):
 
 def test_unknown_language_or_track_is_a_400(client):
     assert client.get("/growth/practice?lang=de").status_code == 400
-    assert client.get("/growth/practice?lang=nl&track=frame").status_code == 400
+    assert client.get("/growth/practice?lang=nl&track=nope").status_code == 400
 
 
 def test_state_files_are_not_world_readable(client, tmp_path):
-    _answer(client, "nl", "oneliner", 1)
+    _answer(client, "nl", "frame", 1)
 
     assert (tmp_path / "nl.json").stat().st_mode & 0o777 == 0o600
