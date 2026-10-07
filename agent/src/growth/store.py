@@ -1,53 +1,43 @@
-"""个人成长:状态读写。
+"""个人成长:练习进度的读写。
 
 存在后端而不是浏览器 localStorage,是因为打卡多半发生在手机上、回顾多半发生
-在电脑上。存在浏览器里会把同一个人的数据劈成互不相干的两份,"两周后看到
-进步"直接作废。
+在电脑上。存在浏览器里会把同一个人的数据劈成互不相干的两份。
 
-状态转换(``apply_checkin`` 等)写成纯函数:进出都是 dict,不碰磁盘,便于测试。
+每门语言一个文件(英语沿用原来的 ``english.json``,已有记录不受影响)。
+``reviews`` 是每条内容的复习状态,``daily`` 是每天的作答战绩——日历和"累计
+学了多少天"需要按天的数字,而复习状态里只留得下最后一次作答的日期。两份
+数据**在同一个文件里一次写完**:分成两次写就会出现只写成功一半的时刻。
+
+状态转换写成纯函数:进出都是 dict,不碰磁盘,便于测试。
 """
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from src.config.paths import get_runtime_root
-from src.growth.plan import DOMAINS, PLAN_VERSION
+from src.growth.languages import STATE_FILENAMES
 
 STATE_VERSION = 1
 
 
-def state_path() -> Path:
-    return get_runtime_root() / "growth" / "state.json"
+def state_path(lang: str) -> Path:
+    return get_runtime_root() / "growth" / STATE_FILENAMES[lang]
 
 
-def english_path() -> Path:
-    """英语句型的复习进度。与两周计划分开存:节奏不同,寿命也不同——
-    计划每两周重排一次,这份进度要跨越很多个两周累积下去。"""
-    return get_runtime_root() / "growth" / "english.json"
-
-
-def empty_english() -> dict:
-    """``reviews`` 是每条句型的复习状态,``daily`` 是每天的作答战绩。
-
-    日历和"累计学了多少天"需要按天的数字,而复习状态里只留得下最后一次作答的
-    日期——从它推不出前天答对了几条。所以两份数据都要存,而且**存在同一个
-    文件里一次写完**:分成两次写就会出现只写成功一半的时刻。
-    """
+def empty_state() -> dict:
     return {"reviews": {}, "daily": {}}
 
 
-def read_english() -> dict:
+def read_state(lang: str) -> dict:
     try:
-        data = json.loads(english_path().read_text(encoding="utf-8"))
+        data = json.loads(state_path(lang).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return empty_english()
+        return empty_state()
     if not isinstance(data, dict):
-        return empty_english()
+        return empty_state()
     reviews = data.get("reviews")
     daily = data.get("daily")
     return {
@@ -56,8 +46,8 @@ def read_english() -> dict:
     }
 
 
-def write_english(doc: dict) -> dict:
-    path = english_path()
+def write_state(lang: str, doc: dict) -> dict:
+    path = state_path(lang)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": STATE_VERSION, **doc}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -68,98 +58,8 @@ def write_english(doc: dict) -> dict:
     return doc
 
 
-def clear_english() -> None:
+def clear_state(lang: str) -> None:
     try:
-        english_path().unlink()
+        state_path(lang).unlink()
     except OSError:
         pass
-
-
-def read_state() -> Optional[dict]:
-    """返回已保存的计划;尚未创建或文件损坏时返回 None。"""
-    try:
-        data = json.loads(state_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict) or data.get("version") != STATE_VERSION:
-        return None
-    return data
-
-
-def write_state(state: dict) -> dict:
-    path = state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-    return state
-
-
-def clear_state() -> None:
-    try:
-        state_path().unlink()
-    except OSError:
-        pass
-
-
-# ── 纯状态转换 ────────────────────────────────────────────────────────────────
-
-def new_state(*, plan: dict, intake: dict, chronotype: str, today: str) -> dict:
-    return {
-        "version": STATE_VERSION,
-        "plan_version": PLAN_VERSION,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "start_date": today,
-        "chronotype": chronotype,
-        "intake": intake,
-        "plan": plan,
-        "checkins": [],
-        "checkpoints": {},
-    }
-
-
-def apply_checkin(state: dict, *, domain: str, today: str) -> dict:
-    """记录一次完成,返回新的 state。
-
-    同一领域同一天只推进一步。重复点击推进两步会把当天的内容悄悄跳过去——
-    这正是手机上最容易误触出来的情况,所以在这里挡掉而不是靠界面。
-    """
-    if domain not in DOMAINS:
-        raise ValueError(f"未知领域:{domain}")
-    if domain not in (state.get("plan") or {}):
-        raise ValueError(f"计划里没有这个领域:{domain}")
-
-    checkins = list(state.get("checkins") or [])
-    if any(c.get("domain") == domain and c.get("date") == today for c in checkins):
-        return state  # 已完成,保持幂等
-
-    steps = (state["plan"][domain].get("steps") or [])
-    done = sum(1 for c in checkins if c.get("domain") == domain)
-    if done >= len(steps):
-        return state  # 本领域已全部完成
-
-    return {**state, "checkins": [
-        *checkins, {"date": today, "domain": domain, "day": steps[done]["day"]},
-    ]}
-
-
-def undo_checkin(state: dict, *, domain: str, today: str) -> dict:
-    """撤销今天这一次——手机上误触是常事,不给撤销就只能眼看着进度错位。"""
-    checkins = [
-        c for c in (state.get("checkins") or [])
-        if not (c.get("domain") == domain and c.get("date") == today)
-    ]
-    return {**state, "checkins": checkins}
-
-
-def set_checkpoint(state: dict, *, domain: str, which: str, value: str) -> dict:
-    """记录检查点的基线(start)或两周后的结果(end)。"""
-    if which not in ("start", "end"):
-        raise ValueError("检查点只能是 start 或 end")
-    if domain not in DOMAINS:
-        raise ValueError(f"未知领域:{domain}")
-    marks = {**(state.get("checkpoints") or {})}
-    marks[domain] = {**(marks.get(domain) or {}), which: value.strip()[:120]}
-    return {**state, "checkpoints": marks}

@@ -1,4 +1,4 @@
-"""英语句型的间隔重复练习——全是纯函数。
+"""练习引擎:间隔重复 + 两选一测验——全是纯函数,与具体语言无关。
 
 目标是"调用自动化":交流时不经过翻译就能脱口而出。能做到这件事的练法只有
 **检索练习**——先看中文情境、自己产出英文,再对答案。只看英文觉得"认识"是
@@ -19,17 +19,19 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 
-from src.growth.english_patterns import (
-    PATTERN_BY_ID, PATTERNS_BY_TRACK, TRACK_TOTALS, TRACKS,
-)
-
-DEFAULT_TRACK = "frame"
+from src.growth.languages import CATALOGS, DEFAULT_LANG, catalog, daily_goal
 
 
-def _track_patterns(track: str) -> tuple:
-    if track not in TRACKS:
-        raise ValueError(f"未知的分类:{track}")
-    return PATTERNS_BY_TRACK[track]
+def _patterns(lang: str, track: str) -> tuple:
+    cat = catalog(lang)
+    if track not in cat.by_track:
+        raise ValueError(f"{cat.label}没有这个分类:{track}")
+    return cat.by_track[track]
+
+
+def default_track(lang: str) -> str:
+    """该语言的第一个分类。荷兰语没有句型,所以不能把 frame 写死成默认值。"""
+    return catalog(lang).tracks[0]
 
 GRADES = ("again", "slow", "instant")
 
@@ -44,10 +46,6 @@ FAST_MS = 6000
 INTERVALS = (1, 2, 4, 9, 21)
 MAX_BOX = len(INTERVALS) - 1
 
-#: 每天的目标:在测试里答对多少条句型就算今天过了。
-#: 一个能看见进度、也能真的在几分钟内达成的数,比"练一会儿"这种说法可执行。
-DAILY_GOAL = 10
-
 
 
 def _add_days(day: str, n: int) -> str:
@@ -58,10 +56,19 @@ def new_reviews() -> dict:
     return {}
 
 
+def find_pattern(pattern_id: str):
+    """按 id 跨语言找条目。id 全局唯一,所以按 id 操作的接口不必带语言参数。"""
+    for lang in CATALOGS:
+        pattern = catalog(lang).by_id.get(pattern_id)
+        if pattern is not None:
+            return pattern
+    return None
+
+
 def mark_studied(reviews: dict, pattern_id: str, today: str) -> dict:
     """在学习页看过一条。只记接触,不记分——打分是测验的事。"""
-    if pattern_id not in PATTERN_BY_ID:
-        raise ValueError(f"没有这个句型:{pattern_id}")
+    if find_pattern(pattern_id) is None:
+        raise ValueError(f"没有这个条目:{pattern_id}")
     entry = dict(reviews.get(pattern_id) or {})
     return {**reviews, pattern_id: {**entry, "studied": entry.get("studied") or today}}
 
@@ -80,11 +87,13 @@ def record_answer(doc: dict, pattern_id: str, correct: bool, elapsed_ms: int, to
     return {**doc, "reviews": reviews, "daily": {**(doc.get("daily") or {}), today: day}}
 
 
-def english_today(doc: dict, today: str, goal: int = DAILY_GOAL) -> dict:
-    """今天的英语进度——每天那张卡片要显示的东西。"""
+def today_progress(doc: dict, today: str, lang: str = DEFAULT_LANG) -> dict:
+    """今天这门语言的进度——「每天」那张卡片要显示的东西。"""
+    goal = daily_goal(lang)
     day = (doc.get("daily") or {}).get(today) or {}
     correct = int(day.get("correct", 0))
     return {
+        "lang": lang,
         "goal": goal,
         "correct": correct,
         "answered": int(day.get("answered", 0)),
@@ -92,8 +101,9 @@ def english_today(doc: dict, today: str, goal: int = DAILY_GOAL) -> dict:
     }
 
 
-def english_days(doc: dict, goal: int = DAILY_GOAL) -> set[str]:
+def goal_days(doc: dict, lang: str = DEFAULT_LANG) -> set[str]:
     """达成过当天目标的日期。"""
+    goal = daily_goal(lang)
     return {
         day for day, row in (doc.get("daily") or {}).items()
         if int((row or {}).get("correct", 0)) >= goal
@@ -106,8 +116,8 @@ def set_favorite(reviews: dict, pattern_id: str, favorite: bool) -> dict:
     与盒子无关:盒子是算法按答题表现推的,收藏是自己标的"这句我要留着"。
     两件事互不干涉,所以收藏不会打乱复习节奏。
     """
-    if pattern_id not in PATTERN_BY_ID:
-        raise ValueError(f"没有这个句型:{pattern_id}")
+    if find_pattern(pattern_id) is None:
+        raise ValueError(f"没有这个条目:{pattern_id}")
     entry = dict(reviews.get(pattern_id) or {})
     if favorite:
         entry["favorite"] = True
@@ -116,14 +126,14 @@ def set_favorite(reviews: dict, pattern_id: str, favorite: bool) -> dict:
     return {**reviews, pattern_id: entry}
 
 
-def favorites(reviews: dict, track: str = DEFAULT_TRACK) -> list[dict]:
+def favorites(reviews: dict, lang: str, track: str) -> list[dict]:
     """已收藏的条目,按清单顺序(也就是难度顺序)。"""
     return [
         {
             "id": p.id, "frame": p.frame, "meaning": p.meaning,
             "group_label": p.group_label, "level_label": p.level_label,
         }
-        for p in _track_patterns(track)
+        for p in _patterns(lang, track)
         if (reviews.get(p.id) or {}).get("favorite")
     ]
 
@@ -141,8 +151,8 @@ def grade_for_answer(correct: bool, elapsed_ms: int) -> str:
 
 def apply_review(reviews: dict, pattern_id: str, grade: str, today: str) -> dict:
     """记一次评分,返回新的复习表。"""
-    if pattern_id not in PATTERN_BY_ID:
-        raise ValueError(f"没有这个句型:{pattern_id}")
+    if find_pattern(pattern_id) is None:
+        raise ValueError(f"没有这个条目:{pattern_id}")
     if grade not in GRADES:
         raise ValueError(f"评分只能是 {GRADES} 之一:{grade}")
 
@@ -175,22 +185,22 @@ def apply_review(reviews: dict, pattern_id: str, grade: str, today: str) -> dict
     }
 
 
-def _quiz_pool(reviews: dict, track: str) -> list:
+def _quiz_pool(reviews: dict, lang: str, track: str) -> list:
     """可以拿来考的条目:学习页见过的,或已经考过的。
 
     都没有时退回整条线(按难度顺序),这样第一次打开测验也能玩起来——
     边考边学,总好过一个空页面。
     """
-    patterns = _track_patterns(track)
+    patterns = _patterns(lang, track)
     known = [p for p in patterns if p.id in reviews]
     return known if len(known) >= QUIZ_OPTIONS else list(patterns)
 
 
-def pick_quiz(reviews: dict, today: str, *, track: str = DEFAULT_TRACK, count: int = 20,
+def pick_quiz(reviews: dict, today: str, *, lang: str, track: str, count: int = 20,
               rng: random.Random | None = None) -> list[dict]:
     """抽一批题。到期的优先,其余随机——重复的题面会让人开始背位置而不是背内容。"""
     rng = rng or random.Random()
-    pool = _quiz_pool(reviews, track)
+    pool = _quiz_pool(reviews, lang, track)
     if len(pool) < QUIZ_OPTIONS:
         return []
 
@@ -240,7 +250,7 @@ def pick_quiz(reviews: dict, today: str, *, track: str = DEFAULT_TRACK, count: i
     return questions
 
 
-def build_session(reviews: dict, today: str, *, track: str = DEFAULT_TRACK,
+def build_session(reviews: dict, today: str, *, lang: str, track: str,
                   limit: int | None = None) -> list[dict]:
     """学习页的队列:**还没看过的**句型,按清单顺序(也就是难度顺序)。
 
@@ -251,7 +261,7 @@ def build_session(reviews: dict, today: str, *, track: str = DEFAULT_TRACK,
     得到空字符串,而空字符串比任何日期都小,于是被判成到期、永远排在最前面:
     每次打开都从第一条重新学。复习归测试页管,这一页只负责往下推。
     """
-    fresh = [p for p in _track_patterns(track)
+    fresh = [p for p in _patterns(lang, track)
              if not (reviews.get(p.id) or {}).get("studied")]
     if limit is not None:
         fresh = fresh[:limit]
@@ -262,17 +272,18 @@ def build_session(reviews: dict, today: str, *, track: str = DEFAULT_TRACK,
     ]
 
 
-def stats(reviews: dict, today: str, track: str = DEFAULT_TRACK) -> dict:
+def stats(reviews: dict, today: str, lang: str, track: str) -> dict:
     """某条线的进度总览。"""
-    mine = {p.id for p in _track_patterns(track)}
+    mine = {p.id for p in _patterns(lang, track)}
     reviews = {k: v for k, v in reviews.items() if k in mine}
     tested = [e for e in reviews.values() if int(e.get("seen", 0)) > 0]
     boxes = [int(e.get("box", 0)) for e in tested]
     right = sum(int(e.get("right", 0)) for e in tested)
     wrong = sum(int(e.get("wrong", 0)) for e in tested)
     return {
+        "lang": lang,
         "track": track,
-        "total": TRACK_TOTALS[track],
+        "total": len(_patterns(lang, track)),
         "started": len(reviews),
         "favorites": sum(1 for e in reviews.values() if e.get("favorite")),
         "tested": len(tested),

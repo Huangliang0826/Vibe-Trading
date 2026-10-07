@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { api, type EnglishPattern, type EnglishState } from "@/lib/api";
+import { api, type PracticeItem, type PracticeState } from "@/lib/api";
 import { SpeakButton } from "@/components/SpeakButton";
 import { cancelSpeech } from "@/lib/speech";
 
@@ -36,7 +36,7 @@ function Card({
   onStudied,
   onFavorite,
 }: {
-  item: EnglishPattern;
+  item: PracticeItem;
   index: number;
   total: number;
   onNext: () => void;
@@ -67,7 +67,7 @@ function Card({
       <div>
         <div className="flex items-start gap-2">
           <p className="text-[19px] font-semibold tracking-tight">{item.frame}</p>
-          <SpeakButton text={item.frame} label={`朗读句型 ${item.frame}`} className="mt-0.5" />
+          <SpeakButton lang={item.lang} text={item.frame} label={`朗读句型 ${item.frame}`} className="mt-0.5" />
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{item.meaning}</p>
       </div>
@@ -75,7 +75,7 @@ function Card({
       <ul className="space-y-1.5">
         {item.examples.map((example) => (
           <li key={example} className="flex items-start gap-2">
-            <SpeakButton text={example} label={`朗读例句 ${example}`} className="-ml-1" />
+            <SpeakButton lang={item.lang} text={example} label={`朗读例句 ${example}`} className="-ml-1" />
             <span className="text-[15px] leading-relaxed text-foreground/85">{example}</span>
           </li>
         ))}
@@ -110,17 +110,17 @@ function Card({
   );
 }
 
-function Catalog({ levels, track }: { levels: EnglishState["levels"]; track: string }) {
+function Catalog({ levels, lang, track }: { levels: PracticeState["levels"]; lang: string; track: string }) {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<EnglishPattern[] | null>(null);
+  const [rows, setRows] = useState<PracticeItem[] | null>(null);
 
   useEffect(() => {
     if (!open || rows) return;
-    void api.getEnglishPatterns(track).then((d) => setRows(d.patterns)).catch(() => setRows([]));
-  }, [open, rows, track]);
+    void api.getPracticeCatalog(lang, track).then((d) => setRows(d.patterns)).catch(() => setRows([]));
+  }, [open, rows, lang, track]);
 
   const byLevel = (key: string) =>
-    (rows ?? []).filter((p) => p.level === key).reduce<Record<string, EnglishPattern[]>>(
+    (rows ?? []).filter((p) => p.level === key).reduce<Record<string, PracticeItem[]>>(
       (acc, p) => {
         (acc[p.group_label] ??= []).push(p);
         return acc;
@@ -183,11 +183,11 @@ function Catalog({ levels, track }: { levels: EnglishState["levels"]; track: str
   );
 }
 
-export function EnglishDrill({ track }: { track: string }) {
-  const [state, setState] = useState<EnglishState | null>(null);
+export function PracticeDrill({ lang, track }: { lang: string; track: string }) {
+  const [state, setState] = useState<PracticeState | null>(null);
   // 本轮的练习队列是本地的。服务端每次打分都会重算"今天到期"的列表,长度会变;
   // 拿索引去指一个会变长的列表,打完一条就会跳过下一条。
-  const [queue, setQueue] = useState<EnglishPattern[]>([]);
+  const [queue, setQueue] = useState<PracticeItem[]>([]);
   const [cursor, setCursor] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // 本轮已上报过的,避免来回翻卡片时重复请求。
@@ -195,7 +195,7 @@ export function EnglishDrill({ track }: { track: string }) {
 
   const load = useCallback(async () => {
     try {
-      const next = await api.getEnglish(track);
+      const next = await api.getPractice(lang, track);
       setState(next);
       setQueue(next.session);
       setCursor(0);
@@ -203,14 +203,14 @@ export function EnglishDrill({ track }: { track: string }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     }
-  }, []);
+  }, [lang, track]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const toggleFavorite = useCallback((id: string, favorite: boolean) => {
-    void api.setEnglishFavorite(id, favorite).then(setState).catch(() => undefined);
+    void api.setPracticeFavorite(id, favorite).then(setState).catch(() => undefined);
     // 本地立即反映,别等往返——收藏是个高频的小动作。
     setQueue((q) => q.map((p) => (p.id === id ? { ...p, favorite } : p)));
   }, []);
@@ -241,7 +241,7 @@ export function EnglishDrill({ track }: { track: string }) {
     if (studied.current.has(id)) return;
     studied.current.add(id);
     // 用返回的新统计刷新计数,否则"学过"要等到重新加载才会动。
-    void api.markEnglishStudied(id).then(setState).catch(() => studied.current.delete(id));
+    void api.markPracticeStudied(id).then(setState).catch(() => studied.current.delete(id));
   }, []);
 
   if (error) {
@@ -261,7 +261,7 @@ export function EnglishDrill({ track }: { track: string }) {
   const reset = async () => {
     if (!window.confirm("清空 100 条句型的全部练习进度,确定吗?")) return;
     try {
-      const next = await api.resetEnglish(track);
+      const next = await api.resetPractice(lang, track);
       setState(next);
       setQueue(next.session);
       setCursor(0);
@@ -309,7 +309,7 @@ export function EnglishDrill({ track }: { track: string }) {
                   <span className="ml-2 text-muted-foreground">{row.meaning}</span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
-                  <SpeakButton text={row.frame} label={`朗读 ${row.frame}`} />
+                  <SpeakButton lang={lang} text={row.frame} label={`朗读 ${row.frame}`} />
                   <button
                     type="button"
                     onClick={() => toggleFavorite(row.id, false)}
@@ -324,14 +324,14 @@ export function EnglishDrill({ track }: { track: string }) {
         </div>
       )}
 
-      <Catalog levels={state.levels} track={track} />
+      <Catalog levels={state.levels} lang={lang} track={track} />
 
       <button
         type="button"
         onClick={reset}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
       >
-        <RotateCcw className="h-3 w-3" />清空练习进度
+        <RotateCcw className="h-3 w-3" />清空这一类的进度
       </button>
     </div>
   );

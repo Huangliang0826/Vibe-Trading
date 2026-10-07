@@ -17,15 +17,15 @@ import { Check, Loader2, RotateCcw, Timer, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  api, type EnglishAnswerResult, type EnglishQuizQuestion, type EnglishStats,
-  type GrowthEnglishProgress,
+  api, type PracticeAnswerResult, type PracticeQuestion, type PracticeStats,
+  type DailyProgress,
 } from "@/lib/api";
 import { SpeakButton } from "@/components/SpeakButton";
 import { cancelSpeech } from "@/lib/speech";
 
 const BATCH = 20;
 
-interface Verdict extends EnglishAnswerResult {
+interface Verdict extends PracticeAnswerResult {
   chosen_id: string;
 }
 
@@ -41,10 +41,10 @@ function Stat({ label, value, suffix }: { label: string; value: string | number;
   );
 }
 
-export function EnglishQuiz({ track }: { track: string }) {
-  const [questions, setQuestions] = useState<EnglishQuizQuestion[] | null>(null);
-  const [stats, setStats] = useState<EnglishStats | null>(null);
-  const [today, setToday] = useState<GrowthEnglishProgress | null>(null);
+export function PracticeQuiz({ lang, track }: { lang: string; track: string }) {
+  const [questions, setQuestions] = useState<PracticeQuestion[] | null>(null);
+  const [stats, setStats] = useState<PracticeStats | null>(null);
+  const [today, setToday] = useState<DailyProgress | null>(null);
   const [cursor, setCursor] = useState(0);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const advanceTimer = useRef<number | null>(null);
@@ -55,7 +55,7 @@ export function EnglishQuiz({ track }: { track: string }) {
 
   const load = useCallback(async () => {
     try {
-      const data = await api.getEnglishQuiz(track, BATCH);
+      const data = await api.getPracticeQuiz(lang, track, BATCH);
       setQuestions(data.questions);
       setStats(data.stats);
       setToday(data.today_progress);
@@ -66,7 +66,7 @@ export function EnglishQuiz({ track }: { track: string }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
     }
-  }, []);
+  }, [lang, track]);
 
   useEffect(() => {
     void load();
@@ -98,7 +98,7 @@ export function EnglishQuiz({ track }: { track: string }) {
     if (verdict) return;
     const elapsed = Date.now() - askedAt.current;
     try {
-      const result = await api.answerEnglishQuiz(question.answer_id, chosenId, elapsed);
+      const result = await api.answerPracticeQuiz(question.answer_id, chosenId, elapsed);
       setVerdict({ ...result, chosen_id: chosenId });
       setStats(result.stats);
       setToday(result.today_progress);
@@ -220,6 +220,7 @@ export function EnglishQuiz({ track }: { track: string }) {
                       {/* 答完才给朗读:答题当下出声会打乱节奏,也会把计时拖长。 */}
                       {verdict && (
                         <SpeakButton
+                          lang={lang}
                           text={option.frame}
                           label={`朗读 ${option.frame}`}
                           onSpeak={holdPage}

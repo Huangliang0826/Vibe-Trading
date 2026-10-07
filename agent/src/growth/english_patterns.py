@@ -1,35 +1,15 @@
-"""英语口语的 100 个高频句型(chunks)。
+"""英语的练习清单:句型 152 / 整句 91 / 搭配 157。
 
-目标不是"认识",而是**调用自动化**:交流时不经过翻译就能脱口而出。所以每条
-都带一个中文情境提示(``cue``),练习时只给提示、不给英文,逼着自己先产出。
+三条线的失败方式各不相同,所以分开统计进度——见 ``catalog.py`` 的说明。
 
-选型标准:
-
-* 口语对话里真实高频,不是书面语或考试腔;
-* 是**框架**而不是整句——填进自己的内容就能用;
-* 承担具体的交际功能(缓和、让步、叙述、组织话语……),按功能分组,
-  方便在真实对话里按"我现在想干什么"检索,而不是按字母表检索。
-
-内容是人工挑选的固定清单,不走模型生成:间隔重复需要稳定的 ID,内容一旦
-每次生成都不同,复习进度就无从谈起。
+分组按交际功能,但**每条线的功能不一样**:句型和整句按"我现在想干什么"分,
+搭配按"我在说哪件事"分。共用一张表会让 turn on the light 顶着「缓和与委婉」。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from src.growth.catalog import LEVELS, Pattern, build_catalog
 
-#: 难度级别。新句型按这个顺序引入:先把基础的练顺,再往上加。
-LEVELS = {"core": "基础", "mid": "中级", "high": "高级"}
-
-#: 三条并列的训练线,失败方式各不相同,所以进度分开统计:
-#:
-#: * **句型**要接自己的内容,用错只是话接不顺;
-#: * **整句**拿来即用,不会就是接不上话;
-#: * **搭配**嵌在句子里,用错语法完全正确,但一听就不是母语者。
-TRACKS = {"frame": "句型", "oneliner": "整句", "collocation": "搭配"}
-
-#: 分组按交际功能,但**每条线的功能不一样**:句型/整句是按"我现在想干什么"
-#: 分的,搭配是按"我在说哪件事"分的。共用一张表会让搭配顶着句型的标签。
 _TALK_GROUPS = {
     "A": "缓和与委婉",
     "B": "观点与立场",
@@ -55,48 +35,6 @@ _SCENE_GROUPS = {
     "I": "手上的动作",
     "J": "碰撞与身体",
 }
-
-GROUPS = {
-    "frame": _TALK_GROUPS,
-    "oneliner": _TALK_GROUPS,
-    "collocation": _SCENE_GROUPS,
-}
-
-
-@dataclass(frozen=True)
-class Pattern:
-    id: str
-    frame: str
-    group: str
-    level: str
-    meaning: str
-    #: 中文情境提示。练习时只显示这个,英文要自己产出。
-    cue: str
-    examples: tuple[str, ...]
-    track: str = "frame"
-    #: 中式英语的直译版,用作测验干扰项。只有搭配才有。
-    wrong: tuple[str, ...] = ()
-
-    @property
-    def group_label(self) -> str:
-        return GROUPS[self.track][self.group]
-
-    @property
-    def level_label(self) -> str:
-        return LEVELS[self.level]
-
-    @property
-    def track_label(self) -> str:
-        return TRACKS[self.track]
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id, "frame": self.frame, "group": self.group,
-            "group_label": self.group_label, "level": self.level,
-            "level_label": self.level_label, "meaning": self.meaning,
-            "cue": self.cue, "examples": list(self.examples),
-            "track": self.track, "track_label": self.track_label,
-        }
 
 
 _RAW: tuple[tuple, ...] = (
@@ -531,55 +469,49 @@ def _track_of(frame: str) -> str:
     return "frame" if "…" in frame else "oneliner"
 
 
-def _build(raw: tuple[tuple, ...], level: str) -> list[Pattern]:
+def _talk(raw: tuple[tuple, ...], level: str) -> list[Pattern]:
     return [
         Pattern(id=i, frame=f, group=g, level=level, meaning=m, cue=c,
-                examples=tuple(e), track=_track_of(f))
+                examples=tuple(e), lang="en", track=_track_of(f),
+                group_label=_TALK_GROUPS[g])
         for i, f, g, m, c, e in raw
     ]
 
 
-def _build_oneliners(raw: tuple[tuple, ...]) -> list[Pattern]:
+def _oneliners(raw: tuple[tuple, ...]) -> list[Pattern]:
     return [
         Pattern(id=i, frame=f, group=g, level=lv, meaning=m, cue=c,
-                examples=tuple(e), track="oneliner")
+                examples=tuple(e), lang="en", track="oneliner",
+                group_label=_TALK_GROUPS[g])
         for i, f, g, lv, m, c, e in raw
     ]
 
 
-def _build_collocations(raw: tuple[tuple, ...]) -> list[Pattern]:
-    """搭配自带难度,也自带中式英语的错误版。
-
-    """
+def _collocations(raw: tuple[tuple, ...]) -> list[Pattern]:
     return [
         Pattern(id=i, frame=f, group=g, level=lv, meaning=m, cue=c,
-                examples=tuple(e), track="collocation", wrong=tuple(w))
+                examples=tuple(e), lang="en", track="collocation",
+                wrong=tuple(w), group_label=_SCENE_GROUPS[g])
         for i, f, g, lv, m, c, e, w in raw
     ]
 
 
-_ALL = (
-    _build(_RAW, "core") + _build(_RAW_MID, "mid") + _build(_RAW_HIGH, "high")
-    + _build_oneliners(_RAW_ONELINERS)
-    + _build_collocations(_RAW_COLLOCATIONS + _RAW_ACTIONS)
+ENGLISH = build_catalog(
+    "en", "英语", ("frame", "oneliner", "collocation"),
+    _talk(_RAW, "core") + _talk(_RAW_MID, "mid") + _talk(_RAW_HIGH, "high")
+    + _oneliners(_RAW_ONELINERS)
+    + _collocations(_RAW_COLLOCATIONS + _RAW_ACTIONS),
 )
 
-#: 每条线内部按难度排序。清单顺序就是引入顺序,不排的话第一天就会撞上高级内容;
-#: 整句那条线尤其需要——它由两批来源拼成(迁移过来的 + 新写的),天然是乱的。
-_LEVEL_ORDER = list(LEVELS)
-PATTERNS_BY_TRACK: dict[str, tuple[Pattern, ...]] = {
-    track: tuple(sorted((p for p in _ALL if p.track == track),
-                        key=lambda p: _LEVEL_ORDER.index(p.level)))
-    for track in TRACKS
-}
-
-PATTERNS: tuple[Pattern, ...] = tuple(
-    p for track in TRACKS for p in PATTERNS_BY_TRACK[track]
-)
-PATTERN_BY_ID = {p.id: p for p in PATTERNS}
+# 兼容旧的模块级名字(仍有测试与路由在用)
+PATTERNS = ENGLISH.patterns
+PATTERN_BY_ID = ENGLISH.by_id
+PATTERNS_BY_TRACK = ENGLISH.by_track
 TOTAL = len(PATTERNS)
-TRACK_TOTALS = {track: len(items) for track, items in PATTERNS_BY_TRACK.items()}
-LEVEL_TOTALS = {
-    track: {key: sum(1 for p in items if p.level == key) for key in LEVELS}
-    for track, items in PATTERNS_BY_TRACK.items()
-}
+TRACK_TOTALS = ENGLISH.track_totals
+TRACKS = {t: ENGLISH.by_track[t][0].track_label for t in ENGLISH.tracks}
+GROUPS = {"frame": _TALK_GROUPS, "oneliner": _TALK_GROUPS, "collocation": _SCENE_GROUPS}
+LEVEL_TOTALS = {t: ENGLISH.level_totals(t) for t in ENGLISH.tracks}
+
+__all__ = ["ENGLISH", "LEVELS", "PATTERNS", "PATTERN_BY_ID", "PATTERNS_BY_TRACK",
+           "TOTAL", "TRACK_TOTALS", "TRACKS", "GROUPS", "LEVEL_TOTALS"]

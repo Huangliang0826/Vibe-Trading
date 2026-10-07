@@ -31,9 +31,27 @@ describe("朗读选音", () => {
     }
   });
 
-  it("绝不会挑中非英语语音", () => {
+  it("绝不会挑中语言不对的语音", () => {
     expect(scoreVoice(v("Ting-Ting", "zh-CN"))).toBe(-Infinity);
     expect(pickVoice([v("Ting-Ting", "zh-CN"), v("Kyoko", "ja-JP")])).toBeNull();
+  });
+
+  it("荷兰语用荷兰语语音,不会退回英语", () => {
+    // 用英语语音念荷兰语,发音会错得离谱——对语言学习者比不出声更糟。
+    const voices = [v("Samantha", "en-US"), v("Xander", "nl-NL"), v("Ellen", "nl-BE")];
+
+    expect(pickVoice(voices, "nl")?.name).toBe("Xander");
+    expect(scoreVoice(v("Samantha", "en-US"), "nl")).toBe(-Infinity);
+  });
+
+  it("没有该语言的语音时返回空,而不是拿别的语言顶上", () => {
+    expect(pickVoice([v("Samantha", "en-US")], "nl")).toBeNull();
+  });
+
+  it("同为荷兰语时偏好荷兰口音而不是比利时口音", () => {
+    expect(scoreVoice(v("Xander", "nl-NL"), "nl")).toBeGreaterThan(
+      scoreVoice(v("Xander", "nl-BE"), "nl"),
+    );
   });
 
   it("在 Chrome 上挑 Google 的英语语音", () => {

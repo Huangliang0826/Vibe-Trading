@@ -2,21 +2,21 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const markEnglishStudied = vi.fn();
-const getEnglish = vi.fn();
-const setEnglishFavorite = vi.fn();
+const markPracticeStudied = vi.fn();
+const getPractice = vi.fn();
+const setPracticeFavorite = vi.fn();
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   api: {
-    getEnglish: (...args: unknown[]) => getEnglish(...args),
-    markEnglishStudied: (...args: unknown[]) => markEnglishStudied(...args),
-    setEnglishFavorite: (...args: unknown[]) => setEnglishFavorite(...args),
-    getEnglishPatterns: vi.fn().mockResolvedValue({ groups: [], levels: [], patterns: [] }),
+    getPractice: (...args: unknown[]) => getPractice(...args),
+    markPracticeStudied: (...args: unknown[]) => markPracticeStudied(...args),
+    setPracticeFavorite: (...args: unknown[]) => setPracticeFavorite(...args),
+    getPracticeCatalog: vi.fn().mockResolvedValue({ groups: [], levels: [], patterns: [] }),
   },
 }));
 
-import { EnglishDrill } from "../EnglishDrill";
+import { PracticeDrill } from "../PracticeDrill";
 
 const pattern = (id: string, status: "new" | "review") => ({
   id,
@@ -38,31 +38,32 @@ const pattern = (id: string, status: "new" | "review") => ({
 
 const state = (overrides = {}) => ({
   today: "2026-10-06",
+  lang: "en",
   track: "frame",
+  languages: [],
   tracks: [{ key: "frame", label: "句型", total: 152 }],
   session: [pattern("a", "new"), pattern("b", "new")],
   stats: {
-    total: 200, started: 0, tested: 0, accuracy: null, favorites: 0,
-    automatic: 0, due_today: 0, reviewed_today: 0, box_counts: {},
+    lang: "en", track: "frame", total: 152, started: 0, tested: 0,
+    accuracy: null, favorites: 0, automatic: 0, due_today: 0, reviewed_today: 0,
   },
   favorites: [],
   fast_ms: 6000,
-  new_per_day: null,
-  session_limit: null,
+  today_progress: { lang: "en", goal: 10, correct: 0, answered: 0, done: false },
   groups: [],
   levels: [{ key: "core", label: "基础", total: 100 }],
   ...overrides,
 });
 
 beforeEach(() => {
-  markEnglishStudied.mockReset();
-  markEnglishStudied.mockImplementation(() => Promise.resolve(state({
+  markPracticeStudied.mockReset();
+  markPracticeStudied.mockImplementation(() => Promise.resolve(state({
     stats: { ...state().stats, started: 1 },
   })));
-  getEnglish.mockReset();
-  getEnglish.mockResolvedValue(state());
-  setEnglishFavorite.mockReset();
-  setEnglishFavorite.mockImplementation(() => Promise.resolve(state({
+  getPractice.mockReset();
+  getPractice.mockResolvedValue(state());
+  setPracticeFavorite.mockReset();
+  setPracticeFavorite.mockImplementation(() => Promise.resolve(state({
     stats: { ...state().stats, favorites: 1 },
     favorites: [{
       id: "a", frame: "frame a", meaning: "释义 a",
@@ -75,30 +76,30 @@ describe("学习页记录接触", () => {
   it("新句型一显示就记为学过", async () => {
     // 回归:之前只在点「看答案」时上报,而新句型一上来就是展开的,那个按钮
     // 根本不渲染——没练过的句型状态全是 new,等于一条都记不上。
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
 
-    await waitFor(() => expect(markEnglishStudied).toHaveBeenCalledWith("a"));
+    await waitFor(() => expect(markPracticeStudied).toHaveBeenCalledWith("a"));
   });
 
   it("翻到下一条时记录下一条", async () => {
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.click(screen.getByRole("button", { name: /下一句/ }));
 
-    await waitFor(() => expect(markEnglishStudied).toHaveBeenCalledWith("b"));
+    await waitFor(() => expect(markPracticeStudied).toHaveBeenCalledWith("b"));
   });
 
   it("同一张卡不会重复上报", async () => {
-    render(<EnglishDrill track="frame" />);
-    await waitFor(() => expect(markEnglishStudied).toHaveBeenCalledWith("a"));
+    render(<PracticeDrill lang="en" track="frame" />);
+    await waitFor(() => expect(markPracticeStudied).toHaveBeenCalledWith("a"));
 
-    const calls = markEnglishStudied.mock.calls.filter(([id]) => id === "a").length;
+    const calls = markPracticeStudied.mock.calls.filter(([id]) => id === "a").length;
     expect(calls).toBe(1);
   });
 
   it("用返回的统计刷新计数,不必重新加载页面", async () => {
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
 
     // "学过" 的数字来自每次上报的响应。
     await waitFor(() => expect(screen.getByText("1")).toBeInTheDocument());
@@ -107,16 +108,16 @@ describe("学习页记录接触", () => {
 
 describe("收藏与键盘", () => {
   it("收藏按钮把当前句式标记为已收藏", async () => {
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.click(screen.getByRole("button", { name: /收藏/ }));
 
-    await waitFor(() => expect(setEnglishFavorite).toHaveBeenCalledWith("a", true));
+    await waitFor(() => expect(setPracticeFavorite).toHaveBeenCalledWith("a", true));
   });
 
   it("收藏状态立刻反映在按钮上,不等往返", async () => {
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.click(screen.getByRole("button", { name: /收藏/ }));
@@ -127,7 +128,7 @@ describe("收藏与键盘", () => {
   });
 
   it("按向右键翻到下一句", async () => {
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
     await screen.findByText("frame a");
 
     await userEvent.keyboard("{ArrowRight}");
@@ -140,7 +141,7 @@ describe("收藏与键盘", () => {
     render(
       <>
         <input aria-label="测试输入" />
-        <EnglishDrill track="frame" />
+        <PracticeDrill lang="en" track="frame" />
       </>,
     );
     await screen.findByText("frame a");
@@ -156,7 +157,7 @@ describe("向右键的健壮性", () => {
   it("事件目标不是元素时也不会把快捷键打死", async () => {
     // window / document 上派发的 keydown 其 target 没有 closest;
     // 当成元素直接调用会抛错,整个快捷键就静默失效了。
-    render(<EnglishDrill track="frame" />);
+    render(<PracticeDrill lang="en" track="frame" />);
     await screen.findByText("frame a");
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));

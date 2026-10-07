@@ -1,18 +1,22 @@
-"""英语句型:内容清单与间隔重复逻辑。"""
+"""练习引擎:内容清单、间隔重复、两选一测验。"""
 
 import pytest
 
-from src.growth.english import (
-    DAILY_GOAL, FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session,
-    english_days, english_today, favorites, grade_for_answer, mark_studied,
-    new_reviews, pick_quiz, record_answer, set_favorite, stats,
-)
-from src.growth.english_patterns import (
-    GROUPS, LEVELS, PATTERN_BY_ID, PATTERNS, PATTERNS_BY_TRACK, TOTAL,
-    TRACK_TOTALS, TRACKS,
+from src.growth.catalog import LEVELS
+from src.growth.english_patterns import ENGLISH
+from src.growth.practice import (
+    FAST_MS, MAX_BOX, QUIZ_OPTIONS, apply_review, build_session, favorites, goal_days, grade_for_answer, mark_studied, new_reviews,
+    pick_quiz, record_answer, set_favorite, stats, today_progress,
 )
 
+PATTERNS = ENGLISH.patterns
+PATTERN_BY_ID = ENGLISH.by_id
+PATTERNS_BY_TRACK = ENGLISH.by_track
+TRACK_TOTALS = ENGLISH.track_totals
+TOTAL = len(PATTERNS)
+TRACKS = {t: ENGLISH.by_track[t][0].track_label for t in ENGLISH.tracks}
 FRAMES = PATTERNS_BY_TRACK["frame"]
+DAILY_GOAL = 10
 
 TODAY = "2026-10-05"
 
@@ -57,7 +61,7 @@ def test_every_pattern_carries_what_the_drill_needs():
         # 没有中文情境提示就只能看着英文念,那是识别不是产出。
         assert p.cue.strip(), p.id
         assert len(p.examples) >= 2, p.id
-        assert p.group in GROUPS[p.track], p.id
+        assert p.group_label, p.id
         assert p.level in LEVELS, p.id
 
 
@@ -114,7 +118,7 @@ def test_only_a_run_of_instant_recalls_reaches_the_last_box():
         day = reviews["the-thing-is"]["due"]
 
     assert reviews["the-thing-is"]["box"] == MAX_BOX
-    assert stats(reviews, day)["automatic"] == 1
+    assert stats(reviews, day, "en", "frame")["automatic"] == 1
 
 
 def test_a_slow_answer_never_counts_as_automatic():
@@ -124,7 +128,7 @@ def test_a_slow_answer_never_counts_as_automatic():
         reviews = apply_review(reviews, "the-thing-is", "slow", day)
         day = reviews["the-thing-is"]["due"]
 
-    assert stats(reviews, day)["automatic"] == 0
+    assert stats(reviews, day, "en", "frame")["automatic"] == 0
 
 
 def test_review_counts_attempts_and_keeps_the_first_date():
@@ -137,7 +141,7 @@ def test_review_counts_attempts_and_keeps_the_first_date():
 
 
 def test_review_rejects_an_unknown_pattern_or_grade():
-    with pytest.raises(ValueError, match="没有这个句型"):
+    with pytest.raises(ValueError, match="没有这个条目"):
         apply_review(new_reviews(), "nope", "instant", TODAY)
     with pytest.raises(ValueError, match="评分"):
         apply_review(new_reviews(), "the-thing-is", "perfect", TODAY)
@@ -148,11 +152,11 @@ def test_review_rejects_an_unknown_pattern_or_grade():
 def test_stats_report_progress_within_one_track():
     reviews = apply_review(new_reviews(), "the-thing-is", "instant", TODAY)
 
-    s = stats(reviews, TODAY)
+    s = stats(reviews, TODAY, "en", "frame")
 
     assert s["total"] == TRACK_TOTALS["frame"] and s["started"] == 1
     # 另一条线的进度不该被算进来。
-    assert stats(reviews, TODAY, "collocation")["started"] == 0
+    assert stats(reviews, TODAY, "en", "collocation")["started"] == 0
     assert s["reviewed_today"] == 1
 
 
@@ -165,7 +169,7 @@ def _rng(seed=7):
 
 
 def test_each_question_offers_exactly_two_cards_one_of_them_right():
-    questions = pick_quiz(new_reviews(), TODAY, count=5, rng=_rng())
+    questions = pick_quiz(new_reviews(), TODAY, lang="en", track="frame", count=5, rng=_rng())
 
     assert len(questions) == 5
     for q in questions:
@@ -177,7 +181,7 @@ def test_each_question_offers_exactly_two_cards_one_of_them_right():
 
 def test_the_distractor_comes_from_the_same_functional_group():
     # 不同组的两张卡一眼就能排除,考不出分辨力。
-    questions = pick_quiz(new_reviews(), TODAY, count=20, rng=_rng())
+    questions = pick_quiz(new_reviews(), TODAY, lang="en", track="frame", count=20, rng=_rng())
 
     for q in questions:
         groups = {PATTERN_BY_ID[o["id"]].group for o in q["options"]}
@@ -185,7 +189,7 @@ def test_the_distractor_comes_from_the_same_functional_group():
 
 
 def test_the_question_carries_the_answers_unique_gloss():
-    q = pick_quiz(new_reviews(), TODAY, count=1, rng=_rng())[0]
+    q = pick_quiz(new_reviews(), TODAY, lang="en", track="frame", count=1, rng=_rng())[0]
     answer = PATTERN_BY_ID[q["answer_id"]]
 
     assert q["meaning"] == answer.meaning and q["cue"] == answer.cue
@@ -201,7 +205,7 @@ def test_every_pattern_has_a_distinct_gloss_so_each_question_has_one_answer():
 
 
 def test_a_questions_two_options_never_share_a_gloss():
-    for q in pick_quiz(new_reviews(), TODAY, count=30, rng=_rng()):
+    for q in pick_quiz(new_reviews(), TODAY, lang="en", track="frame", count=30, rng=_rng()):
         glosses = {PATTERN_BY_ID[o["id"]].meaning for o in q["options"]}
         assert len(glosses) == 2, q
 
@@ -213,14 +217,14 @@ def test_due_patterns_are_asked_before_the_rest():
     for pid in list(PATTERN_BY_ID)[3:9]:
         reviews = apply_review(reviews, pid, "instant", TODAY)  # 排到以后
 
-    asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, count=3, rng=_rng())]
+    asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, lang="en", track="frame", count=3, rng=_rng())]
 
     assert set(asked) == set(list(PATTERN_BY_ID)[:3])
 
 
 def test_the_quiz_falls_back_to_the_whole_catalog_before_anything_is_studied():
     # 第一次打开就该能玩起来,边考边学好过一个空页面。
-    assert len(pick_quiz(new_reviews(), TODAY, count=10, rng=_rng())) == 10
+    assert len(pick_quiz(new_reviews(), TODAY, lang="en", track="frame", count=10, rng=_rng())) == 10
 
 
 def test_the_quiz_draws_only_from_what_has_been_seen_once_enough_is_studied():
@@ -229,7 +233,7 @@ def test_the_quiz_draws_only_from_what_has_been_seen_once_enough_is_studied():
     for pid in studied:
         reviews = mark_studied(reviews, pid, TODAY)
 
-    asked = {q["answer_id"] for q in pick_quiz(reviews, TODAY, count=20, rng=_rng())}
+    asked = {q["answer_id"] for q in pick_quiz(reviews, TODAY, lang="en", track="frame", count=20, rng=_rng())}
 
     assert asked <= set(studied)
 
@@ -255,7 +259,7 @@ def test_marking_a_pattern_studied_records_exposure_without_scoring_it():
     entry = reviews["the-thing-is"]
     assert entry["studied"] == TODAY
     assert "box" not in entry and "seen" not in entry
-    assert stats(reviews, TODAY)["tested"] == 0
+    assert stats(reviews, TODAY, "en", "frame")["tested"] == 0
 
 
 def test_studying_twice_keeps_the_first_date(
@@ -280,14 +284,14 @@ def test_stats_track_quiz_accuracy():
     reviews = apply_review(reviews, "it-depends-on", "again", TODAY)
     reviews = apply_review(reviews, "the-point-is", "slow", TODAY)
 
-    s = stats(reviews, TODAY)
+    s = stats(reviews, TODAY, "en", "frame")
 
     assert s["tested"] == 3
     assert s["accuracy"] == 67  # 3 次作答里 2 次选对
 
 
 def test_accuracy_is_absent_before_any_answer():
-    assert stats(mark_studied(new_reviews(), "the-thing-is", TODAY), TODAY)["accuracy"] is None
+    assert stats(mark_studied(new_reviews(), "the-thing-is", TODAY), TODAY, "en", "frame")["accuracy"] is None
 
 
 # ── 收藏 ──────────────────────────────────────────────────────────────────────
@@ -295,8 +299,8 @@ def test_accuracy_is_absent_before_any_answer():
 def test_favoriting_a_pattern_lists_it_and_counts_it():
     reviews = set_favorite(new_reviews(), "the-thing-is", True)
 
-    assert [f["id"] for f in favorites(reviews)] == ["the-thing-is"]
-    assert stats(reviews, TODAY)["favorites"] == 1
+    assert [f["id"] for f in favorites(reviews, "en", "frame")] == ["the-thing-is"]
+    assert stats(reviews, TODAY, "en", "frame")["favorites"] == 1
 
 
 def test_unfavoriting_removes_it():
@@ -304,7 +308,7 @@ def test_unfavoriting_removes_it():
 
     reviews = set_favorite(reviews, "the-thing-is", False)
 
-    assert favorites(reviews) == [] and stats(reviews, TODAY)["favorites"] == 0
+    assert favorites(reviews, "en", "frame") == [] and stats(reviews, TODAY, "en", "frame")["favorites"] == 0
 
 
 def test_favoriting_does_not_disturb_the_review_schedule():
@@ -322,7 +326,7 @@ def test_favoriting_does_not_disturb_the_review_schedule():
 def test_favoriting_an_unseen_pattern_does_not_count_it_as_tested():
     reviews = set_favorite(new_reviews(), "the-thing-is", True)
 
-    s = stats(reviews, TODAY)
+    s = stats(reviews, TODAY, "en", "frame")
     assert s["favorites"] == 1 and s["tested"] == 0
 
 
@@ -330,20 +334,20 @@ def test_favorites_are_listed_easiest_first():
     reviews = set_favorite(new_reviews(), "high-be-that-as-it-may", True)
     reviews = set_favorite(reviews, "the-thing-is", True)
 
-    assert [f["level_label"] for f in favorites(reviews)] == ["基础", "高级"]
+    assert [f["level_label"] for f in favorites(reviews, "en", "frame")] == ["基础", "高级"]
 
 
 def test_session_items_carry_their_favorite_state():
     reviews = set_favorite(new_reviews(), "the-thing-is", True)
 
-    by_id = {item["id"]: item for item in build_session(reviews, TODAY)}
+    by_id = {item["id"]: item for item in build_session(reviews, TODAY, lang="en", track="frame")}
 
     assert by_id["the-thing-is"]["favorite"] is True
     assert by_id["it-depends-on"]["favorite"] is False
 
 
 def test_favoriting_rejects_an_unknown_pattern():
-    with pytest.raises(ValueError, match="没有这个句型"):
+    with pytest.raises(ValueError, match="没有这个条目"):
         set_favorite(new_reviews(), "nope", True)
 
 
@@ -354,13 +358,15 @@ def test_a_quiz_answer_counts_towards_todays_goal():
 
     doc = record_answer(doc, "the-thing-is", True, 900, TODAY)
 
-    assert english_today(doc, TODAY) == {"goal": DAILY_GOAL, "correct": 1, "answered": 1, "done": False}
+    assert today_progress(doc, TODAY, "en") == {
+        "lang": "en", "goal": DAILY_GOAL, "correct": 1, "answered": 1, "done": False,
+    }
 
 
 def test_a_wrong_answer_counts_as_answered_but_not_as_progress():
     doc = record_answer({"reviews": {}, "daily": {}}, "the-thing-is", False, 900, TODAY)
 
-    progress = english_today(doc, TODAY)
+    progress = today_progress(doc, TODAY, "en")
     assert progress["answered"] == 1 and progress["correct"] == 0
 
 
@@ -369,8 +375,8 @@ def test_the_day_is_done_once_the_goal_is_reached():
     for _ in range(DAILY_GOAL):
         doc = record_answer(doc, "the-thing-is", True, 900, TODAY)
 
-    assert english_today(doc, TODAY)["done"] is True
-    assert english_days(doc) == {TODAY}
+    assert today_progress(doc, TODAY, "en")["done"] is True
+    assert goal_days(doc, "en") == {TODAY}
 
 
 def test_a_day_short_of_the_goal_is_not_marked_on_the_calendar():
@@ -378,7 +384,7 @@ def test_a_day_short_of_the_goal_is_not_marked_on_the_calendar():
     for _ in range(DAILY_GOAL - 1):
         doc = record_answer(doc, "the-thing-is", True, 900, TODAY)
 
-    assert english_days(doc) == set()
+    assert goal_days(doc, "en") == set()
 
 
 def test_each_day_is_counted_separately():
@@ -387,8 +393,8 @@ def test_each_day_is_counted_separately():
         doc = record_answer(doc, "the-thing-is", True, 900, "2026-10-05")
     doc = record_answer(doc, "the-thing-is", True, 900, "2026-10-06")
 
-    assert english_days(doc) == {"2026-10-05"}
-    assert english_today(doc, "2026-10-06")["correct"] == 1
+    assert goal_days(doc, "en") == {"2026-10-05"}
+    assert today_progress(doc, "2026-10-06", "en")["correct"] == 1
 
 
 def test_an_answer_advances_the_box_and_the_daily_tally_together():
@@ -402,7 +408,7 @@ def test_an_answer_advances_the_box_and_the_daily_tally_together():
 # ── 学习页的队列:进度要续得上 ────────────────────────────────────────────────
 
 def test_the_first_session_offers_the_whole_track():
-    session = build_session(new_reviews(), TODAY)
+    session = build_session(new_reviews(), TODAY, lang="en", track="frame")
 
     assert len(session) == TRACK_TOTALS["frame"]
     assert session[0]["id"] == FRAMES[0].id
@@ -411,13 +417,13 @@ def test_the_first_session_offers_the_whole_track():
 def test_each_track_has_its_own_queue():
     reviews = mark_studied(new_reviews(), FRAMES[0].id, TODAY)
 
-    assert len(build_session(reviews, TODAY, track="frame")) == TRACK_TOTALS["frame"] - 1
+    assert len(build_session(reviews, TODAY, lang="en", track="frame")) == TRACK_TOTALS["frame"] - 1
     # 在句型里看过一条,不该让搭配那条线少一条。
-    assert len(build_session(reviews, TODAY, track="collocation")) == TRACK_TOTALS["collocation"]
+    assert len(build_session(reviews, TODAY, lang="en", track="collocation")) == TRACK_TOTALS["collocation"]
 
 
 def test_a_collocation_question_is_answered_against_its_chinglish_version():
-    q = pick_quiz(new_reviews(), TODAY, track="collocation", count=1, rng=_rng())[0]
+    q = pick_quiz(new_reviews(), TODAY, lang="en", track="collocation", count=1, rng=_rng())[0]
     answer = PATTERN_BY_ID[q["answer_id"]]
 
     wrong = next(o for o in q["options"] if o["id"] != q["answer_id"])
@@ -428,8 +434,8 @@ def test_a_collocation_question_is_answered_against_its_chinglish_version():
 def test_an_unknown_track_is_rejected():
     import pytest as _pytest
 
-    with _pytest.raises(ValueError, match="未知的分类"):
-        build_session(new_reviews(), TODAY, track="nope")
+    with _pytest.raises(ValueError, match="没有这个分类"):
+        build_session(new_reviews(), TODAY, lang="en", track="nope")
 
 
 def test_studied_patterns_drop_out_so_the_next_visit_resumes():
@@ -439,7 +445,7 @@ def test_studied_patterns_drop_out_so_the_next_visit_resumes():
     for pattern in FRAMES[:3]:
         reviews = mark_studied(reviews, pattern.id, TODAY)
 
-    session = build_session(reviews, TODAY)
+    session = build_session(reviews, TODAY, lang="en", track="frame")
 
     assert len(session) == TRACK_TOTALS["frame"] - 3
     assert session[0]["id"] == FRAMES[3].id
@@ -449,13 +455,13 @@ def test_a_quizzed_pattern_still_shows_up_until_it_has_been_read():
     # 考过不等于在学习页看过;只有 studied 才让它退出队列。
     reviews = apply_review(new_reviews(), FRAMES[0].id, "instant", TODAY)
 
-    assert build_session(reviews, TODAY)[0]["id"] == FRAMES[0].id
+    assert build_session(reviews, TODAY, lang="en", track="frame")[0]["id"] == FRAMES[0].id
 
 
 def test_the_session_keeps_the_catalog_order_so_difficulty_still_ramps():
     reviews = mark_studied(new_reviews(), FRAMES[5].id, TODAY)
 
-    levels = [item["level"] for item in build_session(reviews, TODAY)]
+    levels = [item["level"] for item in build_session(reviews, TODAY, lang="en", track="frame")]
 
     assert levels == sorted(levels, key=["core", "mid", "high"].index)
 
@@ -465,7 +471,7 @@ def test_the_session_is_empty_once_everything_has_been_read():
     for pattern in FRAMES:
         reviews = mark_studied(reviews, pattern.id, TODAY)
 
-    assert build_session(reviews, TODAY) == []
+    assert build_session(reviews, TODAY, lang="en", track="frame") == []
 
 
 def test_a_pattern_that_is_merely_studied_is_not_treated_as_due_by_the_quiz():
@@ -475,7 +481,7 @@ def test_a_pattern_that_is_merely_studied_is_not_treated_as_due_by_the_quiz():
         reviews = mark_studied(reviews, pattern.id, TODAY)
     reviews = apply_review(reviews, FRAMES[50].id, "again", TODAY)  # 真正到期的
 
-    asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, count=1, rng=_rng())]
+    asked = [q["answer_id"] for q in pick_quiz(reviews, TODAY, lang="en", track="frame", count=1, rng=_rng())]
 
     assert asked == [FRAMES[50].id]
 

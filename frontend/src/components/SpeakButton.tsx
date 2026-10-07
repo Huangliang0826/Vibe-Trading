@@ -5,11 +5,14 @@ import { isSpeechSupported, speak } from "@/lib/speech";
 
 export function SpeakButton({
   text,
+  lang,
   label,
   className,
   onSpeak,
 }: {
   text: string;
+  /** 要用哪门语言的语音念。用英语语音念荷兰语,发音会错得离谱。 */
+  lang: string;
   /** 无障碍名字,说清楚要读的是什么 */
   label: string;
   className?: string;
@@ -26,7 +29,7 @@ export function SpeakButton({
         // 例句本身常常嵌在可点击的卡片里,别让朗读顺带触发了翻页或选答案。
         event.stopPropagation();
         onSpeak?.();
-        speak(text);
+        speak(text, lang);
       }}
       className={cn(
         "inline-grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary",

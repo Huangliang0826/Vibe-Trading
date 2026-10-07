@@ -89,123 +89,85 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // ── 个人成长 ────────────────────────────────────────────────────────────────
-// 状态存在后端而不是 localStorage:打卡多在手机上,回顾多在电脑上,存浏览器
-// 会把同一个人的数据劈成两份。
+// 每门语言共用一套练习引擎(检索练习 + 间隔重复 + 两选一测验),语言和分类都是
+// 参数。「每天」没有计划:它的两项就是两门语言当天的测验目标。
 
-export interface GrowthStep {
-  day: number;
-  title: string;
-  detail: string;
-  minutes: number;
+export type PracticeGrade = "again" | "slow" | "instant";
+
+export interface PracticeItem {
+  id: string;
+  /** 要练的那段外语 */
+  frame: string;
+  group: string;
+  group_label: string;
+  level: string;
+  level_label: string;
+  /** frame 句型 / oneliner 整句 / collocation 搭配 */
+  track: string;
+  track_label: string;
+  lang: string;
+  meaning: string;
+  /** 中文情境提示——练习时只给这个,外语要自己产出 */
+  cue: string;
+  examples: string[];
+  status?: "new" | "review";
+  box?: number;
+  favorite?: boolean;
 }
 
-export interface GrowthDomainPlan {
-  checkpoint: string;
-  why: string;
-  min_version: string;
-  steps: GrowthStep[];
-  /** ai = 模型生成;fallback = 模型不可用时的确定性计划 */
-  source: "ai" | "fallback";
-}
-
-export interface GrowthDomainProgress {
-  domain: string;
-  label: string;
-  done: number;
+export interface PracticeStats {
+  lang: string;
+  track: string;
   total: number;
-  percent: number;
-  /** 下一个未完成的步骤;全部完成时为 null */
-  next_step: GrowthStep | null;
-  /** 今天已完成的那一步;还没打卡时为 null */
-  today_step: GrowthStep | null;
-  done_today: boolean;
-  /** 今天记录的感受 1~3,没记为 null */
-  feeling_today: number | null;
-  dots: ("done" | "next" | "todo")[];
-  checkpoint: string;
-  min_version: string;
-  why: string;
+  started: number;
+  tested: number;
+  accuracy: number | null;
+  favorites: number;
+  automatic: number;
+  due_today: number;
+  reviewed_today: number;
 }
 
-export interface GrowthCheckpointStatus {
-  start_date: string;
-  due_date: string;
-  elapsed_days: number;
-  days_left: number;
-  due: boolean;
-}
-
-export interface GrowthEnglishProgress {
+export interface DailyProgress {
+  lang: string;
   goal: number;
   correct: number;
   answered: number;
   done: boolean;
 }
 
-export interface GrowthCalendarDay {
-  date: string;
-  plan: boolean;
-  english: boolean;
-  state: "full" | "partial" | "none";
+export interface PracticeTrack {
+  key: string;
+  label: string;
+  total: number;
 }
 
-export interface GrowthSummary {
-  /** 至少完成一项的天数 */
-  active_days: number;
-  /** 两项都完成的天数 */
-  full_days: number;
-  streak: number;
-  best_streak: number;
+export interface PracticeLanguage {
+  key: string;
+  label: string;
+  goal: number;
+  tracks: PracticeTrack[];
 }
 
-export interface GrowthOverview {
+export interface PracticeState {
   today: string;
-  streak: number;
-  /** 连续断两天才为 true——断一天不打扰 */
-  nudge: boolean;
-  domains: GrowthDomainProgress[];
-  done_today: number;
-  domain_count: number;
-  total_done: number;
-  total_steps: number;
-  percent: number;
-  checkpoint: GrowthCheckpointStatus;
-  /** 英语不走计划:目标由「英语句型」的测试直接给出 */
-  english: GrowthEnglishProgress;
-  calendar: GrowthCalendarDay[];
-  summary: GrowthSummary;
+  lang: string;
+  track: string;
+  languages: PracticeLanguage[];
+  tracks: PracticeTrack[];
+  session: PracticeItem[];
+  stats: PracticeStats;
+  today_progress: DailyProgress;
+  favorites: {
+    id: string; frame: string; meaning: string;
+    group_label: string; level_label: string;
+  }[];
+  fast_ms: number;
+  groups: { key: string; label: string }[];
+  levels: { key: string; label: string; total: number }[];
 }
 
-export interface GrowthState {
-  configured: boolean;
-  /** 计划正在后台生成——四个领域要一两分钟,所以接口立即返回,进度靠轮询 */
-  generating?: boolean;
-  ready?: number;
-  total?: number;
-  start_date?: string;
-  chronotype?: string;
-  intake?: Record<string, { level: string; minutes: number }>;
-  plan?: Record<string, GrowthDomainPlan>;
-  checkpoints?: Record<string, { start?: string; end?: string }>;
-  overview?: GrowthOverview;
-}
-
-export interface GrowthOptions {
-  days: number;
-  minutes: number[];
-  chronotypes: { key: string; label: string }[];
-  domains: { key: string; label: string; levels: { key: string; label: string }[] }[];
-}
-
-export interface GrowthIntakeBody {
-  chronotype: string;
-  domains: Record<string, { level: string; minutes: number }>;
-}
-
-// 英语句型:100 个高频框架的间隔重复练习。评分是"取回花了多久",不是对错。
-export type EnglishGrade = "again" | "slow" | "instant";
-
-export interface EnglishQuizQuestion {
+export interface PracticeQuestion {
   answer_id: string;
   /** 主问句:答案的中文释义,在整份清单里唯一,所以每题恰好一个正确答案 */
   meaning: string;
@@ -215,74 +177,36 @@ export interface EnglishQuizQuestion {
   options: { id: string; frame: string; meaning: string }[];
 }
 
-export interface EnglishAnswerResult {
+export interface PracticeAnswerResult {
   correct: boolean;
-  grade: EnglishGrade;
-  stats: EnglishStats;
-  today_progress: GrowthEnglishProgress;
+  grade: PracticeGrade;
+  stats: PracticeStats;
+  today_progress: DailyProgress;
 }
 
-export interface EnglishPattern {
-  id: string;
-  frame: string;
-  group: string;
-  group_label: string;
-  /** core 基础 / mid 中级 / high 高级 */
-  level: string;
-  level_label: string;
-  /** frame 句型 / oneliner 整句 / collocation 搭配 */
-  track: string;
-  track_label: string;
-  meaning: string;
-  /** 中文情境提示——练习时只给这个,英文要自己产出 */
-  cue: string;
-  examples: string[];
-  status?: "new" | "review";
-  /** 0~4;-1 表示还没练过(仅出现在整份清单里) */
-  box?: number;
-  seen?: number;
-  favorite?: boolean;
+export interface GrowthCalendarDay {
+  date: string;
+  langs: Record<string, boolean>;
+  state: "full" | "partial" | "none";
 }
 
-export interface EnglishStats {
-  total: number;
-  /** 学习页见过的条数 */
-  started: number;
-  /** 被测验考过的条数 */
-  tested: number;
-  /** 测验正确率 %,还没答过为 null */
-  accuracy: number | null;
-  /** 走到最后一盒的条数。内部用于安排复习,界面上不展示 */
-  automatic: number;
-  /** 自己标记收藏的条数 */
-  favorites: number;
-  due_today: number;
-  reviewed_today: number;
-  box_counts: Record<string, number>;
+export interface GrowthSummary {
+  /** 至少练了一门的天数 */
+  active_days: number;
+  /** 两门都达标的天数 */
+  full_days: number;
+  streak: number;
+  best_streak: number;
 }
 
-export interface EnglishTrack {
-  key: string;
-  label: string;
-  total: number;
-}
-
-export interface EnglishState {
+export interface GrowthState {
   today: string;
-  track: string;
-  tracks: EnglishTrack[];
-  today_progress: GrowthEnglishProgress;
-  daily_goal: number;
-  session: EnglishPattern[];
-  stats: EnglishStats;
-  favorites: {
-    id: string; frame: string; meaning: string;
-    group_label: string; level_label: string;
-  }[];
-  /** 答得多快才算"脱口而出"(毫秒) */
-  fast_ms: number;
-  groups: { key: string; label: string }[];
-  levels: { key: string; label: string; total: number }[];
+  languages: (DailyProgress & { key: string; label: string })[];
+  done_today: number;
+  lang_count: number;
+  streak: number;
+  calendar: GrowthCalendarDay[];
+  summary: GrowthSummary;
 }
 
 export interface UploadResult {
@@ -625,60 +549,44 @@ export const api = {
     }),
 
   // 个人成长:选项来自后端,避免前后端各存一份点选目录导致漂移
-  getGrowthOptions: () => request<GrowthOptions>("/growth/options"),
   getGrowthState: () => request<GrowthState>("/growth/state"),
-  createGrowthPlan: (body: GrowthIntakeBody) =>
-    request<GrowthState>("/growth/plan", { method: "POST", body: JSON.stringify(body) }),
-  growthCheckin: (domain: string, feeling?: number) =>
-    request<GrowthState>("/growth/checkin", {
-      method: "POST",
-      body: JSON.stringify({ domain, feeling }),
-    }),
-  growthUndoCheckin: (domain: string) =>
-    request<GrowthState>("/growth/checkin/undo", {
-      method: "POST",
-      body: JSON.stringify({ domain }),
-    }),
-  growthSetCheckpoint: (domain: string, which: "start" | "end", value: string) =>
-    request<GrowthState>("/growth/checkpoint", {
-      method: "POST",
-      body: JSON.stringify({ domain, which, value }),
-    }),
-  resetGrowth: () => request<{ configured: boolean }>("/growth/reset", { method: "POST" }),
-  getEnglish: (track = "frame") =>
-    request<EnglishState>(`/growth/english?track=${track}`),
-  // 学习页只记接触,不打分;打分一律走测验。
-  markEnglishStudied: (pattern_id: string) =>
-    request<EnglishState>("/growth/english/studied", {
-      method: "POST",
-      body: JSON.stringify({ pattern_id }),
-    }),
-  setEnglishFavorite: (pattern_id: string, favorite: boolean) =>
-    request<EnglishState>("/growth/english/favorite", {
-      method: "POST",
-      body: JSON.stringify({ pattern_id, favorite }),
-    }),
-  getEnglishQuiz: (track = "frame", count = 20) =>
-    request<{
-      questions: EnglishQuizQuestion[];
-      options_per_question: number;
-      fast_ms: number;
-      stats: EnglishStats;
-      today_progress: GrowthEnglishProgress;
-    }>(`/growth/english/quiz?track=${track}&count=${count}`),
-  answerEnglishQuiz: (pattern_id: string, chosen_id: string, elapsed_ms: number) =>
-    request<EnglishAnswerResult>("/growth/english/answer", {
-      method: "POST",
-      body: JSON.stringify({ pattern_id, chosen_id, elapsed_ms }),
-    }),
-  getEnglishPatterns: (track = "frame") =>
+  getPractice: (lang: string, track?: string) =>
+    request<PracticeState>(`/growth/practice?lang=${lang}${track ? `&track=${track}` : ""}`),
+  getPracticeCatalog: (lang: string, track: string) =>
     request<{
       groups: { key: string; label: string }[];
       levels: { key: string; label: string; total: number }[];
-      patterns: EnglishPattern[];
-    }>(`/growth/english/patterns?track=${track}`),
-  resetEnglish: (track = "frame") =>
-    request<EnglishState>(`/growth/english/reset?track=${track}`, { method: "POST" }),
+      patterns: PracticeItem[];
+    }>(`/growth/practice/catalog?lang=${lang}&track=${track}`),
+  // 学习页只记接触,不打分;打分一律走测验。
+  markPracticeStudied: (pattern_id: string) =>
+    request<PracticeState>("/growth/practice/studied", {
+      method: "POST",
+      body: JSON.stringify({ pattern_id }),
+    }),
+  setPracticeFavorite: (pattern_id: string, favorite: boolean) =>
+    request<PracticeState>("/growth/practice/favorite", {
+      method: "POST",
+      body: JSON.stringify({ pattern_id, favorite }),
+    }),
+  getPracticeQuiz: (lang: string, track: string, count = 20) =>
+    request<{
+      questions: PracticeQuestion[];
+      options_per_question: number;
+      fast_ms: number;
+      lang: string;
+      track: string;
+      stats: PracticeStats;
+      today_progress: DailyProgress;
+    }>(`/growth/practice/quiz?lang=${lang}&track=${track}&count=${count}`),
+  answerPracticeQuiz: (pattern_id: string, chosen_id: string, elapsed_ms: number) =>
+    request<PracticeAnswerResult>("/growth/practice/answer", {
+      method: "POST",
+      body: JSON.stringify({ pattern_id, chosen_id, elapsed_ms }),
+    }),
+  resetPractice: (lang: string, track: string) =>
+    request<PracticeState>(`/growth/practice/reset?lang=${lang}&track=${track}`,
+      { method: "POST" }),
 
   getNewsCenterDates: () => request<string[]>("/news-center/dates"),
   getNewsCenterArticles: (filters: NewsCenterFilters = {}) => {
