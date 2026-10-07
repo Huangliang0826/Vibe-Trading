@@ -12,6 +12,8 @@ import {
   api, type DailyProgress, type GrowthCalendarDay, type GrowthState,
   type GrowthSummary,
 } from "@/lib/api";
+import { Achievements } from "@/components/growth/Achievements";
+import { LevelRing } from "@/components/growth/LevelRing";
 import { PracticeDrill } from "@/pages/growth/PracticeDrill";
 import { PracticeQuiz } from "@/pages/growth/PracticeQuiz";
 
@@ -159,33 +161,52 @@ function Today() {
 
   const remaining = state.lang_count - state.done_today;
 
+  const { level } = state.rewards;
+
   return (
     <div className="space-y-6">
-      <Lede>{remaining === 0 ? "今天都做完了。明天见。" : `今天还剩 ${remaining} 项,每项几分钟。`}</Lede>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-2xl border bg-card p-4">
-          <p className="text-xs text-muted-foreground">连续</p>
-          <p className="mt-1 inline-flex items-baseline gap-1">
-            <span className="text-2xl font-semibold tabular-nums">{state.streak}</span>
-            <span className="text-xs text-muted-foreground">天</span>
-            {state.streak >= 3 && <Flame className="h-3.5 w-3.5 text-primary" />}
+      {/* 顶部一眼看到"我到哪了":等级来自真实掌握度,不是打开次数。 */}
+      <div className="flex items-center gap-5 rounded-2xl border bg-gradient-to-br from-primary/[0.07] to-transparent p-5">
+        <LevelRing level={level} />
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-medium">
+            已掌握 <span className="tabular-nums">{level.mastered}</span> 句
           </p>
-        </div>
-        <div className="rounded-2xl border bg-card p-4">
-          <p className="text-xs text-muted-foreground">今天</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums">
-            {state.done_today}
-            <span className="text-xs font-normal text-muted-foreground"> / {state.lang_count}</span>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {level.next_label
+              ? `再掌握 ${level.to_next} 句升到「${level.next_label}」。`
+              : "已经是最高一级了。"}
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Flame className={cn("h-3.5 w-3.5", state.streak >= 3 && "text-primary")} />
+              连续 <span className="font-semibold tabular-nums text-foreground">{state.streak}</span> 天
+            </span>
+            <span>
+              今天 <span className="font-semibold tabular-nums text-foreground">{state.done_today}</span>
+              {" / "}{state.lang_count}
+            </span>
+            <span>
+              成就 <span className="font-semibold tabular-nums text-foreground">{state.rewards.unlocked}</span>
+              {" / "}{state.rewards.total}
+            </span>
+          </div>
         </div>
       </div>
+
+      <Lede>{remaining === 0 ? "今天都做完了。明天见。" : `今天还剩 ${remaining} 项,每项几分钟。`}</Lede>
 
       <div className="space-y-4">
         {state.languages.map((item) => <LanguageCard key={item.key} item={item} />)}
       </div>
 
       <Calendar days={state.calendar} summary={state.summary} />
+
+      <Achievements
+        items={state.rewards.achievements}
+        unlocked={state.rewards.unlocked}
+        total={state.rewards.total}
+      />
     </div>
   );
 }

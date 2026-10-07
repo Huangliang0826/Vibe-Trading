@@ -159,6 +159,7 @@ export interface PracticeState {
   session: PracticeItem[];
   stats: PracticeStats;
   today_progress: DailyProgress;
+  level: GrowthLevel;
   favorites: {
     id: string; frame: string; meaning: string;
     group_label: string; level_label: string;
@@ -181,6 +182,10 @@ export interface PracticeQuestion {
 export interface PracticeAnswerResult {
   correct: boolean;
   grade: PracticeGrade;
+  /** 这一下换来了什么:进了第几盒、是否升盒、是否刚刚推到最后一盒 */
+  box: number;
+  box_up: boolean;
+  just_mastered: boolean;
   stats: PracticeStats;
   today_progress: DailyProgress;
 }
@@ -200,8 +205,37 @@ export interface GrowthSummary {
   best_streak: number;
 }
 
+export interface GrowthLevel {
+  level: number;
+  label: string;
+  mastered: number;
+  next_at: number | null;
+  next_label: string | null;
+  to_next: number;
+  percent: number;
+}
+
+export interface GrowthAchievement {
+  key: string;
+  label: string;
+  detail: string;
+  icon: string;
+  target: number;
+  value: number;
+  unlocked: boolean;
+  percent: number;
+}
+
+export interface GrowthRewards {
+  level: GrowthLevel;
+  achievements: GrowthAchievement[];
+  unlocked: number;
+  total: number;
+}
+
 export interface GrowthState {
   today: string;
+  rewards: GrowthRewards;
   languages: (DailyProgress & { key: string; label: string })[];
   done_today: number;
   lang_count: number;

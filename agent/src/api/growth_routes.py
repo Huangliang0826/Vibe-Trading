@@ -17,11 +17,12 @@ from pydantic import BaseModel, Field
 from src.growth.catalog import LEVELS as _LEVELS
 from src.growth.languages import CATALOGS, DEFAULT_LANG, catalog, languages
 from src.growth.practice import (
-    FAST_MS, QUIZ_OPTIONS, build_session, default_track, favorites, find_pattern,
+    FAST_MS, MAX_BOX, QUIZ_OPTIONS, build_session, default_track, favorites, find_pattern,
     goal_days, mark_studied, pick_quiz, record_answer, set_favorite, stats,
     today_progress,
 )
 from src.growth.progress import build_calendar, build_summary
+from src.growth.rewards import build_rewards, level_of, mastered_count
 from src.growth.store import clear_state, empty_state, read_state, write_state
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
             "session": build_session(reviews, today, lang=lang, track=track),
             "stats": stats(reviews, today, lang, track),
             "today_progress": today_progress(doc, today, lang),
+            "level": level_of(mastered_count(reviews)),
             "favorites": favorites(reviews, lang, track),
             "fast_ms": FAST_MS,
             "groups": cat.groups(track),
@@ -98,6 +100,7 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         summary = build_summary(days, today)
         return {
             "today": today,
+            "rewards": build_rewards(docs, days),
             "languages": [
                 {"key": lang, "label": catalog(lang).label,
                  **today_progress(docs[lang], today, lang)}
@@ -187,15 +190,23 @@ def register_growth_routes(app: FastAPI, *, require_auth: AuthDep) -> None:
         correct = payload.chosen_id == payload.pattern_id
         today = _today()
         lang = _lang_of(payload.pattern_id)
+        read_before = read_state(lang)
         try:
-            doc = record_answer(read_state(lang), payload.pattern_id, correct,
+            doc = record_answer(read_before, payload.pattern_id, correct,
                                 payload.elapsed_ms, today)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        before = (read_before.get("reviews") or {}).get(payload.pattern_id) or {}
+        after = doc["reviews"][payload.pattern_id]
         write_state(lang, doc)
         pattern = find_pattern(payload.pattern_id)
         return {
             "correct": correct,
+            # 即时反馈要说清"这一下换来了什么":升了一盒,还是刚刚推到最后一盒。
+            "box": int(after.get("box", 0)),
+            "box_up": int(after.get("box", 0)) > int(before.get("box", 0)),
+            "just_mastered": (int(after.get("box", 0)) >= MAX_BOX
+                              > int(before.get("box", 0))),
             "grade": (doc["reviews"][payload.pattern_id] or {}).get("last_grade", ""),
             "stats": stats(doc["reviews"], today, lang, pattern.track),
             "today_progress": today_progress(doc, today, lang),

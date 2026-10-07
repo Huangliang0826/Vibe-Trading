@@ -13,7 +13,7 @@
  *  释义在整份清单里唯一,所以每题恰好一个正确答案。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, RotateCcw, Timer, X, Zap } from "lucide-react";
+import { Check, Flame, Loader2, RotateCcw, Timer, Trophy, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -50,7 +50,7 @@ export function PracticeQuiz({ lang, track }: { lang: string; track: string }) {
   const advanceTimer = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   //  本轮战绩,只活在这一轮里。
-  const [round, setRound] = useState({ right: 0, wrong: 0, streak: 0, best: 0 });
+  const [round, setRound] = useState({ right: 0, wrong: 0, streak: 0, best: 0, mastered: 0 });
   const askedAt = useRef<number>(Date.now());
 
   const load = useCallback(async () => {
@@ -61,7 +61,7 @@ export function PracticeQuiz({ lang, track }: { lang: string; track: string }) {
       setToday(data.today_progress);
       setCursor(0);
       setVerdict(null);
-      setRound({ right: 0, wrong: 0, streak: 0, best: 0 });
+      setRound({ right: 0, wrong: 0, streak: 0, best: 0, mastered: 0 });
       askedAt.current = Date.now();
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
@@ -114,6 +114,7 @@ export function PracticeQuiz({ lang, track }: { lang: string; track: string }) {
           wrong: r.wrong + (result.correct ? 0 : 1),
           streak,
           best: Math.max(r.best, streak),
+          mastered: r.mastered + (result.just_mastered ? 1 : 0),
         };
       });
     } catch (err) {
@@ -148,17 +149,53 @@ export function PracticeQuiz({ lang, track }: { lang: string; track: string }) {
           suffix={today.done ? "已完成" : undefined}
         />
         <Stat label="总正确率" value={stats.accuracy === null ? "—" : `${stats.accuracy}%`} />
-        <Stat label="本轮连对" value={round.streak} suffix={round.best ? `最高 ${round.best}` : undefined} />
+        <div
+          className={cn(
+            "rounded-2xl border bg-card p-4 transition-colors",
+            round.streak >= 3 && "border-primary/40 bg-primary/[0.06]",
+          )}
+        >
+          <p className="text-xs text-muted-foreground">本轮连对</p>
+          <p className="mt-1 inline-flex items-baseline gap-1.5">
+            <span className="text-2xl font-semibold tabular-nums">{round.streak}</span>
+            {round.streak >= 3 && <Flame className="h-4 w-4 self-center text-primary" />}
+            {round.best > 0 && (
+              <span className="text-xs font-normal text-muted-foreground">最高 {round.best}</span>
+            )}
+          </p>
+        </div>
       </div>
 
       {done ? (
-        <div className="space-y-3 rounded-2xl border bg-card p-6 text-center">
-          <p className="text-[15px] font-medium">这一轮答完了</p>
-          <p className="text-sm text-muted-foreground">
-            {answered > 0
-              ? `${answered} 题答对 ${round.right} 题,最长连对 ${round.best}。`
-              : "这一轮没有题目。"}
-          </p>
+        <div className="space-y-5 rounded-2xl border bg-gradient-to-br from-primary/[0.08] to-transparent p-6 text-center">
+          <div>
+            <Trophy className="mx-auto h-6 w-6 text-primary" />
+            <p className="mt-2 text-[15px] font-medium">这一轮答完了</p>
+          </div>
+
+          {answered > 0 ? (
+            <dl className="grid grid-cols-3 gap-3">
+              {[
+                { label: "正确率", value: `${Math.round((round.right / answered) * 100)}%` },
+                { label: "最长连对", value: round.best },
+                { label: "记牢了", value: round.mastered },
+              ].map((row) => (
+                <div key={row.label} className="rounded-xl border bg-card p-3">
+                  <dt className="text-xs text-muted-foreground">{row.label}</dt>
+                  <dd className="mt-1 text-xl font-semibold tabular-nums">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="text-sm text-muted-foreground">这一轮没有题目。</p>
+          )}
+
+          {round.mastered > 0 && (
+            <p className="text-sm text-primary">
+              有 {round.mastered} 条推到了最后一盒——这些是真的记住了。
+            </p>
+          )}
+
           <button
             type="button"
             onClick={() => void load()}
@@ -244,8 +281,10 @@ export function PracticeQuiz({ lang, track }: { lang: string; track: string }) {
                 )}
               >
                 {verdict.correct ? (
-                  verdict.grade === "instant" ? (
-                    <><Zap className="h-4 w-4" />够快,进下一盒</>
+                  verdict.just_mastered ? (
+                    <><Trophy className="h-4 w-4" />这条记牢了,进入最后一盒</>
+                  ) : verdict.grade === "instant" ? (
+                    <><Zap className="h-4 w-4" />够快,进第 {verdict.box + 1} 盒</>
                   ) : (
                     <><Timer className="h-4 w-4" />答对了,但想得有点久</>
                   )
