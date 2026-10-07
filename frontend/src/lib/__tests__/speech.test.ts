@@ -22,13 +22,19 @@ describe("朗读选音", () => {
     expect(chosen?.name).toBe("Samantha");
   });
 
-  it("每一个玩具语音的得分都低于任何正常语音", () => {
-    const novelty = ["Bad News", "Bahh", "Boing", "Zarvox", "Trinoids", "Albert", "Fred"];
-    const normal = scoreVoice(v("Moira", "en-IE"));
+  it("玩具语音一律出局,不是排在最后", () => {
+    // Whisper 沙哑、Zarvox 阴森。只要还能被挑中,早晚会被挑中——用户就是
+    // 这么听到"沙哑阴森"的那一次的。
+    const novelty = ["Bad News", "Bahh", "Boing", "Zarvox", "Trinoids", "Albert",
+                     "Fred", "Whisper"];
 
     for (const name of novelty) {
-      expect(scoreVoice(v(name, "en-US"))).toBeLessThan(normal);
+      expect(scoreVoice(v(name, "en-US"))).toBe(-Infinity);
     }
+  });
+
+  it("只剩玩具语音时宁可不设语音,也不拿它去念", () => {
+    expect(pickVoice([v("Zarvox", "en-US"), v("Whisper", "en-US")])).toBeNull();
   });
 
   it("绝不会挑中语言不对的语音", () => {
@@ -74,10 +80,6 @@ describe("朗读选音", () => {
     const chosen = pickVoice([v("Zarvox", "en-US"), v("Shelley", "en-US")]);
 
     expect(chosen?.name).toBe("Shelley");
-  });
-
-  it("只剩玩具语音时宁可出声也不沉默", () => {
-    expect(pickVoice([v("Zarvox", "en-US")])?.name).toBe("Zarvox");
   });
 
   it("同为首选时偏好美音", () => {
